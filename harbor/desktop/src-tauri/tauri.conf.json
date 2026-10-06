@@ -1,0 +1,43 @@
+{
+	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+	"productName": "Btrfs Harbor",
+	"version": "0.1.0",
+	"identifier": "io.github.GodsQuantum.BtrfsHarbor",
+	"build": {
+		"frontendDist": "../build",
+		"devUrl": "http://localhost:5173",
+		"beforeDevCommand": "pnpm dev",
+		"beforeBuildCommand": "pnpm build"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "Btrfs Harbor",
+				"width": 1320,
+				"height": 840,
+				"minWidth": 980,
+				"minHeight": 680,
+				"resizable": true,
+				"fullscreen": false,
+				"center": true
+			}
+		],
+		"security": {
+			"csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"category": "Utility",
+		"shortDescription": "Native Btrfs backup, recovery and system replication control center",
+		"longDescription": "Btrfs Harbor manages Btrfs snapshot replication, verification, disaster recovery and system replicas.",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		]
+	}
+}

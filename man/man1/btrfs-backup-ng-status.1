@@ -10,6 +10,11 @@ Display last run times, snapshot counts, transfer statistics, and overall
 health status for configured backup jobs.
 .SH OPTIONS
 .TP
+.BR \-\-format " " \fI{text|json}\fR
+Choose the output format. The default is human-readable text. The
+\fBjson\fR format emits a versioned machine-readable status document for
+integrations while preserving the same health-based exit status.
+.TP
 .BR \-t ", " \-\-transactions
 Show recent transaction history from the transaction log.
 .TP

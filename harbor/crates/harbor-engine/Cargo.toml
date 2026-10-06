@@ -1,0 +1,12 @@
+[package]
+name = "harbor-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+harbor-core = { path = "../harbor-core" }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

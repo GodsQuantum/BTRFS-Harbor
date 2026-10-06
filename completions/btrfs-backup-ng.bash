@@ -51,6 +51,8 @@ _btrfs_backup_ng() {
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --type)
             COMPREPLY=($(compgen -W "single pre post" -- "$cur")); return ;;
+        --format)
+            COMPREPLY=($(compgen -W "text json" -- "$cur")); return ;;
         --level)
             COMPREPLY=($(compgen -W "metadata stream full" -- "$cur")); return ;;
         --temp-dir)
@@ -152,7 +154,7 @@ _btrfs_backup_ng() {
         snapshot)
             COMPREPLY=($(compgen -W "-h --help --dry-run --volume $global_opts" -- "$cur")) ;;
         status)
-            COMPREPLY=($(compgen -W "-h --help -t --transactions -n --limit $global_opts" -- "$cur")) ;;
+            COMPREPLY=($(compgen -W "-h --help --format -t --transactions -n --limit $global_opts" -- "$cur")) ;;
         transfer)
             COMPREPLY=($(compgen -W "-h --help --dry-run --volume --compress --rate-limit --no-check-space --force --safety-margin --progress --no-progress $global_opts" -- "$cur")) ;;
         transfers)

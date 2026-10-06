@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Btrfs Harbor
+Comment=Native Btrfs backup, recovery and system replication control center
+Exec=btrfs-harbor
+Icon=btrfs-harbor
+Terminal=false
+Categories=System;Utility;
+Keywords=btrfs;backup;snapshot;restore;recovery;snapper;
+StartupNotify=true

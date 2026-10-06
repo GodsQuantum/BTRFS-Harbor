@@ -17,7 +17,11 @@ import pytest
 from btrfs_backup_ng.cli.dispatcher import create_subcommand_parser
 
 _REPO = Path(__file__).resolve().parent.parent
-_DOCS = [_REPO / "README.md", _REPO / "docs" / "SNAPPER-INTEGRATION.md"]
+_DOCS = [
+    _REPO / "README.md",
+    _REPO / "docs" / "upstream" / "UPSTREAM_ENGINE_README.md",
+    _REPO / "docs" / "SNAPPER-INTEGRATION.md",
+]
 
 # The top-level parser rejects the bare legacy `SRC DST` form (a shim in main() handles
 # it) and output banners / prose; those first tokens are neither a subcommand nor a flag,

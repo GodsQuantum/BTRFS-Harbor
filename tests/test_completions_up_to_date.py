@@ -127,8 +127,10 @@ def test_bash_completion_actually_offers_run_flags():
     if shutil.which("bash") is None:
         pytest.skip("bash is not installed")
 
+    import shlex
+
     script = (
-        f"source {COMPLETIONS / 'btrfs-backup-ng.bash'}\n"
+        f"source {shlex.quote(str(COMPLETIONS / 'btrfs-backup-ng.bash'))}\n"
         "COMP_WORDS=(btrfs-backup-ng run --); COMP_CWORD=2\n"
         "_btrfs_backup_ng\n"
         'printf "%s\\n" "${COMPREPLY[@]}"\n'
@@ -147,8 +149,10 @@ def test_fish_completion_actually_offers_run_flags():
     if shutil.which("fish") is None:
         pytest.skip("fish is not installed")
 
+    import shlex
+
     script = (
-        f"source {COMPLETIONS / 'btrfs-backup-ng.fish'}; "
+        f"source {shlex.quote(str(COMPLETIONS / 'btrfs-backup-ng.fish'))}; "
         "complete -C 'btrfs-backup-ng run --'"
     )
     out = subprocess.run(

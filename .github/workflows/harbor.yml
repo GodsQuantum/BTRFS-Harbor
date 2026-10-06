@@ -1,0 +1,111 @@
+name: Harbor CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-engine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Sync locked engine environment
+        run: uv sync --frozen --extra test --extra dev
+      - name: Harbor JSON contract
+        run: uv run --frozen pytest -q tests/test_status_json.py
+      - name: Upstream tier-1 suite
+        run: uv run --frozen pytest -q
+      - name: Ruff
+        run: uv run --frozen ruff check src/ tests/
+      - name: Format
+        run: uv run --frozen ruff format --check src/ tests/
+      - name: Type check
+        run: uv run --frozen mypy src/btrfs_backup_ng --ignore-missing-imports
+
+  rust-control-plane:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: harbor
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Tests
+        run: cargo test --workspace --exclude btrfs-harbor-desktop --locked
+      - name: Clippy
+        run: cargo clippy --workspace --exclude btrfs-harbor-desktop --all-targets --locked -- -D warnings
+
+  desktop:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: harbor/desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "12.9.1"
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        run: pnpm test
+      - name: Svelte diagnostics
+        run: pnpm check
+      - name: Lint
+        run: pnpm lint
+      - name: Static build
+        run: pnpm build
+
+  tauri:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: harbor
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             libwebkit2gtk-4.1-dev             libgtk-3-dev             libxdo-dev             libssl-dev             libayatana-appindicator3-dev             librsvg2-dev             libdbus-1-dev
+      - name: Cargo check desktop
+        run: cargo check -p btrfs-harbor-desktop --locked
+
+  packaging:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate XML policies
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          for path in [
+              "packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf",
+              "packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy",
+          ]:
+              ET.parse(path)
+              print("valid:", path)
+          PY
+      - name: Validate packaging files
+        run: |
+          bash -n packaging/arch/PKGBUILD
+          test -s packaging/systemd/btrfs-harbor-agent.service
+          test -s packaging/desktop/btrfs-harbor.desktop
+          test -s examples/harbor.toml
+          test -s README.md
+          test -s README.fr.md
+          test -s README.zh-CN.md

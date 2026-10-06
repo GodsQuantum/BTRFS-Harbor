@@ -20,7 +20,7 @@ from btrfs_backup_ng.cli.dispatcher import create_subcommand_parser
 
 ROOT = Path(__file__).resolve().parent.parent
 MAN = ROOT / "man" / "man1" / "btrfs-backup-ng-restore.1"
-README = ROOT / "README.md"
+README = ROOT / "docs" / "upstream" / "UPSTREAM_ENGINE_README.md"
 
 #: flag -> the phrase every description of it must carry
 WITHDRAWN = {

@@ -263,6 +263,7 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command snapshot' -
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command snapshot' -l volume -d 'Only snapshot specific volume(s)' -r -F
 
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command status' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command status' -l format -d 'Output format (default: text)' -x -a 'text json'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command status' -s t -l transactions -d 'Show recent transaction history'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command status' -s n -l limit -d 'Number of transactions to show (default: 10)' -x
 

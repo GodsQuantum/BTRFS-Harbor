@@ -52,7 +52,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/berrym/btrfs-backup-ng"
+Homepage = "https://github.com/GodsQuantum/btrfs-harbor"
+Upstream = "https://github.com/berrym/btrfs-backup-ng"
 
 [project.scripts]
 btrfs-backup-ng = "btrfs_backup_ng.__main__:main"

@@ -1,0 +1,109 @@
+pkgname=btrfs-harbor-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Native Btrfs backup, recovery and system replication control center"
+arch=('x86_64')
+url="https://github.com/GodsQuantum/btrfs-harbor"
+license=('MIT')
+provides=('btrfs-backup-ng=0.9.12')
+conflicts=('btrfs-backup-ng')
+depends=(
+  'btrfs-progs'
+  'dbus'
+  'gtk3'
+  'libappindicator-gtk3'
+  'librsvg'
+  'openssh'
+  'polkit'
+  'python'
+  'python-filelock'
+  'python-rich'
+  'snapper'
+  'util-linux'
+  'webkit2gtk-4.1'
+  'zstd'
+)
+makedepends=(
+  'appmenu-gtk-module'
+  'cargo'
+  'curl'
+  'git'
+  'nodejs'
+  'openssl'
+  'pnpm'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'rust'
+  'wget'
+  'xdotool'
+)
+checkdepends=(
+  'python-pytest'
+  'python-pytest-asyncio'
+  'python-pytest-cov'
+)
+source=("git+https://github.com/GodsQuantum/btrfs-harbor.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd btrfs-harbor
+  printf "0.1.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd btrfs-harbor
+
+  python -m build --wheel --no-isolation --outdir dist-python
+
+  cd harbor/desktop
+  pnpm install --frozen-lockfile
+  pnpm build
+  cd ../..
+
+  cargo build --manifest-path harbor/Cargo.toml --release --locked
+}
+
+check() {
+  cd btrfs-harbor
+
+  PYTHONPATH=src python -m pytest -q
+  cargo test --manifest-path harbor/Cargo.toml --workspace --exclude btrfs-harbor-desktop --locked
+
+  cd harbor/desktop
+  pnpm test
+  pnpm check
+}
+
+package() {
+  cd btrfs-harbor
+
+  python -m installer --destdir="$pkgdir" dist-python/*.whl
+
+  install -Dm755 harbor/target/release/btrfs-harbor-desktop     "$pkgdir/usr/bin/btrfs-harbor"
+  install -Dm755 harbor/target/release/harbor-agent     "$pkgdir/usr/lib/btrfs-harbor/btrfs-harbor-agent"
+  install -Dm755 harbor/target/release/btrfs-harborctl     "$pkgdir/usr/bin/btrfs-harborctl"
+  install -Dm755 harbor/target/release/harbor-recovery     "$pkgdir/usr/bin/btrfs-harbor-recovery"
+
+  install -Dm644 packaging/systemd/btrfs-harbor-agent.service     "$pkgdir/usr/lib/systemd/system/btrfs-harbor-agent.service"
+  install -Dm644 packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf     "$pkgdir/usr/share/dbus-1/system.d/io.github.GodsQuantum.BtrfsHarbor1.conf"
+  install -Dm644 packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy     "$pkgdir/usr/share/polkit-1/actions/io.github.GodsQuantum.BtrfsHarbor.policy"
+
+  install -Dm644 packaging/desktop/btrfs-harbor.desktop     "$pkgdir/usr/share/applications/btrfs-harbor.desktop"
+  install -Dm644 harbor/desktop/src-tauri/icons/32x32.png     "$pkgdir/usr/share/icons/hicolor/32x32/apps/btrfs-harbor.png"
+  install -Dm644 harbor/desktop/src-tauri/icons/64x64.png     "$pkgdir/usr/share/icons/hicolor/64x64/apps/btrfs-harbor.png"
+  install -Dm644 harbor/desktop/src-tauri/icons/128x128.png     "$pkgdir/usr/share/icons/hicolor/128x128/apps/btrfs-harbor.png"
+  install -Dm644 harbor/desktop/src-tauri/icons/128x128@2x.png     "$pkgdir/usr/share/icons/hicolor/256x256/apps/btrfs-harbor.png"
+
+  install -Dm644 examples/harbor.toml     "$pkgdir/usr/share/doc/btrfs-harbor/harbor.example.toml"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/btrfs-harbor/README.md"
+  install -Dm644 README.fr.md "$pkgdir/usr/share/doc/btrfs-harbor/README.fr.md"
+  install -Dm644 README.zh-CN.md "$pkgdir/usr/share/doc/btrfs-harbor/README.zh-CN.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  install -dm755 "$pkgdir/etc/btrfs-harbor"
+  install -dm700 "$pkgdir/etc/btrfs-harbor/credentials"
+  install -dm700 "$pkgdir/var/lib/btrfs-harbor/generated"
+  install -dm750 "$pkgdir/var/log/btrfs-harbor"
+}

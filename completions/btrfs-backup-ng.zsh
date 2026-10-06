@@ -504,6 +504,7 @@ _btrfs_backup_ng() {
                     _arguments \
                         '-h[show this help message and exit]' \
                         '--help[show this help message and exit]' \
+                        '--format[Output format (default: text)]:value:(text json)' \
                         '-t[Show recent transaction history]' \
                         '--transactions[Show recent transaction history]' \
                         '-n[Number of transactions to show (default: 10)]:n:' \

@@ -358,6 +358,12 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         description="Display last run times, snapshot counts, and health status",
     )
     status_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    status_parser.add_argument(
         "-t",
         "--transactions",
         action="store_true",

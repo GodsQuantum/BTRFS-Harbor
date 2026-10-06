@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "config": "/etc/btrfs-harbor/engine.toml",
+  "healthy": false,
+  "parallelism": { "volumes": 1, "targets": 1 },
+  "volumes": [
+    {
+      "path": "/",
+      "source": { "status": "ok", "snapshot_count": 1, "latest_snapshot": "root-001" },
+      "targets": [
+        { "path": "raw:///mnt/backup/workstation/root", "status": "no backups", "backup_count": 0, "pending": 0 }
+      ]
+    }
+  ]
+}

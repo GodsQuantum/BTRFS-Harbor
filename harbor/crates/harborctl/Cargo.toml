@@ -1,0 +1,20 @@
+[package]
+name = "harborctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "btrfs-harborctl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+harbor-core = { path = "../harbor-core" }
+harbor-recovery = { path = "../harbor-recovery" }
+harbor-replica = { path = "../harbor-replica" }
+harbor-storage = { path = "../harbor-storage" }
+serde_json.workspace = true
+toml.workspace = true
+uuid.workspace = true

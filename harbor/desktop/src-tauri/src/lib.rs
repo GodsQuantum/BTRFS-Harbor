@@ -13,6 +13,16 @@ const BUS_NAME: &str = "io.github.GodsQuantum.BtrfsHarbor1";
 const OBJECT_PATH: &str = "/io/github/GodsQuantum/BtrfsHarbor1";
 const INTERFACE: &str = "io.github.GodsQuantum.BtrfsHarbor1";
 
+#[cfg_attr(not(test), allow(dead_code))]
+fn choose_helper_candidate(
+    installed: Option<PathBuf>,
+    bundled: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    installed
+        .or(bundled)
+        .ok_or_else(|| "No Harbor helper is available for this operation.".to_string())
+}
+
 async fn call_agent<R>(
     method: &str,
     body: &(impl serde::ser::Serialize + zbus::zvariant::DynamicType),
@@ -669,4 +679,34 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while building Btrfs Harbor desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installed_helper_is_preferred_over_bundled_helper() {
+        let selected = choose_helper_candidate(
+            Some(PathBuf::from("/usr/bin/btrfs-harborctl")),
+            Some(PathBuf::from("/app/resources/portable/btrfs-harborctl")),
+        )
+        .unwrap();
+
+        assert_eq!(selected, PathBuf::from("/usr/bin/btrfs-harborctl"));
+    }
+
+    #[test]
+    fn portable_appimage_uses_bundled_helper_when_not_installed() {
+        let selected = choose_helper_candidate(
+            None,
+            Some(PathBuf::from("/app/resources/portable/btrfs-harborctl")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected,
+            PathBuf::from("/app/resources/portable/btrfs-harborctl")
+        );
+    }
 }

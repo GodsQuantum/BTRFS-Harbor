@@ -1535,6 +1535,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "harbor-core",
+ "harbor-engine",
  "harbor-recovery",
  "harbor-replica",
  "harbor-storage",

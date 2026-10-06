@@ -118,7 +118,7 @@ install -m 0755 "$PAYLOAD/btrfs-harbor-agent" /usr/lib/btrfs-harbor/btrfs-harbor
 install -m 0755 "$PAYLOAD/btrfs-harborctl" /usr/bin/btrfs-harborctl
 install -m 0755 "$PAYLOAD/btrfs-harbor-recovery" /usr/bin/btrfs-harbor-recovery
 install -m 0755 "$PAYLOAD/btrfs-backup-ng.pyz" /usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
-install -m 0755 "$PAYLOAD/btrfs-backup-ng" /usr/bin/btrfs-backup-ng
+install -m 0755 "$PAYLOAD/btrfs-backup-ng" /usr/lib/btrfs-harbor/btrfs-backup-ng
 
 cat >/usr/bin/btrfs-harbor <<'EOF'
 #!/bin/sh

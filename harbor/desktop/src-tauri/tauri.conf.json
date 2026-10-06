@@ -58,14 +58,12 @@
 					"util-linux",
 					"zstd"
 				],
-				"provides": ["btrfs-backup-ng"],
-				"conflicts": ["btrfs-backup-ng"],
 				"files": {
 					"/usr/lib/btrfs-harbor/btrfs-harbor-agent": "../../target/release/harbor-agent",
 					"/usr/bin/btrfs-harborctl": "../../target/release/btrfs-harborctl",
 					"/usr/bin/btrfs-harbor-recovery": "../../target/release/harbor-recovery",
 					"/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz": "../../../packaging/generated/btrfs-backup-ng.pyz",
-					"/usr/bin/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
+					"/usr/lib/btrfs-harbor/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
 					"/usr/lib/systemd/system/btrfs-harbor-agent.service": "../../../packaging/systemd/btrfs-harbor-agent.service",
 					"/usr/share/dbus-1/system.d/io.github.GodsQuantum.BtrfsHarbor1.conf": "../../../packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf",
 					"/usr/share/polkit-1/actions/io.github.GodsQuantum.BtrfsHarbor.policy": "../../../packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy"
@@ -87,14 +85,12 @@
 					"util-linux",
 					"zstd"
 				],
-				"provides": ["btrfs-backup-ng"],
-				"conflicts": ["btrfs-backup-ng"],
 				"files": {
 					"/usr/lib/btrfs-harbor/btrfs-harbor-agent": "../../target/release/harbor-agent",
 					"/usr/bin/btrfs-harborctl": "../../target/release/btrfs-harborctl",
 					"/usr/bin/btrfs-harbor-recovery": "../../target/release/harbor-recovery",
 					"/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz": "../../../packaging/generated/btrfs-backup-ng.pyz",
-					"/usr/bin/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
+					"/usr/lib/btrfs-harbor/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
 					"/usr/lib/systemd/system/btrfs-harbor-agent.service": "../../../packaging/systemd/btrfs-harbor-agent.service",
 					"/usr/share/dbus-1/system.d/io.github.GodsQuantum.BtrfsHarbor1.conf": "../../../packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf",
 					"/usr/share/polkit-1/actions/io.github.GodsQuantum.BtrfsHarbor.policy": "../../../packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy"

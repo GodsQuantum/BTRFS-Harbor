@@ -27,7 +27,7 @@ const DEFAULT_CONFIG: &str = "/etc/btrfs-harbor/harbor.toml";
 const DEFAULT_GENERATED_DIR: &str = "/var/lib/btrfs-harbor/generated";
 const DEFAULT_SYSTEMD_DIR: &str = "/etc/systemd/system";
 const DEFAULT_SYSTEMCTL: &str = "/usr/bin/systemctl";
-const DEFAULT_ENGINE: &str = "/usr/bin/btrfs-backup-ng";
+const DEFAULT_BUNDLED_ENGINE: &str = "/usr/lib/btrfs-harbor/btrfs-backup-ng";
 const DEFAULT_FINDMNT: &str = "/usr/bin/findmnt";
 const DEFAULT_BTRFS: &str = "/usr/bin/btrfs";
 const SNAPSHOT_TRIGGER: &str = "@snapshots";
@@ -121,7 +121,14 @@ fn systemd_dir() -> PathBuf {
 }
 
 fn engine_executable() -> PathBuf {
-    debug_path_override("BTRFS_HARBOR_ENGINE", DEFAULT_ENGINE)
+    #[cfg(debug_assertions)]
+    if let Some(value) = env::var_os("BTRFS_HARBOR_ENGINE") {
+        return PathBuf::from(value);
+    }
+
+    harbor_engine::discover_engine(Some(PathBuf::from(DEFAULT_BUNDLED_ENGINE)))
+        .map(|resolution| resolution.executable)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_BUNDLED_ENGINE))
 }
 
 fn systemctl_executable() -> PathBuf {

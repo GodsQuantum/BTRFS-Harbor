@@ -5,8 +5,6 @@ pkgdesc="Native Btrfs backup, recovery and system replication control center"
 arch=('x86_64')
 url="https://github.com/GodsQuantum/btrfs-harbor"
 license=('MIT')
-provides=('btrfs-backup-ng=0.9.12')
-conflicts=('btrfs-backup-ng')
 depends=(
   'btrfs-progs'
   'dbus'

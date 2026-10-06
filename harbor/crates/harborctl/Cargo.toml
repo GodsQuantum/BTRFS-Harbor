@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 harbor-core = { path = "../harbor-core" }
+harbor-engine = { path = "../harbor-engine" }
 harbor-recovery = { path = "../harbor-recovery" }
 harbor-replica = { path = "../harbor-replica" }
 harbor-storage = { path = "../harbor-storage" }

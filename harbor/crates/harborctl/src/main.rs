@@ -30,6 +30,7 @@ const DEFAULT_SYSTEMCTL: &str = "/usr/bin/systemctl";
 const DEFAULT_ENGINE: &str = "/usr/bin/btrfs-backup-ng";
 const DEFAULT_FINDMNT: &str = "/usr/bin/findmnt";
 const DEFAULT_BTRFS: &str = "/usr/bin/btrfs";
+const SNAPSHOT_TRIGGER: &str = "@snapshots";
 
 fn main() -> Result<()> {
     let mut args = env::args().skip(1);
@@ -170,7 +171,8 @@ struct ApplyArtifacts {
     main_config: String,
     engine_config: String,
     service: String,
-    timer: String,
+    timer: Option<String>,
+    path: Option<String>,
 }
 
 fn parse_config_json(raw: &str) -> Result<HarborConfig> {
@@ -190,11 +192,15 @@ fn render_apply_artifacts(config: &HarborConfig, id: Uuid) -> Result<ApplyArtifa
         .profile(id)
         .with_context(|| format!("profile {id} not found"))?;
 
+    let snapshot_trigger = profile.on_calendar.trim() == SNAPSHOT_TRIGGER;
     Ok(ApplyArtifacts {
         main_config: config.to_toml()?,
         engine_config: render_engine_config(profile, &config.destinations)?,
         service: render_service(id),
-        timer: render_timer(profile),
+        timer: (!snapshot_trigger).then(|| render_timer(profile)),
+        path: snapshot_trigger
+            .then(|| render_snapshot_path(profile))
+            .transpose()?,
     })
 }
 
@@ -221,11 +227,20 @@ fn write_apply_artifacts(
         artifacts.service.as_bytes(),
         0o644,
     )?;
-    atomic_write_mode(
-        &systemd_dir.join(format!("{stem}.timer")),
-        artifacts.timer.as_bytes(),
-        0o644,
-    )?;
+
+    let timer_path = systemd_dir.join(format!("{stem}.timer"));
+    let path_path = systemd_dir.join(format!("{stem}.path"));
+    match (&artifacts.timer, &artifacts.path) {
+        (Some(timer), None) => {
+            atomic_write_mode(&timer_path, timer.as_bytes(), 0o644)?;
+            let _ = fs::remove_file(&path_path);
+        }
+        (None, Some(path_unit)) => {
+            atomic_write_mode(&path_path, path_unit.as_bytes(), 0o644)?;
+            let _ = fs::remove_file(&timer_path);
+        }
+        _ => bail!("profile must render exactly one schedule unit"),
+    }
 
     Ok(())
 }
@@ -242,7 +257,7 @@ fn apply_config_from_stdin(id: Uuid) -> Result<()> {
     let profile = config
         .profile(id)
         .with_context(|| format!("profile {id} not found"))?;
-    validate_calendar(&profile.on_calendar)?;
+    validate_schedule(profile)?;
 
     let artifacts = render_apply_artifacts(&config, id)?;
     write_apply_artifacts(
@@ -254,9 +269,19 @@ fn apply_config_from_stdin(id: Uuid) -> Result<()> {
     )?;
 
     let stem = profile_unit_stem(id);
+    let active_unit = if profile.on_calendar.trim() == SNAPSHOT_TRIGGER {
+        format!("{stem}.path")
+    } else {
+        format!("{stem}.timer")
+    };
+    let stale_unit = if active_unit.ends_with(".path") {
+        format!("{stem}.timer")
+    } else {
+        format!("{stem}.path")
+    };
+    let _ = run_systemctl(&["disable", "--now", &stale_unit]);
     run_systemctl(&["daemon-reload"])?;
-    run_systemctl(&["enable", &format!("{stem}.timer")])?;
-    run_systemctl(&["restart", &format!("{stem}.timer")])?;
+    run_systemctl(&["enable", "--now", &active_unit])?;
 
     println!("Applied profile {} ({id})", profile.name);
     Ok(())
@@ -265,7 +290,7 @@ fn apply_config_from_stdin(id: Uuid) -> Result<()> {
 fn install_profile(id: Uuid) -> Result<()> {
     ensure_root()?;
     let (config, profile) = load_profile(id)?;
-    validate_calendar(&profile.on_calendar)?;
+    validate_schedule(&profile)?;
 
     fs::create_dir_all(generated_dir())?;
     let generated = render_engine_config(&profile, &config.destinations)?;
@@ -278,13 +303,23 @@ fn install_profile(id: Uuid) -> Result<()> {
         &systemd.join(format!("{stem}.service")),
         render_service(id).as_bytes(),
     )?;
-    atomic_write(
-        &systemd.join(format!("{stem}.timer")),
-        render_timer(&profile).as_bytes(),
-    )?;
+    let active_unit = if profile.on_calendar.trim() == SNAPSHOT_TRIGGER {
+        let unit = format!("{stem}.path");
+        atomic_write(
+            &systemd.join(&unit),
+            render_snapshot_path(&profile)?.as_bytes(),
+        )?;
+        let _ = fs::remove_file(systemd.join(format!("{stem}.timer")));
+        unit
+    } else {
+        let unit = format!("{stem}.timer");
+        atomic_write(&systemd.join(&unit), render_timer(&profile).as_bytes())?;
+        let _ = fs::remove_file(systemd.join(format!("{stem}.path")));
+        unit
+    };
 
     run_systemctl(&["daemon-reload"])?;
-    run_systemctl(&["enable", "--now", &format!("{stem}.timer")])?;
+    run_systemctl(&["enable", "--now", &active_unit])?;
     println!("Installed profile {} ({})", profile.name, id);
     Ok(())
 }
@@ -293,10 +328,12 @@ fn uninstall_profile(id: Uuid) -> Result<()> {
     ensure_root()?;
     let stem = profile_unit_stem(id);
     let _ = run_systemctl(&["disable", "--now", &format!("{stem}.timer")]);
+    let _ = run_systemctl(&["disable", "--now", &format!("{stem}.path")]);
 
     for path in [
         systemd_dir().join(format!("{stem}.service")),
         systemd_dir().join(format!("{stem}.timer")),
+        systemd_dir().join(format!("{stem}.path")),
         generated_config_path(id),
     ] {
         match fs::remove_file(&path) {
@@ -916,6 +953,52 @@ WantedBy=timers.target
     )
 }
 
+fn render_snapshot_path(profile: &BackupProfile) -> Result<String> {
+    let mut paths = profile
+        .sources
+        .iter()
+        .filter(|source| source.snapper_config.is_some())
+        .map(|source| source.path.join(".snapshots"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+
+    if paths.is_empty() {
+        bail!("snapshot-triggered scheduling needs at least one Snapper-managed source");
+    }
+
+    let mut unit = format!(
+        "[Unit]\nDescription=Btrfs Harbor snapshot trigger for profile {}\n\n[Path]\n",
+        profile.id
+    );
+    for path in paths {
+        let value = path.to_string_lossy();
+        if value.contains('\n') || value.contains('\r') {
+            bail!("snapshot watch path contains a newline");
+        }
+        unit.push_str(&format!("PathChanged={value}\n"));
+    }
+    unit.push_str(&format!(
+        "Unit={}.service\n\n[Install]\nWantedBy=paths.target\n",
+        profile_unit_stem(profile.id)
+    ));
+    Ok(unit)
+}
+
+fn validate_schedule(profile: &BackupProfile) -> Result<()> {
+    if profile.on_calendar.trim() == SNAPSHOT_TRIGGER {
+        if profile
+            .sources
+            .iter()
+            .any(|source| source.snapper_config.is_some())
+        {
+            return Ok(());
+        }
+        bail!("snapshot-triggered scheduling needs at least one Snapper-managed source");
+    }
+    validate_calendar(&profile.on_calendar)
+}
+
 fn validate_calendar(spec: &str) -> Result<()> {
     if spec.trim().is_empty() || spec.contains('\n') || spec.contains('\r') {
         bail!("invalid empty or multiline OnCalendar specification");
@@ -1085,8 +1168,13 @@ mod tests {
         assert!(artifacts.engine_config.contains("incremental = true"));
         assert!(artifacts.engine_config.contains("source = \"snapper\""));
         assert!(artifacts.service.contains(&format!("run-profile {id}")));
-        assert!(artifacts.timer.contains("OnCalendar=*-*-* 02:00:00"));
-        assert!(artifacts.timer.contains("Persistent=true"));
+        let timer = artifacts
+            .timer
+            .as_deref()
+            .expect("calendar profile renders timer");
+        assert!(timer.contains("OnCalendar=*-*-* 02:00:00"));
+        assert!(timer.contains("Persistent=true"));
+        assert!(artifacts.path.is_none());
     }
 
     #[cfg(unix)]
@@ -1129,6 +1217,34 @@ mod tests {
         assert!(timer_path.is_file());
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn snapshot_schedule_renders_native_systemd_path_unit() {
+        let mut config = configuration();
+        config.profiles[0].on_calendar = SNAPSHOT_TRIGGER.into();
+        let id = config.profiles[0].id;
+
+        let artifacts = render_apply_artifacts(&config, id).unwrap();
+        let path = artifacts
+            .path
+            .as_deref()
+            .expect("snapshot profile renders path");
+
+        assert!(artifacts.timer.is_none());
+        assert!(path.contains("PathChanged=/.snapshots"));
+        assert!(path.contains(&format!("Unit={}.service", profile_unit_stem(id))));
+        validate_schedule(&config.profiles[0]).unwrap();
+    }
+
+    #[test]
+    fn snapshot_schedule_requires_a_snapper_managed_source() {
+        let mut p = profile();
+        p.on_calendar = SNAPSHOT_TRIGGER.into();
+        p.sources[0].snapper_config = None;
+
+        let err = validate_schedule(&p).unwrap_err().to_string();
+        assert!(err.contains("Snapper-managed"), "{err}");
     }
 
     #[test]

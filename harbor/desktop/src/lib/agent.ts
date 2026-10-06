@@ -129,12 +129,6 @@ export async function loadSystemIdentity(): Promise<SystemIdentity> {
 	return JSON.parse(raw) as SystemIdentity;
 }
 
-export async function discoverMountedBackupDestinations(): Promise<MountProbe[]> {
-	if (!isTauri()) return [];
-	const raw = await invoke<string>('discover_destination_mounts');
-	return JSON.parse(raw) as MountProbe[];
-}
-
 export async function installFullHarbor(): Promise<string> {
 	if (!isTauri()) return 'demo';
 	return invoke<string>('install_full_package');

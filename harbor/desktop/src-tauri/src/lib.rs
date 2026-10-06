@@ -246,34 +246,6 @@ async fn system_identity() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn discover_destination_mounts() -> Result<String, String> {
-    let mountinfo = tokio::fs::read_to_string("/proc/self/mountinfo")
-        .await
-        .map_err(|err| format!("Cannot read mount table: {err}"))?;
-    let table = MountTable::from_mountinfo(&mountinfo);
-    let probes = table
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            let kind = match entry.fs_type.as_str() {
-                "nfs" | "nfs4" => "nfs",
-                "cifs" => "smb",
-                _ => return None,
-            };
-            Some(MountProbe {
-                mount_point: entry.mount_point.to_string_lossy().into_owned(),
-                source: entry.source.clone(),
-                fs_type: entry.fs_type.clone(),
-                kind,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    serde_json::to_string(&probes)
-        .map_err(|err| format!("Cannot encode detected backup destinations: {err}"))
-}
-
-#[tauri::command]
 async fn inspect_mount(path: String) -> Result<String, String> {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
@@ -680,7 +652,6 @@ pub fn run() {
             system_summary,
             installation_state,
             system_identity,
-            discover_destination_mounts,
             install_full_package,
             profiles,
             configuration,

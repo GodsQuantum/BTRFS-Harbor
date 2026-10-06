@@ -48,12 +48,12 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 ## 📦 下载与安装
 
-对于大多数 x86_64 Linux，推荐使用**通用安装程序**。它会一起安装桌面应用、Rust helper、继承的备份引擎、systemd 服务、D-Bus 策略以及 polkit 集成：
+对于大多数 x86_64 Linux，推荐使用**通用安装程序**。它会一起安装桌面应用、Rust helper、内置的 btrfs-backup-ng 引擎、systemd 服务、D-Bus 策略以及 polkit 集成：
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.1/BTRFS-Harbor-0.1.1-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.1-linux-x86_64.run
-./BTRFS-Harbor-0.1.1-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.2/BTRFS-Harbor-0.1.2-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.2-linux-x86_64.run
+./BTRFS-Harbor-0.1.2-linux-x86_64.run
 ```
 
 通用安装程序支持 **x86_64、glibc + systemd Linux**，并可通过 pacman、apt、dnf 或 zypper 安装所需系统工具。目前不支持 Alpine/musl 或非 systemd 系统。
@@ -62,7 +62,7 @@ Release 还提供：
 
 - **DEB** — Debian / Ubuntu 及其衍生发行版。
 - **RPM** — Fedora / RHEL 系及兼容 openSUSE 的软件包流程。
-- **便携 AppImage** — 可直接运行，但**不会安装 Harbor**。它可用于检查电脑并准备备份；启用计划备份时，Harbor 可以自动安装完整系统软件包，也可以直接使用 `.run`、`.deb` 或 `.rpm`。
+- **便携 AppImage** — 可直接运行，但**不会安装 Harbor**。它可用于检查电脑并准备备份。只有当你启用关闭 AppImage 后仍需运行的自动/周期性 `btrfs send` 任务时，才需要系统安装。
 - **SHA256SUMS** — 所有 Linux release 文件的校验值。
 
 ## 🚀 在 CachyOS / Arch Linux 上从源码构建
@@ -97,9 +97,9 @@ btrfs-harbor
 1. 打开 Harbor。它会识别当前电脑，并扫描已挂载的 **Btrfs 子卷**。
 2. 检查 Harbor 的检测结果。现有 **Snapper** 配置和快照会自动识别；可直接用于 `btrfs send` 的只读快照会明确显示。
 3. 选择需要保护的内容。Harbor 会预选推荐的持久化 Btrfs 来源，并在简单视图中隐藏缓存或临时类挂载。
-4. 选择备份目标。已经挂载的 **NFS/SMB** 会自动显示真实挂载点与 server/share 身份；也可以手动选择其他目标目录。
-5. **简单**模式默认使用安全设置：每天 02:00 自动备份并启用验证。只有需要修改计划、保留策略或底层来源选项时才进入**高级**模式。
-6. 点击 **保存并启用**。如果当前运行的是便携 AppImage，Harbor 会先通过 polkit 安装完整系统集成，然后立即应用刚才的选择。
+4. 选择备份目标。普通模式只有两个选择：**文件夹**或 **SSH 服务器**。文件夹只需选择一个目录；Harbor 会在后台自动判断它位于本地、NFS 还是 SMB，并内部保存挂载安全信息。SSH 使用 `user@host:/path/to/backups`。
+5. 直接选择频率：**每小时**、**每天**、**每周**或**每次 Snapper 快照后**。备份后验证默认保持启用。高级模式仅用于保留策略和底层选项。
+6. 点击 **保存并启用自动备份**。如果当前运行的是便携 AppImage，只有此时 Harbor 才会请求 polkit 权限，安装周期性/后台 `btrfs send` 所需的系统组件；AppImage 本身仍保持便携。
 7. 先手动运行一次备份，并确认结果变为 **BACKED UP** 和 **VERIFIED**。
 8. 在把 Harbor 用于唯一数据之前，完成一次 staging 恢复测试。
 

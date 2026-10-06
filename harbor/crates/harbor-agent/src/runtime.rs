@@ -124,6 +124,11 @@ pub async fn inspect_profile_runtime(id: Uuid) -> Result<ProfileRuntime> {
         ],
     )
     .await?;
+    let path = show_unit(
+        &format!("{stem}.path"),
+        &["LoadState", "ActiveState", "SubState", "UnitFileState"],
+    )
+    .await?;
     let service = show_unit(
         &format!("{stem}.service"),
         &[
@@ -136,7 +141,15 @@ pub async fn inspect_profile_runtime(id: Uuid) -> Result<ProfileRuntime> {
     )
     .await?;
 
-    Ok(runtime_from_properties(id, &timer, &service))
+    let path_is_loaded = path.get("LoadState").is_some_and(|value| value == "loaded");
+    let schedule = if path_is_loaded { &path } else { &timer };
+    let mut runtime = runtime_from_properties(id, schedule, &service);
+    if path_is_loaded {
+        runtime.timer_unit = format!("{stem}.path");
+        runtime.next_elapse_realtime = None;
+        runtime.last_trigger = None;
+    }
+    Ok(runtime)
 }
 
 #[cfg(test)]

@@ -48,12 +48,12 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 
 ## 📦 Télécharger et installer
 
-Sur la plupart des Linux x86_64, utilise l’**installateur universel**. Il installe ensemble l’application desktop, les helpers Rust, le moteur de sauvegarde hérité, le service systemd, la politique D-Bus et l’intégration polkit :
+Sur la plupart des Linux x86_64, utilise l’**installateur universel**. Il installe ensemble l’application desktop, les helpers Rust, le moteur btrfs-backup-ng inclus, le service systemd, la politique D-Bus et l’intégration polkit :
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.1/BTRFS-Harbor-0.1.1-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.1-linux-x86_64.run
-./BTRFS-Harbor-0.1.1-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.2/BTRFS-Harbor-0.1.2-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.2-linux-x86_64.run
+./BTRFS-Harbor-0.1.2-linux-x86_64.run
 ```
 
 L’installateur universel cible **Linux x86_64 avec glibc + systemd**. Il peut installer les outils système requis via pacman, apt, dnf ou zypper. Alpine/musl et les systèmes sans systemd ne sont pas pris en charge actuellement.
@@ -62,7 +62,7 @@ La release fournit aussi :
 
 - **DEB** — Debian / Ubuntu et dérivées.
 - **RPM** — Fedora / famille RHEL / workflows compatibles openSUSE.
-- **AppImage portable** — se lance directement et **n’installe pas Harbor**. Elle permet d’inspecter l’ordinateur et de préparer la sauvegarde. Au moment d’activer les sauvegardes planifiées, Harbor peut installer lui-même le paquet système complet, ou tu peux utiliser directement le `.run`, `.deb` ou `.rpm`.
+- **AppImage portable** — se lance directement et **n’installe pas Harbor**. Elle permet d’inspecter l’ordinateur et de préparer la sauvegarde. L’installation système sert uniquement à activer les `btrfs send` automatiques/périodiques qui doivent continuer même lorsque l’AppImage est fermée.
 - **SHA256SUMS** — checksums de tous les artefacts Linux.
 
 ## 🚀 Compilation depuis les sources sur CachyOS / Arch Linux
@@ -97,9 +97,9 @@ btrfs-harbor
 1. Ouvre Harbor. Il identifie l’ordinateur courant et scanne ses **subvolumes Btrfs montés**.
 2. Vérifie ce qu’Harbor a détecté. Les configurations et snapshots **Snapper** existants sont reconnus ; les snapshots read-only utilisables par `btrfs send` sont indiqués explicitement.
 3. Choisis ce que tu veux protéger. Harbor présélectionne les sources Btrfs persistantes recommandées et masque les montages de type cache/jetable dans la vue simple.
-4. Choisis la destination. Les destinations **NFS/SMB déjà montées** sont proposées automatiquement avec leur vrai point de montage et l’identité serveur/share ; tu peux aussi choisir un autre dossier.
-5. En mode **Simple**, Harbor applique des valeurs sûres : sauvegarde automatique quotidienne à 02:00 et vérification activée. Passe en **Avancé** uniquement si tu veux modifier planning, rétention ou options bas niveau.
-6. Clique **Enregistrer et activer**. Si tu as lancé l’AppImage portable, Harbor installe d’abord l’intégration système complète via polkit, puis applique directement les choix que tu viens de faire.
+4. Choisis la destination. En mode normal il n’y a que deux choix : **Dossier** ou **Serveur SSH**. Pour un dossier, choisis un seul répertoire ; Harbor détecte silencieusement s’il est local, NFS ou SMB et garde les informations de sécurité du montage en interne. Pour SSH, saisis `utilisateur@hôte:/chemin/des/backups`.
+5. Choisis directement la fréquence : **toutes les heures**, **tous les jours**, **toutes les semaines** ou **après chaque snapshot Snapper**. La vérification après sauvegarde reste activée par défaut. Le mode Avancé sert uniquement à la rétention et aux options bas niveau.
+6. Clique **Enregistrer et activer les sauvegardes automatiques**. Si tu as lancé l’AppImage portable, c’est seulement à ce moment que Harbor demande l’autorisation polkit d’installer les composants système nécessaires aux `btrfs send` périodiques/en arrière-plan ; l’AppImage elle-même reste portable.
 7. Lance une première sauvegarde manuelle et vérifie qu’elle passe à **SAUVEGARDÉ** puis **VÉRIFIÉ**.
 8. Fais un test de restauration en staging avant de considérer Harbor comme validé pour des données uniques.
 

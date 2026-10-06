@@ -11,7 +11,6 @@
 	import Clock3 from 'lucide-svelte/icons/clock-3';
 	import Copy from 'lucide-svelte/icons/copy';
 	import DatabaseBackup from 'lucide-svelte/icons/database-backup';
-	import Download from 'lucide-svelte/icons/download';
 	import Gauge from 'lucide-svelte/icons/gauge';
 	import HardDrive from 'lucide-svelte/icons/hard-drive';
 	import History from 'lucide-svelte/icons/history';
@@ -33,7 +32,7 @@
 	import Wifi from 'lucide-svelte/icons/wifi';
 	import WifiOff from 'lucide-svelte/icons/wifi-off';
 	import {
-		installFullHarbor,
+		applyHarborConfiguration,
 		loadDashboardStatus,
 		loadHarborConfiguration,
 		loadInstallationState,
@@ -42,7 +41,7 @@
 		type InstallationState,
 		type SystemIdentity
 	} from '#lib/agent.ts';
-	import { type HarborConfig } from '#lib/config.ts';
+	import { cloneConfiguration, resolveProfile, type HarborConfig } from '#lib/config.ts';
 	import {
 		dictionaries,
 		localeLabels,
@@ -82,10 +81,20 @@
 	let configWarning = '';
 	let installationState: InstallationState | null = null;
 	let systemIdentity: SystemIdentity | null = null;
-	let installingFull = false;
-	let setupMessage = '';
-	let setupError = '';
+	let scheduleSaving = false;
+	let scheduleFeedback = '';
+	let scheduleError = '';
 	$: protection = protectionState(dashboard.engine);
+	$: activeProfile = harborConfig?.profiles[0] ?? null;
+	$: activeSchedule = activeProfile?.on_calendar ?? '';
+	$: activeProfileHasSnapper =
+		activeProfile?.sources.some((source) => Boolean(source.snapper_config)) ?? false;
+	$: if (
+		!advanced &&
+		(active === 'destinations' || active === 'replicate' || active === 'activity')
+	) {
+		active = 'overview';
+	}
 
 	const t = (key: TranslationKey) => translate(locale, key);
 
@@ -123,19 +132,35 @@
 		localStorage.setItem('btrfs-harbor-theme', dark ? 'dark' : 'light');
 	}
 
-	async function installFullPackage() {
-		installingFull = true;
-		setupMessage = '';
-		setupError = '';
+	const overviewSchedules = [
+		['hourly', 'hourlySchedule'],
+		['*-*-* 02:00:00', 'dailySchedule'],
+		['Sun *-*-* 02:00:00', 'weeklySchedule'],
+		['@snapshots', 'snapshotSchedule']
+	] as const;
+
+	function readableSchedule(value: string): string {
+		const found = overviewSchedules.find(([spec]) => spec === value);
+		return found ? t(found[1]) : value;
+	}
+
+	async function updateOverviewSchedule(spec: string) {
+		if (!harborConfig || !activeProfile) return;
+		scheduleSaving = true;
+		scheduleFeedback = '';
+		scheduleError = '';
 		try {
-			await installFullHarbor();
-			installationState = await loadInstallationState();
+			const next = cloneConfiguration(harborConfig);
+			const profile = resolveProfile(next, activeProfile.id);
+			profile.on_calendar = spec;
+			await applyHarborConfiguration(next, profile.id);
+			harborConfig = next;
 			dashboard = await loadDashboardStatus();
-			setupMessage = t('installationComplete');
+			scheduleFeedback = t('scheduleUpdated');
 		} catch (error) {
-			setupError = error instanceof Error ? error.message : String(error);
+			scheduleError = error instanceof Error ? error.message : String(error);
 		} finally {
-			installingFull = false;
+			scheduleSaving = false;
 		}
 	}
 
@@ -227,7 +252,7 @@
 				<Gauge size={18} strokeWidth={1.8} /><span>{t('overview')}</span>
 			</button>
 			<button class:active={active === 'protection'} onclick={() => (active = 'protection')}>
-				<ShieldCheck size={18} strokeWidth={1.8} /><span>{t('protection')}</span>
+				<Clock3 size={18} strokeWidth={1.8} /><span>{t('protection')}</span>
 			</button>
 			{#if dashboard.source === 'live' || dashboard.source === 'demo'}
 				<button class:active={active === 'timeline'} onclick={() => (active = 'timeline')}>
@@ -236,10 +261,13 @@
 				<button class:active={active === 'recover'} onclick={() => (active = 'recover')}>
 					<LifeBuoy size={18} strokeWidth={1.8} /><span>{t('recover')}</span>
 				</button>
-				<button class:active={active === 'destinations'} onclick={() => (active = 'destinations')}>
-					<HardDrive size={18} strokeWidth={1.8} /><span>{t('destinations')}</span>
-				</button>
 				{#if advanced}
+					<button
+						class:active={active === 'destinations'}
+						onclick={() => (active = 'destinations')}
+					>
+						<HardDrive size={18} strokeWidth={1.8} /><span>{t('destinations')}</span>
+					</button>
 					<button class:active={active === 'replicate'} onclick={() => (active = 'replicate')}>
 						<Copy size={18} strokeWidth={1.8} /><span>{t('replicate')}</span>
 					</button>
@@ -357,19 +385,6 @@
 						<div>
 							<strong>{t('portableMode')}</strong>
 							<p>{t('portableModeDesc')}</p>
-							<button
-								class="primary compact"
-								onclick={installFullPackage}
-								disabled={installingFull}
-							>
-								{#if installingFull}
-									<RotateCcw class="spin" size={15} /> {t('installingHarbor')}
-								{:else}
-									<Download size={15} /> {t('installHarbor')}
-								{/if}
-							</button>
-							{#if setupMessage}<small class="good-status">{setupMessage}</small>{/if}
-							{#if setupError}<small class="error-text">{setupError}</small>{/if}
 						</div>
 					</article>
 				{/if}
@@ -450,6 +465,33 @@
 					</div>
 				</article>
 
+				{#if dashboard.source === 'live' && harborConfig && activeProfile}
+					<article class="panel overview-schedule">
+						<div class="overview-schedule-copy">
+							<span>{t('schedule')}</span>
+							<strong>{readableSchedule(activeSchedule)}</strong>
+							<small>{t('simpleScheduleHelp')}</small>
+						</div>
+						<div class="schedule-options compact-options">
+							{#each overviewSchedules as [spec, key] (spec)}
+								<button
+									type="button"
+									class:active={activeSchedule === spec}
+									disabled={scheduleSaving || (spec === '@snapshots' && !activeProfileHasSnapper)}
+									title={spec === '@snapshots' && !activeProfileHasSnapper
+										? t('snapshotScheduleNeedsSnapper')
+										: ''}
+									onclick={() => updateOverviewSchedule(spec)}
+								>
+									{t(key)}
+								</button>
+							{/each}
+						</div>
+						{#if scheduleFeedback}<small class="good-status">{scheduleFeedback}</small>{/if}
+						{#if scheduleError}<small class="error-text">{scheduleError}</small>{/if}
+					</article>
+				{/if}
+
 				<div class="metric-grid">
 					<article class="metric">
 						<div class="metric-icon"><DatabaseBackup size={19} /></div>
@@ -471,8 +513,12 @@
 						<div class="metric-icon"><Clock3 size={19} /></div>
 						<div>
 							<span>{t('nextRun')}</span>
-							<strong>{dashboard.nextRun}</strong>
-							<small>systemd · Persistent</small>
+							<strong
+								>{activeSchedule === '@snapshots'
+									? t('snapshotSchedule')
+									: dashboard.nextRun}</strong
+							>
+							<small>{t('backgroundProtection')}</small>
 						</div>
 					</article>
 					<article class="metric">
@@ -755,16 +801,10 @@
 							</div>
 							<div class="destination-copy">
 								<strong>{destination.name}</strong>
-								<span>
-									{destination.kind.toUpperCase()}
-									{#if destination.expected_mount_source}
-										· {destination.expected_mount_source}
-									{/if}
-								</span>
+								<span
+									>{destination.kind === 'ssh' ? t('sshDestination') : t('folderDestination')}</span
+								>
 								<code>{destination.path}</code>
-							</div>
-							<div class="destination-meta">
-								<strong>{destination.compression}</strong>
 							</div>
 						</article>
 					{/each}
@@ -777,13 +817,6 @@
 						</button>
 					</article>
 				{/if}
-				<div class="transport-grid">
-					{#each [[t('nfs'), 'raw://'], [t('smb'), 'raw://'], [t('localDisk'), 'raw://'], [t('ssh'), 'ssh://']] as transport (transport[0])}
-						<div>
-							<HardDrive size={18} /><strong>{transport[0]}</strong><code>{transport[1]}</code>
-						</div>
-					{/each}
-				</div>
 				<article class="callout">
 					<CircleAlert size={20} />
 					<div>
@@ -852,9 +885,13 @@
 						</div>
 						<p class="body-copy">{t('inheritedEngine')}</p>
 						<div class="setting-row">
-							<span>{t('backgroundAgent')}</span><strong>{t('systemdManaged')}</strong>
+							<span>{t('installationMode')}</span>
+							<strong>
+								{installationState?.helper_installed
+									? t('installedAutomation')
+									: t('portableForSetup')}
+							</strong>
 						</div>
-						<div class="setting-row"><span>Protocol</span><strong>{t('footerEngine')}</strong></div>
 					</article>
 				</div>
 				<article class="callout large">
@@ -869,7 +906,6 @@
 
 		<footer>
 			<span><Anchor size={13} /> {t('footerNative')}</span>
-			<span>{t('footerEngine')}</span>
 		</footer>
 	</main>
 </div>

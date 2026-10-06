@@ -56,7 +56,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: "12.9.1"
       - name: Install
@@ -109,3 +109,7 @@ jobs:
           test -s README.md
           test -s README.fr.md
           test -s README.zh-CN.md
+          if grep -RInE '\[Reading [0-9]+ lines from' harbor/desktop/src README*.md docs packaging; then
+            echo "Tooling transcript text leaked into public sources" >&2
+            exit 1
+          fi

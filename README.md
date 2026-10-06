@@ -48,12 +48,12 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 
 ## 📦 Download & install
 
-For most x86_64 Linux systems, use the **universal installer**. It installs the desktop app, Rust helpers, inherited backup engine, systemd service, D-Bus policy and polkit integration together:
+For most x86_64 Linux systems, use the **universal installer**. It installs the desktop app, Rust helpers, the included btrfs-backup-ng engine, systemd service, D-Bus policy and polkit integration together:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.1/BTRFS-Harbor-0.1.1-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.1-linux-x86_64.run
-./BTRFS-Harbor-0.1.1-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.2/BTRFS-Harbor-0.1.2-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.2-linux-x86_64.run
+./BTRFS-Harbor-0.1.2-linux-x86_64.run
 ```
 
 Supported by the universal installer: **x86_64 Linux with glibc + systemd**. It can install required host tools through pacman, apt, dnf or zypper. Alpine/musl and non-systemd systems are not currently supported.
@@ -62,7 +62,7 @@ The release also provides:
 
 - **DEB** — Debian / Ubuntu and derivatives.
 - **RPM** — Fedora / RHEL-family / openSUSE-compatible package workflows.
-- **Portable AppImage** — runs directly and does **not install Harbor**. Use it to inspect the computer and prepare a backup. When you activate scheduled backups, Harbor can install the full system package for you, or you can use the `.run`, `.deb` or `.rpm` directly.
+- **Portable AppImage** — runs directly and does **not install Harbor**. Use it to inspect the computer and prepare a backup. System installation is only needed when you enable automatic/periodic `btrfs send` jobs that must keep running after the AppImage is closed.
 - **SHA256SUMS** — checksums for every Linux release artifact.
 
 ## 🚀 Build from source on CachyOS / Arch Linux
@@ -111,9 +111,9 @@ The same package recipe is intended to become the AUR package after public testi
 1. Open Harbor. It identifies the current computer and scans its mounted **Btrfs subvolumes**.
 2. Review what Harbor found. Existing **Snapper** configurations and snapshots are detected; read-only snapshots that can be used by `btrfs send` are shown explicitly.
 3. Choose what to protect. Harbor preselects recommended persistent Btrfs sources and leaves disposable/cache-style mounts out of the simple view.
-4. Choose a destination. Already-mounted **NFS/SMB** destinations are offered automatically with their real mount point and server/share identity; you can also browse to another destination.
-5. In **Simple** mode, Harbor uses safe defaults: automatic daily backup at 02:00 and verification enabled. Open **Advanced** only when you want to change scheduling, retention or low-level source options.
-6. Click **Save & activate**. If you started from the portable AppImage, Harbor installs the full system integration through polkit first, then applies the choices you just made.
+4. Choose a destination. In normal mode there are only two choices: **Folder** or **SSH server**. For a folder, pick exactly one directory; Harbor silently detects whether it lives on local storage, NFS or SMB and keeps the mount-safety metadata internally. For SSH, enter `user@host:/path/to/backups`.
+5. Choose the schedule directly: **hourly**, **daily**, **weekly**, or **after each Snapper snapshot**. Verification after backup stays enabled by default. Advanced mode is only for retention and low-level options.
+6. Click **Save & enable automatic backups**. If you started from the portable AppImage, this is the point where Harbor asks for polkit permission to install the system components required for periodic/background `btrfs send`; the AppImage itself remains portable.
 7. Run one manual backup and confirm the result becomes **BACKED UP** and **VERIFIED**.
 8. Perform a staged restore test before relying on Harbor for unique data.
 

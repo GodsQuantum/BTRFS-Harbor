@@ -13,10 +13,10 @@
 		"windows": [
 			{
 				"title": "Btrfs Harbor",
-				"width": 1320,
-				"height": 840,
-				"minWidth": 980,
-				"minHeight": 680,
+				"width": 1080,
+				"height": 720,
+				"minWidth": 880,
+				"minHeight": 600,
 				"resizable": true,
 				"fullscreen": false,
 				"center": true

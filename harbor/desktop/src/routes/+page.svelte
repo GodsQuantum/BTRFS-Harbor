@@ -27,7 +27,6 @@
 	import Settings from 'lucide-svelte/icons/settings';
 	import ShieldCheck from 'lucide-svelte/icons/shield-check';
 	import ShieldEllipsis from 'lucide-svelte/icons/shield-ellipsis';
-	import Sparkles from 'lucide-svelte/icons/sparkles';
 	import Sun from 'lucide-svelte/icons/sun';
 	import TerminalSquare from 'lucide-svelte/icons/terminal-square';
 	import Wifi from 'lucide-svelte/icons/wifi';
@@ -64,7 +63,7 @@
 	let locale: Locale = 'en';
 	let active: Page = 'overview';
 	let advanced = false;
-	let dark = true;
+	let dark = false;
 	let loading = true;
 	let sending = false;
 	let backupProgress: BackupProgressEvent | null = null;
@@ -79,7 +78,9 @@
 		const savedLocale = localStorage.getItem('btrfs-harbor-locale') as Locale | null;
 		if (savedLocale && savedLocale in dictionaries) locale = savedLocale;
 		const savedTheme = localStorage.getItem('btrfs-harbor-theme');
-		if (savedTheme) dark = savedTheme === 'dark';
+		dark = savedTheme
+			? savedTheme === 'dark'
+			: window.matchMedia('(prefers-color-scheme: dark)').matches;
 
 		dashboard = await loadDashboardStatus();
 		try {
@@ -264,7 +265,7 @@
 
 		{#if dashboard.source === 'demo'}
 			<div class="demo-banner">
-				<Sparkles size={16} />
+				<DatabaseBackup size={15} />
 				<div>
 					<strong>{t('demoData')}</strong>
 					<span>{t('demoExplain')}</span>

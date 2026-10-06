@@ -46,7 +46,26 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 - **English / Français / 简体中文** — UI et documentation complètes.
 - **Aucun runtime Docker** — Harbor s’installe comme une application Linux native.
 
-## 🚀 Installation sur CachyOS / Arch Linux
+## 📦 Télécharger et installer
+
+Sur la plupart des Linux x86_64, utilise l’**installateur universel**. Il installe ensemble l’application desktop, les helpers Rust, le moteur de sauvegarde hérité, le service systemd, la politique D-Bus et l’intégration polkit :
+
+```bash
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.0/BTRFS-Harbor-0.1.0-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.0-linux-x86_64.run
+./BTRFS-Harbor-0.1.0-linux-x86_64.run
+```
+
+L’installateur universel cible **Linux x86_64 avec glibc + systemd**. Il peut installer les outils système requis via pacman, apt, dnf ou zypper. Alpine/musl et les systèmes sans systemd ne sont pas pris en charge actuellement.
+
+La release fournit aussi :
+
+- **DEB** — Debian / Ubuntu et dérivées.
+- **RPM** — Fedora / famille RHEL / workflows compatibles openSUSE.
+- **AppImage** — binaire desktop portable. Pour toutes les fonctions Harbor, préfère l’installateur universel ou un paquet natif, car Harbor nécessite aussi son agent/helper privilégié et l’intégration système.
+- **SHA256SUMS** — checksums de tous les artefacts Linux.
+
+## 🚀 Compilation depuis les sources sur CachyOS / Arch Linux
 
 L’installation recommandée depuis les sources utilise le paquet Arch fourni par le repo :
 

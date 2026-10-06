@@ -1,9 +1,6 @@
 name: Harbor Release Build
 
 on:
-  push:
-    branches:
-      - ui-preview-temp
   workflow_dispatch:
   release:
     types: [published]

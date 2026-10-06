@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	backupSourceFromDiscovery,
 	createDefaultConfiguration,
+	describeDraftIssue,
 	draftIssues,
 	resolveDestination,
 	resolveProfile,
@@ -23,6 +24,21 @@ describe('Harbor profile editor model', () => {
 		expect(destination.path).toBe('');
 		expect(destination.mount_point).toBeNull();
 		expect(destination.expected_mount_source).toBeNull();
+	});
+
+	it('turns internal draft issue tokens into actionable user guidance', () => {
+		expect(describeDraftIssue('sources')).toEqual({
+			section: 'sources',
+			messageKey: 'validationSourcesRequired'
+		});
+		expect(describeDraftIssue('destination_path')).toEqual({
+			section: 'destination',
+			messageKey: 'validationDestinationRequired'
+		});
+		expect(describeDraftIssue('mount_point')).toEqual({
+			section: 'destination',
+			messageKey: 'validationDestinationUnavailable'
+		});
 	});
 
 	it('starts incomplete until live discovery and destination selection are provided', () => {

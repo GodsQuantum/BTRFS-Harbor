@@ -65,6 +65,39 @@ export type DraftIssue =
 	| 'expected_mount_source'
 	| 'compression';
 
+export type DraftSection = 'profile' | 'schedule' | 'sources' | 'destination';
+
+export interface DraftIssueDescriptor {
+	section: DraftSection;
+	messageKey:
+		| 'validationProfileRequired'
+		| 'validationScheduleRequired'
+		| 'validationSourcesRequired'
+		| 'validationDestinationRequired'
+		| 'validationDestinationUnavailable'
+		| 'validationCompressionRequired';
+}
+
+export function describeDraftIssue(issue: DraftIssue): DraftIssueDescriptor {
+	switch (issue) {
+		case 'profile_name':
+			return { section: 'profile', messageKey: 'validationProfileRequired' };
+		case 'schedule':
+			return { section: 'schedule', messageKey: 'validationScheduleRequired' };
+		case 'sources':
+			return { section: 'sources', messageKey: 'validationSourcesRequired' };
+		case 'mount_point':
+		case 'expected_mount_source':
+			return { section: 'destination', messageKey: 'validationDestinationUnavailable' };
+		case 'compression':
+			return { section: 'destination', messageKey: 'validationCompressionRequired' };
+		case 'destination':
+		case 'destination_name':
+		case 'destination_path':
+			return { section: 'destination', messageKey: 'validationDestinationRequired' };
+	}
+}
+
 const recommendedSources: Readonly<Record<string, BackupSource>> = {
 	'/': {
 		path: '/',

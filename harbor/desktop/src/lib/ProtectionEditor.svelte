@@ -14,6 +14,7 @@
 	import {
 		backupSourceFromDiscovery,
 		cloneConfiguration,
+		describeDraftIssue,
 		draftIssues,
 		isSourceEnabled,
 		recommendedSourcePaths,
@@ -39,6 +40,8 @@
 	let message = '';
 	let error = '';
 	let discoveryError = '';
+	let destinationValidated = false;
+	let validatingDestination = false;
 	let discoveredSources: DiscoveredSource[] = [];
 
 	$: profile = resolveProfile(config);
@@ -68,6 +71,14 @@
 	function clearFeedback() {
 		message = '';
 		error = '';
+	}
+
+	function focusSection(section: 'profile' | 'schedule' | 'sources' | 'destination') {
+		requestAnimationFrame(() => {
+			document
+				.getElementById('harbor-' + section)
+				?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		});
 	}
 
 	function fallbackSource(path: string): DiscoveredSource {
@@ -136,6 +147,7 @@
 		const current = resolveDestination(next, currentProfile);
 		mutator(current);
 		config = next;
+		destinationValidated = false;
 		clearFeedback();
 	}
 
@@ -189,8 +201,13 @@
 			}
 		});
 
-		if (probeError) error = probeError;
-		else if (probe) message = t('autoDetectedMount');
+		if (probeError) {
+			destinationValidated = false;
+			error = probeError;
+		} else if (probe) {
+			destinationValidated = true;
+			message = t('destinationReady');
+		}
 	}
 
 	function setDestinationMode(mode: 'folder' | 'ssh') {
@@ -239,6 +256,30 @@
 		return next;
 	}
 
+	async function validateDestination() {
+		error = '';
+		message = '';
+		if (!destination.path.trim()) {
+			error = t('destinationNeedsPath');
+			focusSection('destination');
+			return;
+		}
+
+		validatingDestination = true;
+		try {
+			const next = await normalizedConfiguration();
+			config = next;
+			destinationValidated = true;
+			message = t('destinationReady');
+		} catch (cause) {
+			destinationValidated = false;
+			error = cause instanceof Error ? cause.message : String(cause);
+			focusSection('destination');
+		} finally {
+			validatingDestination = false;
+		}
+	}
+
 	async function apply() {
 		error = '';
 		message = '';
@@ -248,7 +289,9 @@
 			const nextProfile = resolveProfile(next, profile.id);
 			const nextIssues = draftIssues(next, nextProfile);
 			if (nextIssues.length > 0) {
-				error = t('completeRequiredFields') + ' ' + nextIssues.join(', ');
+				const issue = describeDraftIssue(nextIssues[0]);
+				error = t(issue.messageKey);
+				focusSection(issue.section);
 				return;
 			}
 			config = next;
@@ -404,7 +447,7 @@
 			</article>
 		{/if}
 
-		<article class="panel editor-card">
+		<article class="panel editor-card" id="harbor-destination">
 			<div class="panel-head">
 				<div>
 					<p class="eyebrow">{t('destination')}</p>
@@ -462,6 +505,16 @@
 							{t('chooseFolder')}
 						</button>
 					{/if}
+					<button
+						class="secondary validation-button"
+						class:validated={destinationValidated}
+						type="button"
+						disabled={validatingDestination}
+						onclick={validateDestination}
+					>
+						<Check size={15} />
+						{destinationValidated ? t('destinationReady') : t('validateDestination')}
+					</button>
 				</div>
 				<small class="field-help">
 					{destinationIsSsh ? t('sshDestinationHelp') : t('folderDestinationHelp')}
@@ -487,7 +540,7 @@
 		</article>
 	</div>
 
-	<article class="panel editor-card">
+	<article class="panel editor-card" id="harbor-sources">
 		<div class="panel-head">
 			<div>
 				<p class="eyebrow">{t('selectVolumes')}</p>

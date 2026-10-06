@@ -108,16 +108,16 @@ The same package recipe is intended to become the AUR package after public testi
 
 ## 🛟 Your first backup
 
-1. Open **Protection**.
-2. Create a profile and select the Btrfs subvolumes you actually want to preserve.
-3. Choose a destination. For an already-mounted NFS/SMB folder, Harbor detects the active mount point and server/share identity.
-4. Choose retention, schedule and **Verify after backup**.
-5. Save and enable the profile.
-6. Run one manual backup first.
-7. Open **Timeline / Activity** and confirm the backup is **BACKED UP** and, when enabled, **VERIFIED**.
+1. Open Harbor. It identifies the current computer and scans its mounted **Btrfs subvolumes**.
+2. Review what Harbor found. Existing **Snapper** configurations and snapshots are detected; read-only snapshots that can be used by `btrfs send` are shown explicitly.
+3. Choose what to protect. Harbor preselects recommended persistent Btrfs sources and leaves disposable/cache-style mounts out of the simple view.
+4. Choose a destination. Already-mounted **NFS/SMB** destinations are offered automatically with their real mount point and server/share identity; you can also browse to another destination.
+5. In **Simple** mode, Harbor uses safe defaults: automatic daily backup at 02:00 and verification enabled. Open **Advanced** only when you want to change scheduling, retention or low-level source options.
+6. Click **Save & activate**. If you started from the portable AppImage, Harbor installs the full system integration through polkit first, then applies the choices you just made.
+7. Run one manual backup and confirm the result becomes **BACKED UP** and **VERIFIED**.
 8. Perform a staged restore test before relying on Harbor for unique data.
 
-A typical desktop profile may protect `/` through an existing Snapper root config plus persistent `/home`, `/root` or `/srv` subvolumes, while caches and temporary data remain disposable.
+Nothing is pre-filled with a demo IP, machine name or source path in the native first-run flow: Harbor uses the computer it is actually running on.
 
 ## 🧭 What the status means
 

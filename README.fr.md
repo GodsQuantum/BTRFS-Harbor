@@ -94,16 +94,16 @@ btrfs-harbor
 
 ## 🛟 Première sauvegarde
 
-1. Ouvre **Protection**.
-2. Crée un profil et sélectionne uniquement les subvolumes Btrfs à conserver.
-3. Choisis une destination. Sur un dossier NFS/SMB déjà monté, Harbor détecte le point de montage actif et l’identité serveur/share.
-4. Choisis rétention, planning et **Vérifier après sauvegarde**.
-5. Enregistre et active le profil.
-6. Lance d’abord une sauvegarde manuelle.
-7. Vérifie dans **Chronologie / Activité** que l’état passe à **SAUVEGARDÉ** puis, si activé, **VÉRIFIÉ**.
-8. Fais un test de restauration en staging avant de considérer le backup comme fiable.
+1. Ouvre Harbor. Il identifie l’ordinateur courant et scanne ses **subvolumes Btrfs montés**.
+2. Vérifie ce qu’Harbor a détecté. Les configurations et snapshots **Snapper** existants sont reconnus ; les snapshots read-only utilisables par `btrfs send` sont indiqués explicitement.
+3. Choisis ce que tu veux protéger. Harbor présélectionne les sources Btrfs persistantes recommandées et masque les montages de type cache/jetable dans la vue simple.
+4. Choisis la destination. Les destinations **NFS/SMB déjà montées** sont proposées automatiquement avec leur vrai point de montage et l’identité serveur/share ; tu peux aussi choisir un autre dossier.
+5. En mode **Simple**, Harbor applique des valeurs sûres : sauvegarde automatique quotidienne à 02:00 et vérification activée. Passe en **Avancé** uniquement si tu veux modifier planning, rétention ou options bas niveau.
+6. Clique **Enregistrer et activer**. Si tu as lancé l’AppImage portable, Harbor installe d’abord l’intégration système complète via polkit, puis applique directement les choix que tu viens de faire.
+7. Lance une première sauvegarde manuelle et vérifie qu’elle passe à **SAUVEGARDÉ** puis **VÉRIFIÉ**.
+8. Fais un test de restauration en staging avant de considérer Harbor comme validé pour des données uniques.
 
-Un profil desktop typique peut protéger `/` via une configuration Snapper existante, plus les subvolumes persistants `/home`, `/root` ou `/srv`, tout en laissant caches et fichiers temporaires jetables.
+Aucune IP de démonstration, aucun nom de machine et aucun chemin source ne sont préremplis dans le premier lancement natif : Harbor utilise la machine sur laquelle il tourne réellement.
 
 ## 🧭 Comprendre les statuts
 

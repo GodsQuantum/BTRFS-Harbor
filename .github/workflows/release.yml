@@ -213,7 +213,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" release-assets/* --clobber
+        run: gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
 
 # Deliberately no PyPI publishing here.
 # This fork preserves btrfs-backup-ng internally but must never publish a

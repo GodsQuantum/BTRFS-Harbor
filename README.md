@@ -51,9 +51,9 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 For most x86_64 Linux systems, use the **universal installer**. It installs the desktop app, Rust helpers, inherited backup engine, systemd service, D-Bus policy and polkit integration together:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.0/BTRFS-Harbor-0.1.0-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.0-linux-x86_64.run
-./BTRFS-Harbor-0.1.0-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.1/BTRFS-Harbor-0.1.1-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.1-linux-x86_64.run
+./BTRFS-Harbor-0.1.1-linux-x86_64.run
 ```
 
 Supported by the universal installer: **x86_64 Linux with glibc + systemd**. It can install required host tools through pacman, apt, dnf or zypper. Alpine/musl and non-systemd systems are not currently supported.
@@ -62,7 +62,7 @@ The release also provides:
 
 - **DEB** — Debian / Ubuntu and derivatives.
 - **RPM** — Fedora / RHEL-family / openSUSE-compatible package workflows.
-- **AppImage** — portable desktop binary. For full Harbor functionality, prefer the universal installer or a native package because Harbor also needs its privileged agent/helper and system integration.
+- **Portable AppImage** — runs directly and does **not install Harbor**. Use it to inspect the computer and prepare a backup. When you activate scheduled backups, Harbor can install the full system package for you, or you can use the `.run`, `.deb` or `.rpm` directly.
 - **SHA256SUMS** — checksums for every Linux release artifact.
 
 ## 🚀 Build from source on CachyOS / Arch Linux

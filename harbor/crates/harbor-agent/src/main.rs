@@ -1,5 +1,4 @@
-mod discovery;
-mod runtime;
+use harbor_agent::{discovery, runtime};
 
 use anyhow::Result;
 use harbor_engine::EngineClient;

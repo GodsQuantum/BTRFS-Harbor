@@ -7,6 +7,9 @@ export interface DiscoveredSource {
 	source: string;
 	subvolume: string | null;
 	snapper_config: string | null;
+	snapshot_count?: number;
+	sendable_snapshot_count?: number;
+	latest_snapshot_number?: number | null;
 	hint: SourceHint;
 }
 
@@ -122,10 +125,10 @@ export function createDefaultConfiguration(
 			{
 				id: destinationId,
 				name: 'Backup destination',
-				kind: 'nfs',
+				kind: 'raw',
 				path: '',
-				mount_point: '',
-				expected_mount_source: '',
+				mount_point: null,
+				expected_mount_source: null,
 				compression: 'zstd',
 				optional: false
 			}
@@ -134,7 +137,7 @@ export function createDefaultConfiguration(
 			{
 				id: profileId,
 				name: 'Recovery backup',
-				sources: recommendedOrder.map((path) => copySource(recommendedSources[path])),
+				sources: [],
 				destination_ids: [destinationId],
 				on_calendar: '*-*-* 02:00:00',
 				retention: {

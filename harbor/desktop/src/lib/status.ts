@@ -49,7 +49,7 @@ export interface BackupProgressEvent {
 	stream?: 'stdout' | 'stderr';
 }
 
-export type DataSource = 'live' | 'demo' | 'offline';
+export type DataSource = 'live' | 'demo' | 'setup' | 'offline';
 
 export interface DashboardStatus {
 	source: DataSource;

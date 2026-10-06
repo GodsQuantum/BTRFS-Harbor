@@ -1,6 +1,6 @@
 [package]
 name = "btrfs-harbor-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native Btrfs Harbor backup, recovery and replication desktop"
 authors = ["Btrfs Harbor contributors"]
 license = "MIT"
@@ -20,6 +20,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.1" }
 
 [dependencies]
+harbor-agent = { path = "../../crates/harbor-agent" }
 harbor-storage = { path = "../../crates/harbor-storage" }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }

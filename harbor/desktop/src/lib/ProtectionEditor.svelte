@@ -9,7 +9,9 @@
 		applyHarborConfiguration,
 		chooseDestinationDirectory,
 		discoverBtrfsSources,
-		inspectDestinationMount
+		discoverMountedBackupDestinations,
+		inspectDestinationMount,
+		type MountProbe
 	} from './agent';
 	import {
 		backupSourceFromDiscovery,
@@ -41,6 +43,7 @@
 	let error = '';
 	let discoveryError = '';
 	let discoveredSources: DiscoveredSource[] = [];
+	let detectedDestinations: MountProbe[] = [];
 
 	$: profile = resolveProfile(config);
 	$: destination = resolveDestination(config, profile);
@@ -51,7 +54,20 @@
 
 	onMount(async () => {
 		try {
-			discoveredSources = await discoverBtrfsSources();
+			const [sources, destinations] = await Promise.all([
+				discoverBtrfsSources(),
+				discoverMountedBackupDestinations().catch(() => [])
+			]);
+			discoveredSources = sources;
+			detectedDestinations = destinations;
+			if (profile.sources.length === 0 && discoveredSources.length > 0) {
+				const next = cloneConfiguration(config);
+				const current = resolveProfile(next, profile.id);
+				current.sources = discoveredSources
+					.filter((source) => source.hint === 'recommended')
+					.map(backupSourceFromDiscovery);
+				config = next;
+			}
 		} catch (cause) {
 			discoveryError = cause instanceof Error ? cause.message : String(cause);
 		}
@@ -69,6 +85,9 @@
 			source: configured?.path ?? path,
 			subvolume: null,
 			snapper_config: configured?.snapper_config ?? null,
+			snapshot_count: 0,
+			sendable_snapshot_count: 0,
+			latest_snapshot_number: null,
 			hint: recommendedSourcePaths.includes(path) ? 'recommended' : 'optional'
 		};
 	}
@@ -79,12 +98,8 @@
 		showAdvanced: boolean
 	): DiscoveredSource[] {
 		const byPath: Record<string, DiscoveredSource> = {};
-		const base =
-			discovered.length > 0
-				? discovered
-				: recommendedSourcePaths.map((path) => fallbackSource(path));
 
-		for (const source of base) byPath[source.mount_point] = source;
+		for (const source of discovered) byPath[source.mount_point] = source;
 		for (const source of current.sources) {
 			if (!(source.path in byPath)) byPath[source.path] = fallbackSource(source.path);
 		}
@@ -154,6 +169,19 @@
 		);
 		config = next;
 		clearFeedback();
+	}
+
+	function useDetectedDestination(probe: MountProbe) {
+		updateDestination((current) => {
+			current.kind = probe.kind;
+			current.path = probe.mount_point;
+			current.mount_point = probe.mount_point;
+			current.expected_mount_source = probe.source;
+			if (current.name === 'Backup destination' || !current.name.trim()) {
+				current.name = probe.kind === 'nfs' ? 'NFS backup' : 'SMB backup';
+			}
+		});
+		message = t('autoDetectedMount');
 	}
 
 	async function browseDestination() {
@@ -229,105 +257,114 @@
 lines from start (total: 431 lines, 0 remaining)]
 
 <div class="protection-editor">
-	<div class="editor-grid">
-		<article class="panel editor-card">
-			<div class="panel-head">
-				<div>
-					<p class="eyebrow">{t('profile')}</p>
-					<h3>{profile.name || t('profileName')}</h3>
-					<div class="runtime-summary">
-						<span class:good-status={runtime?.timer_active} class:warn={!runtime?.timer_active}>
-							{timerLabel()}
-						</span>
-						{#if runtime?.next_elapse_realtime}
-							<small>{t('nextScheduledRun')}: {runtime.next_elapse_realtime}</small>
-						{/if}
-						{#if runtime?.last_trigger}
-							<small>{t('lastTrigger')}: {runtime.last_trigger}</small>
-						{/if}
+	{#if !advanced}
+		<div class="simple-defaults">
+			<Check size={14} />
+			<span>{t('simpleDefaults')}</span>
+		</div>
+	{/if}
+	<div class="editor-grid" class:single={!advanced}>
+		{#if advanced}
+			<article class="panel editor-card">
+				<div class="panel-head">
+					<div>
+						<p class="eyebrow">{t('profile')}</p>
+						<h3>{profile.name || t('profileName')}</h3>
+						<div class="runtime-summary">
+							<span class:good-status={runtime?.timer_active} class:warn={!runtime?.timer_active}>
+								{timerLabel()}
+							</span>
+							{#if runtime?.next_elapse_realtime}
+								<small>{t('nextScheduledRun')}: {runtime.next_elapse_realtime}</small>
+							{/if}
+							{#if runtime?.last_trigger}
+								<small>{t('lastTrigger')}: {runtime.last_trigger}</small>
+							{/if}
+						</div>
 					</div>
+					<span class="badge good"><ShieldCheck size={14} /> {t('recommended')}</span>
 				</div>
-				<span class="badge good"><ShieldCheck size={14} /> {t('recommended')}</span>
-			</div>
 
-			<label class="field">
-				<span>{t('profileName')}</span>
-				<input
-					value={profile.name}
-					oninput={(event) =>
-						updateProfile(
-							(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
-						)}
-				/>
-			</label>
-
-			<label class="field">
-				<span>{t('schedule')}</span>
-				<select
-					value={schedules.some(([value]) => value === profile.on_calendar)
-						? profile.on_calendar
-						: 'custom'}
-					onchange={(event) => {
-						const value = (event.currentTarget as HTMLSelectElement).value;
-						if (value !== 'custom') updateProfile((current) => (current.on_calendar = value));
-					}}
-				>
-					{#each schedules as [value, key] (value)}
-						<option {value}>{t(key)}</option>
-					{/each}
-					<option value="custom">{t('advanced')}</option>
-				</select>
-			</label>
-
-			{#if advanced}
 				<label class="field">
-					<span>{t('scheduleSpec')}</span>
+					<span>{t('profileName')}</span>
 					<input
-						value={profile.on_calendar}
+						value={profile.name}
 						oninput={(event) =>
 							updateProfile(
-								(current) => (current.on_calendar = (event.currentTarget as HTMLInputElement).value)
+								(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
 							)}
 					/>
 				</label>
 
-				<div class="retention-grid">
-					{#each [['hourly', 'retentionHourly'], ['daily', 'dailyCopies'], ['weekly', 'weeklyCopies'], ['monthly', 'monthlyCopies'], ['yearly', 'retentionYearly']] as [field, key] (field)}
-						<label class="field compact">
-							<span>{t(key as TranslationKey)}</span>
-							<input
-								type="number"
-								min="0"
-								value={profile.retention[field as keyof typeof profile.retention]}
-								oninput={(event) =>
-									updateProfile((current) => {
-										current.retention[field as keyof typeof current.retention] = Math.max(
-											0,
-											Number((event.currentTarget as HTMLInputElement).value) || 0
-										);
-									})}
-							/>
-						</label>
-					{/each}
-				</div>
-			{/if}
+				<label class="field">
+					<span>{t('schedule')}</span>
+					<select
+						value={schedules.some(([value]) => value === profile.on_calendar)
+							? profile.on_calendar
+							: 'custom'}
+						onchange={(event) => {
+							const value = (event.currentTarget as HTMLSelectElement).value;
+							if (value !== 'custom') updateProfile((current) => (current.on_calendar = value));
+						}}
+					>
+						{#each schedules as [value, key] (value)}
+							<option {value}>{t(key)}</option>
+						{/each}
+						<option value="custom">{t('advanced')}</option>
+					</select>
+				</label>
 
-			<label class="toggle-row">
-				<input
-					type="checkbox"
-					checked={profile.verify_after_backup}
-					onchange={(event) =>
-						updateProfile(
-							(current) =>
-								(current.verify_after_backup = (event.currentTarget as HTMLInputElement).checked)
-						)}
-				/>
-				<span>
-					<strong>{t('verifyAfterBackup')}</strong>
-					<small>SHA-256 · raw verify</small>
-				</span>
-			</label>
-		</article>
+				{#if advanced}
+					<label class="field">
+						<span>{t('scheduleSpec')}</span>
+						<input
+							value={profile.on_calendar}
+							oninput={(event) =>
+								updateProfile(
+									(current) =>
+										(current.on_calendar = (event.currentTarget as HTMLInputElement).value)
+								)}
+						/>
+					</label>
+
+					<div class="retention-grid">
+						{#each [['hourly', 'retentionHourly'], ['daily', 'dailyCopies'], ['weekly', 'weeklyCopies'], ['monthly', 'monthlyCopies'], ['yearly', 'retentionYearly']] as [field, key] (field)}
+							<label class="field compact">
+								<span>{t(key as TranslationKey)}</span>
+								<input
+									type="number"
+									min="0"
+									value={profile.retention[field as keyof typeof profile.retention]}
+									oninput={(event) =>
+										updateProfile((current) => {
+											current.retention[field as keyof typeof current.retention] = Math.max(
+												0,
+												Number((event.currentTarget as HTMLInputElement).value) || 0
+											);
+										})}
+								/>
+							</label>
+						{/each}
+					</div>
+				{/if}
+
+				<label class="toggle-row">
+					<input
+						type="checkbox"
+						checked={profile.verify_after_backup}
+						onchange={(event) =>
+							updateProfile(
+								(current) =>
+									(current.verify_after_backup = (event.currentTarget as HTMLInputElement).checked)
+							)}
+					/>
+					<span>
+						<strong>{t('verifyAfterBackup')}</strong>
+						<small>SHA-256 · raw verify</small>
+					</span>
+				</label>
+			</article>
+		{/if}
 
 		<article class="panel editor-card">
 			<div class="panel-head">
@@ -366,6 +403,25 @@ lines from start (total: 431 lines, 0 remaining)]
 					</select>
 				</label>
 			</div>
+
+			{#if detectedDestinations.length > 0 && !destination.path.trim()}
+				<div class="detected-destinations">
+					<strong>{t('detectedDestinations')}</strong>
+					{#each detectedDestinations as probe (probe.mount_point + probe.source)}
+						<button
+							class="detected-destination"
+							type="button"
+							onclick={() => useDetectedDestination(probe)}
+						>
+							<span>
+								<strong>{probe.mount_point}</strong>
+								<small>{probe.kind.toUpperCase()} · {probe.source}</small>
+							</span>
+							<span class="badge good">{t('useDestination')}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
 
 			<label class="field">
 				<span>{t('targetPath')}</span>
@@ -445,6 +501,9 @@ lines from start (total: 431 lines, 0 remaining)]
 			<p class="error-text">{t('sourceDiscoveryFailed')}: {discoveryError}</p>
 		{/if}
 		<div class="source-editor-list">
+			{#if sourceChoices.length === 0}
+				<p class="empty-state">{t('noBtrfsSources')}</p>
+			{/if}
 			{#each sourceChoices as sourceChoice (sourceChoice.mount_point)}
 				{@const path = sourceChoice.mount_point}
 				<div class="source-editor-row">
@@ -466,6 +525,18 @@ lines from start (total: 431 lines, 0 remaining)]
 						{#if sourceChoice.snapper_config}
 							<span class="badge good">
 								{t('snapperManaged')}: {sourceChoice.snapper_config}
+							</span>
+						{/if}
+						{#if (sourceChoice.snapshot_count ?? 0) > 0}
+							<span class="badge">
+								{sourceChoice.snapshot_count}
+								{t('snapshotCount').toLowerCase()}
+							</span>
+						{/if}
+						{#if (sourceChoice.sendable_snapshot_count ?? 0) > 0}
+							<span class="badge good">
+								{sourceChoice.sendable_snapshot_count}
+								{t('sendable')}
 							</span>
 						{/if}
 					</label>

@@ -117,7 +117,8 @@ jobs:
       - name: Assemble universal Linux installer
         run: |
           set -eux
-          version="0.1.0"
+          version="$(python3 -c 'import json; print(json.load(open("harbor/desktop/src-tauri/tauri.conf.json"))["version"])')"
+          test -n "$version"
           appimage="$(find harbor/target/release/bundle/appimage -name '*.AppImage' -print -quit)"
           deb="$(find harbor/target/release/bundle/deb -name '*.deb' -print -quit)"
           rpm_pkg="$(find harbor/target/release/bundle/rpm -name '*.rpm' -print -quit)"
@@ -130,7 +131,7 @@ jobs:
           rm -rf "$out" "$payload"
           mkdir -p "$out" "$payload/icons"
 
-          cp "$appimage" "$out/BTRFS-Harbor-${version}-linux-x86_64.AppImage"
+          cp "$appimage" "$out/BTRFS-Harbor-${version}-linux-x86_64.Portable.AppImage"
           cp "$deb" "$out/BTRFS-Harbor-${version}-linux-x86_64.deb"
           cp "$rpm_pkg" "$out/BTRFS-Harbor-${version}-linux-x86_64.rpm"
 
@@ -185,7 +186,7 @@ jobs:
           mkdir -p /tmp/appimage-extract
           (
             cd /tmp/appimage-extract
-            "$GITHUB_WORKSPACE/release-assets/BTRFS-Harbor-0.1.0-linux-x86_64.AppImage" \
+            "$(find "$GITHUB_WORKSPACE/release-assets" -name '*.AppImage' -print -quit)" \
               --appimage-extract >/dev/null
           )
           test -x /tmp/appimage-extract/squashfs-root/AppRun
@@ -215,7 +216,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "$TAG" \
-            release-assets/BTRFS-Harbor-*-linux-x86_64.AppImage \
+            release-assets/BTRFS-Harbor-*-linux-x86_64.Portable.AppImage \
             release-assets/BTRFS-Harbor-*-linux-x86_64.deb \
             release-assets/BTRFS-Harbor-*-linux-x86_64.rpm \
             release-assets/BTRFS-Harbor-*-linux-x86_64.run \

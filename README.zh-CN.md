@@ -51,9 +51,9 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 对于大多数 x86_64 Linux，推荐使用**通用安装程序**。它会一起安装桌面应用、Rust helper、继承的备份引擎、systemd 服务、D-Bus 策略以及 polkit 集成：
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.0/BTRFS-Harbor-0.1.0-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.0-linux-x86_64.run
-./BTRFS-Harbor-0.1.0-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.1/BTRFS-Harbor-0.1.1-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.1.1-linux-x86_64.run
+./BTRFS-Harbor-0.1.1-linux-x86_64.run
 ```
 
 通用安装程序支持 **x86_64、glibc + systemd Linux**，并可通过 pacman、apt、dnf 或 zypper 安装所需系统工具。目前不支持 Alpine/musl 或非 systemd 系统。
@@ -62,7 +62,7 @@ Release 还提供：
 
 - **DEB** — Debian / Ubuntu 及其衍生发行版。
 - **RPM** — Fedora / RHEL 系及兼容 openSUSE 的软件包流程。
-- **AppImage** — 可移植桌面二进制文件。若要使用 Harbor 的完整功能，建议使用通用安装程序或原生软件包，因为 Harbor 还需要特权 agent/helper 与系统集成。
+- **便携 AppImage** — 可直接运行，但**不会安装 Harbor**。它可用于检查电脑并准备备份；启用计划备份时，Harbor 可以自动安装完整系统软件包，也可以直接使用 `.run`、`.deb` 或 `.rpm`。
 - **SHA256SUMS** — 所有 Linux release 文件的校验值。
 
 ## 🚀 在 CachyOS / Arch Linux 上从源码构建

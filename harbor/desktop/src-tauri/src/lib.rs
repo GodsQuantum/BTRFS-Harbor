@@ -1,7 +1,8 @@
 use harbor_storage::MountTable;
 use serde::Serialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tauri::ipc::Channel;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -41,6 +42,148 @@ async fn system_summary() -> Result<String, String> {
     call_agent("SystemSummary", &()).await
 }
 
+#[derive(Debug, Serialize)]
+struct InstallationState {
+    portable_appimage: bool,
+    helper_installed: bool,
+    service_unit_installed: bool,
+    service_available: bool,
+}
+
+#[tauri::command]
+async fn installation_state() -> Result<String, String> {
+    let state = InstallationState {
+        portable_appimage: std::env::var_os("APPIMAGE").is_some(),
+        helper_installed: Path::new("/usr/bin/btrfs-harborctl").is_file(),
+        service_unit_installed: Path::new("/usr/lib/systemd/system/btrfs-harbor-agent.service")
+            .is_file()
+            || Path::new("/lib/systemd/system/btrfs-harbor-agent.service").is_file(),
+        service_available: agent_version().await.is_ok(),
+    };
+
+    serde_json::to_string(&state).map_err(|err| format!("Cannot encode installation state: {err}"))
+}
+
+async fn download_file(url: &str, destination: &Path) -> Result<(), String> {
+    let curl = Command::new("curl")
+        .args(["-fL", "--retry", "2", "--connect-timeout", "15", "-o"])
+        .arg(destination)
+        .arg(url)
+        .output()
+        .await;
+
+    if let Ok(output) = curl {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
+
+    let wget = Command::new("wget")
+        .arg("-q")
+        .arg("-O")
+        .arg(destination)
+        .arg(url)
+        .output()
+        .await;
+
+    match wget {
+        Ok(output) if output.status.success() => Ok(()),
+        _ => Err(
+            "Harbor could not download the full installer. Install curl or wget, or download the .run package from the GitHub release."
+                .into(),
+        ),
+    }
+}
+
+#[tauri::command]
+async fn install_full_package() -> Result<String, String> {
+    if std::env::consts::ARCH != "x86_64" {
+        return Err("The automatic installer currently supports x86_64 Linux only.".into());
+    }
+
+    if Path::new("/usr/bin/btrfs-harborctl").is_file() {
+        return Ok("already-installed".into());
+    }
+
+    let version = env!("CARGO_PKG_VERSION");
+    let file_name = format!("BTRFS-Harbor-{version}-linux-x86_64.run");
+    let base = format!("https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v{version}");
+    let temp_dir =
+        std::env::temp_dir().join(format!("btrfs-harbor-install-{}", std::process::id()));
+    tokio::fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|err| format!("Cannot create temporary installer directory: {err}"))?;
+
+    let installer = temp_dir.join(&file_name);
+    let checksums = temp_dir.join("SHA256SUMS");
+
+    let result = async {
+        download_file(&format!("{base}/{file_name}"), &installer).await?;
+        download_file(&format!("{base}/SHA256SUMS"), &checksums).await?;
+
+        let expected = tokio::fs::read_to_string(&checksums)
+            .await
+            .map_err(|err| format!("Cannot read Harbor release checksums: {err}"))?
+            .lines()
+            .find_map(|line| {
+                let mut parts = line.split_whitespace();
+                let hash = parts.next()?;
+                let name = parts.next()?.trim_start_matches('*');
+                (name == file_name).then(|| hash.to_ascii_lowercase())
+            })
+            .ok_or_else(|| {
+                "The Harbor release checksum file does not list the installer.".to_string()
+            })?;
+
+        let digest = Command::new("sha256sum")
+            .arg(&installer)
+            .output()
+            .await
+            .map_err(|err| format!("Cannot verify the downloaded Harbor installer: {err}"))?;
+        if !digest.status.success() {
+            return Err("Harbor could not verify the downloaded installer.".into());
+        }
+        let actual = String::from_utf8_lossy(&digest.stdout)
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if actual != expected {
+            return Err("The downloaded Harbor installer failed SHA-256 verification.".into());
+        }
+
+        let mut permissions = tokio::fs::metadata(&installer)
+            .await
+            .map_err(|err| format!("Cannot inspect downloaded installer: {err}"))?
+            .permissions();
+        permissions.set_mode(0o755);
+        tokio::fs::set_permissions(&installer, permissions)
+            .await
+            .map_err(|err| format!("Cannot make downloaded installer executable: {err}"))?;
+
+        let output = Command::new("/usr/bin/pkexec")
+            .arg(&installer)
+            .output()
+            .await
+            .map_err(|err| format!("Cannot start the Harbor installer: {err}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            return Err(if stderr.is_empty() {
+                "Harbor installation was cancelled or failed.".into()
+            } else {
+                stderr
+            });
+        }
+
+        Ok("installed".to_string())
+    }
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    result
+}
+
 #[tauri::command]
 async fn profiles() -> Result<String, String> {
     call_agent("Profiles", &()).await
@@ -52,11 +195,82 @@ async fn configuration() -> Result<String, String> {
 }
 
 #[derive(Debug, Serialize)]
+struct SystemIdentity {
+    hostname: String,
+    pretty_name: String,
+    architecture: String,
+    root_fs: String,
+}
+
+#[derive(Debug, Serialize)]
 struct MountProbe {
     mount_point: String,
     source: String,
     fs_type: String,
     kind: &'static str,
+}
+
+fn parse_os_pretty_name(raw: &str) -> String {
+    raw.lines()
+        .find_map(|line| line.strip_prefix("PRETTY_NAME="))
+        .map(|value| value.trim_matches('"').to_string())
+        .unwrap_or_else(|| "Linux".to_string())
+}
+
+#[tauri::command]
+async fn system_identity() -> Result<String, String> {
+    let hostname = tokio::fs::read_to_string("/etc/hostname")
+        .await
+        .unwrap_or_else(|_| "Linux computer".into())
+        .trim()
+        .to_string();
+    let os_release = tokio::fs::read_to_string("/etc/os-release")
+        .await
+        .unwrap_or_default();
+    let mountinfo = tokio::fs::read_to_string("/proc/self/mountinfo")
+        .await
+        .map_err(|err| format!("Cannot read mount table: {err}"))?;
+    let table = MountTable::from_mountinfo(&mountinfo);
+    let root_fs = table
+        .find_for_path(Path::new("/"))
+        .map(|entry| entry.fs_type.clone())
+        .unwrap_or_else(|| "unknown".into());
+
+    serde_json::to_string(&SystemIdentity {
+        hostname,
+        pretty_name: parse_os_pretty_name(&os_release),
+        architecture: std::env::consts::ARCH.to_string(),
+        root_fs,
+    })
+    .map_err(|err| format!("Cannot encode system identity: {err}"))
+}
+
+#[tauri::command]
+async fn discover_destination_mounts() -> Result<String, String> {
+    let mountinfo = tokio::fs::read_to_string("/proc/self/mountinfo")
+        .await
+        .map_err(|err| format!("Cannot read mount table: {err}"))?;
+    let table = MountTable::from_mountinfo(&mountinfo);
+    let probes = table
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let kind = match entry.fs_type.as_str() {
+                "nfs" | "nfs4" => "nfs",
+                "cifs" => "smb",
+                _ => return None,
+            };
+            Some(MountProbe {
+                mount_point: entry.mount_point.to_string_lossy().into_owned(),
+                source: entry.source.clone(),
+                fs_type: entry.fs_type.clone(),
+                kind,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::to_string(&probes)
+        .map_err(|err| format!("Cannot encode detected backup destinations: {err}"))
 }
 
 #[tauri::command]
@@ -96,7 +310,10 @@ async fn profile_runtime(profile_id: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn discover_sources() -> Result<String, String> {
-    call_agent("DiscoverSources", &()).await
+    let sources = harbor_agent::discovery::discover_sources()
+        .await
+        .map_err(|err| format!("Cannot inspect this computer's Btrfs layout: {err}"))?;
+    serde_json::to_string(&sources).map_err(|err| format!("Cannot encode Btrfs discovery: {err}"))
 }
 
 #[tauri::command]
@@ -461,6 +678,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             agent_version,
             system_summary,
+            installation_state,
+            system_identity,
+            discover_destination_mounts,
+            install_full_package,
             profiles,
             configuration,
             profile_runtime,

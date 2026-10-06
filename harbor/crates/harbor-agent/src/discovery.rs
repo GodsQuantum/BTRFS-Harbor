@@ -20,6 +20,9 @@ pub struct DiscoveredSource {
     pub source: String,
     pub subvolume: Option<String>,
     pub snapper_config: Option<String>,
+    pub snapshot_count: usize,
+    pub sendable_snapshot_count: usize,
+    pub latest_snapshot_number: Option<u64>,
     pub hint: SourceHint,
 }
 
@@ -98,6 +101,9 @@ fn collect_findmnt(node: FindmntNode, out: &mut Vec<DiscoveredSource>) {
             mount_point: target,
             source,
             snapper_config: None,
+            snapshot_count: 0,
+            sendable_snapshot_count: 0,
+            latest_snapshot_number: None,
         });
     }
 
@@ -166,6 +172,101 @@ pub fn attach_snapper_configs(sources: &mut [DiscoveredSource], configs: &HashMa
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SnapperSnapshotStats {
+    pub snapshot_count: usize,
+    pub sendable_snapshot_count: usize,
+    pub latest_snapshot_number: Option<u64>,
+}
+
+fn value_as_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
+}
+
+fn value_as_read_only(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "yes" | "true" | "1"
+            )
+        }
+        Some(Value::Number(value)) => value.as_u64() == Some(1),
+        _ => false,
+    }
+}
+
+fn collect_snapshot_stats(value: &Value, stats: &mut SnapperSnapshotStats) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_snapshot_stats(item, stats);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(number) = map.get("number").and_then(value_as_u64)
+                && number > 0
+            {
+                stats.snapshot_count += 1;
+                if value_as_read_only(map.get("read-only").or_else(|| map.get("read_only"))) {
+                    stats.sendable_snapshot_count += 1;
+                }
+                stats.latest_snapshot_number = Some(
+                    stats
+                        .latest_snapshot_number
+                        .map_or(number, |latest| latest.max(number)),
+                );
+                return;
+            }
+            for child in map.values() {
+                collect_snapshot_stats(child, stats);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn parse_snapper_snapshot_stats(raw: &str) -> Result<SnapperSnapshotStats> {
+    let value: Value = serde_json::from_str(raw).context("invalid snapper snapshot JSON output")?;
+    let mut stats = SnapperSnapshotStats::default();
+    collect_snapshot_stats(&value, &mut stats);
+    Ok(stats)
+}
+
+async fn attach_snapper_snapshot_stats(sources: &mut [DiscoveredSource]) {
+    for source in sources {
+        let Some(config) = source.snapper_config.as_deref() else {
+            continue;
+        };
+
+        let output = Command::new(snapper_executable())
+            .args([
+                "--jsonout",
+                "--config",
+                config,
+                "list",
+                "--disable-used-space",
+                "--columns",
+                "number,read-only",
+            ])
+            .output()
+            .await;
+
+        if let Ok(output) = output
+            && output.status.success()
+            && let Ok(stats) =
+                parse_snapper_snapshot_stats(&String::from_utf8_lossy(&output.stdout))
+        {
+            source.snapshot_count = stats.snapshot_count;
+            source.sendable_snapshot_count = stats.sendable_snapshot_count;
+            source.latest_snapshot_number = stats.latest_snapshot_number;
+        }
+    }
+}
+
 pub async fn discover_sources() -> Result<Vec<DiscoveredSource>> {
     let output = Command::new(findmnt_executable())
         .args([
@@ -180,6 +281,9 @@ pub async fn discover_sources() -> Result<Vec<DiscoveredSource>> {
         .context("cannot execute findmnt for Btrfs discovery")?;
 
     if !output.status.success() {
+        if output.stdout.is_empty() {
+            return Ok(Vec::new());
+        }
         bail!(
             "findmnt Btrfs discovery failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
@@ -198,6 +302,7 @@ pub async fn discover_sources() -> Result<Vec<DiscoveredSource>> {
         && let Ok(configs) = parse_snapper_configs(&String::from_utf8_lossy(&output.stdout))
     {
         attach_snapper_configs(&mut sources, &configs);
+        attach_snapper_snapshot_stats(&mut sources).await;
     }
 
     sources.sort_by_key(|source| {
@@ -293,6 +398,9 @@ mod tests {
             source: "/dev/mapper/root[/@]".into(),
             subvolume: Some("@".into()),
             snapper_config: None,
+            snapshot_count: 0,
+            sendable_snapshot_count: 0,
+            latest_snapshot_number: None,
             hint: SourceHint::Recommended,
         }];
         let configs = HashMap::from([("/".into(), "root".into())]);
@@ -300,5 +408,22 @@ mod tests {
         attach_snapper_configs(&mut sources, &configs);
 
         assert_eq!(sources[0].snapper_config.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn parses_snapper_snapshot_counts_and_sendable_read_only_snapshots() {
+        let stats = parse_snapper_snapshot_stats(
+            r#"[
+                {"number":0,"read-only":false},
+                {"number":41,"read-only":true},
+                {"number":"42","read-only":"yes"},
+                {"number":43,"read-only":false}
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(stats.snapshot_count, 3);
+        assert_eq!(stats.sendable_snapshot_count, 2);
+        assert_eq!(stats.latest_snapshot_number, Some(43));
     }
 }

@@ -17,18 +17,32 @@ describe('Harbor profile editor model', () => {
 		const profile = resolveProfile(config);
 		const destination = resolveDestination(config, profile);
 
-		expect(profile.sources.map((source) => source.path)).toEqual(['/', '/home', '/root', '/srv']);
-		expect(profile.sources[0].snapper_config).toBe('root');
+		expect(profile.sources).toEqual([]);
 		expect(profile.retention).toEqual({ hourly: 0, daily: 7, weekly: 4, monthly: 3, yearly: 0 });
-		expect(destination.kind).toBe('nfs');
+		expect(destination.kind).toBe('raw');
 		expect(destination.path).toBe('');
-		expect(destination.mount_point).toBe('');
-		expect(destination.expected_mount_source).toBe('');
+		expect(destination.mount_point).toBeNull();
+		expect(destination.expected_mount_source).toBeNull();
 	});
 
-	it('reports required NFS fields before allowing apply', () => {
+	it('starts incomplete until live discovery and destination selection are provided', () => {
 		const config = createDefaultConfiguration(uuidFactory);
 		const profile = resolveProfile(config);
+
+		expect(draftIssues(config, profile)).toEqual(['sources', 'destination_path']);
+	});
+
+	it('reports required NFS identity fields after a real source is selected', () => {
+		const config = createDefaultConfiguration(uuidFactory);
+		const profile = resolveProfile(config);
+		const destination = resolveDestination(config, profile);
+		profile.sources.push({
+			path: '/',
+			snapshot_prefix: 'root-',
+			snapper_config: 'root',
+			target_subdir: 'rootfs'
+		});
+		destination.kind = 'nfs';
 
 		expect(draftIssues(config, profile)).toEqual([
 			'destination_path',

@@ -11,6 +11,7 @@
 	import Clock3 from 'lucide-svelte/icons/clock-3';
 	import Copy from 'lucide-svelte/icons/copy';
 	import DatabaseBackup from 'lucide-svelte/icons/database-backup';
+	import Download from 'lucide-svelte/icons/download';
 	import Gauge from 'lucide-svelte/icons/gauge';
 	import HardDrive from 'lucide-svelte/icons/hard-drive';
 	import History from 'lucide-svelte/icons/history';
@@ -31,7 +32,16 @@
 	import TerminalSquare from 'lucide-svelte/icons/terminal-square';
 	import Wifi from 'lucide-svelte/icons/wifi';
 	import WifiOff from 'lucide-svelte/icons/wifi-off';
-	import { loadDashboardStatus, loadHarborConfiguration, sendProfileNow } from '#lib/agent.ts';
+	import {
+		installFullHarbor,
+		loadDashboardStatus,
+		loadHarborConfiguration,
+		loadInstallationState,
+		loadSystemIdentity,
+		sendProfileNow,
+		type InstallationState,
+		type SystemIdentity
+	} from '#lib/agent.ts';
 	import { type HarborConfig } from '#lib/config.ts';
 	import {
 		dictionaries,
@@ -70,6 +80,11 @@
 	let dashboard: DashboardStatus = demoStatus;
 	let harborConfig: HarborConfig | null = null;
 	let configWarning = '';
+	let installationState: InstallationState | null = null;
+	let systemIdentity: SystemIdentity | null = null;
+	let installingFull = false;
+	let setupMessage = '';
+	let setupError = '';
 	$: protection = protectionState(dashboard.engine);
 
 	const t = (key: TranslationKey) => translate(locale, key);
@@ -82,7 +97,14 @@
 			? savedTheme === 'dark'
 			: window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-		dashboard = await loadDashboardStatus();
+		const [dashboardResult, installState, identity] = await Promise.all([
+			loadDashboardStatus(),
+			loadInstallationState().catch(() => null),
+			loadSystemIdentity().catch(() => null)
+		]);
+		dashboard = dashboardResult;
+		installationState = installState;
+		systemIdentity = identity;
 		try {
 			harborConfig = await loadHarborConfiguration();
 		} catch (error) {
@@ -99,6 +121,22 @@
 	function toggleTheme() {
 		dark = !dark;
 		localStorage.setItem('btrfs-harbor-theme', dark ? 'dark' : 'light');
+	}
+
+	async function installFullPackage() {
+		installingFull = true;
+		setupMessage = '';
+		setupError = '';
+		try {
+			await installFullHarbor();
+			installationState = await loadInstallationState();
+			dashboard = await loadDashboardStatus();
+			setupMessage = t('installationComplete');
+		} catch (error) {
+			setupError = error instanceof Error ? error.message : String(error);
+		} finally {
+			installingFull = false;
+		}
 	}
 
 	function progressLabel(phase: string): string {
@@ -191,21 +229,25 @@
 			<button class:active={active === 'protection'} onclick={() => (active = 'protection')}>
 				<ShieldCheck size={18} strokeWidth={1.8} /><span>{t('protection')}</span>
 			</button>
-			<button class:active={active === 'timeline'} onclick={() => (active = 'timeline')}>
-				<History size={18} strokeWidth={1.8} /><span>{t('timeline')}</span>
-			</button>
-			<button class:active={active === 'recover'} onclick={() => (active = 'recover')}>
-				<LifeBuoy size={18} strokeWidth={1.8} /><span>{t('recover')}</span>
-			</button>
-			<button class:active={active === 'replicate'} onclick={() => (active = 'replicate')}>
-				<Copy size={18} strokeWidth={1.8} /><span>{t('replicate')}</span>
-			</button>
-			<button class:active={active === 'destinations'} onclick={() => (active = 'destinations')}>
-				<HardDrive size={18} strokeWidth={1.8} /><span>{t('destinations')}</span>
-			</button>
-			<button class:active={active === 'activity'} onclick={() => (active = 'activity')}>
-				<Activity size={18} strokeWidth={1.8} /><span>{t('activity')}</span>
-			</button>
+			{#if dashboard.source === 'live' || dashboard.source === 'demo'}
+				<button class:active={active === 'timeline'} onclick={() => (active = 'timeline')}>
+					<History size={18} strokeWidth={1.8} /><span>{t('timeline')}</span>
+				</button>
+				<button class:active={active === 'recover'} onclick={() => (active = 'recover')}>
+					<LifeBuoy size={18} strokeWidth={1.8} /><span>{t('recover')}</span>
+				</button>
+				<button class:active={active === 'destinations'} onclick={() => (active = 'destinations')}>
+					<HardDrive size={18} strokeWidth={1.8} /><span>{t('destinations')}</span>
+				</button>
+				{#if advanced}
+					<button class:active={active === 'replicate'} onclick={() => (active = 'replicate')}>
+						<Copy size={18} strokeWidth={1.8} /><span>{t('replicate')}</span>
+					</button>
+					<button class:active={active === 'activity'} onclick={() => (active = 'activity')}>
+						<Activity size={18} strokeWidth={1.8} /><span>{t('activity')}</span>
+					</button>
+				{/if}
+			{/if}
 			<button class:active={active === 'settings'} onclick={() => (active = 'settings')}>
 				<Settings size={18} strokeWidth={1.8} /><span>{t('settings')}</span>
 			</button>
@@ -215,21 +257,31 @@
 			<div class="agent-state">
 				<span
 					class:live={dashboard.source === 'live'}
-					class:demo={dashboard.source === 'demo'}
+					class:demo={dashboard.source === 'demo' || dashboard.source === 'setup'}
 					class:offline={dashboard.source === 'offline'}
 				></span>
 				<div>
 					<strong>
 						{dashboard.source === 'live'
-							? t('liveAgent')
+							? t('protectionActive')
 							: dashboard.source === 'demo'
 								? t('demoData')
-								: t('agentUnavailable')}
+								: dashboard.source === 'setup'
+									? installationState?.portable_appimage
+										? t('portableMode')
+										: t('setupRequired')
+									: t('systemProblem')}
 					</strong>
-					<small>{t('systemdManaged')}</small>
+					<small>
+						{dashboard.source === 'live'
+							? t('backgroundProtection')
+							: dashboard.source === 'setup'
+								? t('setupThisComputer')
+								: t('systemStatus')}
+					</small>
 				</div>
 			</div>
-			<p>{t('closeSafe')}</p>
+			{#if dashboard.source === 'live'}<p>{t('closeSafe')}</p>{/if}
 		</div>
 	</aside>
 
@@ -275,13 +327,75 @@
 			<div class="demo-banner danger">
 				<CircleAlert size={16} />
 				<div>
-					<strong>{t('agentUnavailable')}</strong>
+					<strong>{t('systemProblem')}</strong>
 					<span>{dashboard.warning ?? t('noLiveProfile')}</span>
 				</div>
 			</div>
 		{/if}
 
-		{#if active === 'overview'}
+		{#if active === 'overview' && dashboard.source === 'setup'}
+			<section class="content-stack setup-stack">
+				<div class="page-intro">
+					<div class="intro-icon"><Laptop size={24} /></div>
+					<div>
+						<h2>{t('setupTitle')}</h2>
+						<p>{t('setupIntro')}</p>
+						{#if systemIdentity}
+							<div class="system-facts">
+								<span><strong>{systemIdentity.hostname}</strong></span>
+								<span>{systemIdentity.pretty_name}</span>
+								<span>{systemIdentity.architecture}</span>
+								<span class:good={systemIdentity.root_fs === 'btrfs'}>{systemIdentity.root_fs}</span
+								>
+							</div>
+						{/if}
+					</div>
+				</div>
+				{#if installationState?.portable_appimage && !installationState.helper_installed}
+					<article class="callout install-callout">
+						<CircleAlert size={20} />
+						<div>
+							<strong>{t('portableMode')}</strong>
+							<p>{t('portableModeDesc')}</p>
+							<button
+								class="primary compact"
+								onclick={installFullPackage}
+								disabled={installingFull}
+							>
+								{#if installingFull}
+									<RotateCcw class="spin" size={15} /> {t('installingHarbor')}
+								{:else}
+									<Download size={15} /> {t('installHarbor')}
+								{/if}
+							</button>
+							{#if setupMessage}<small class="good-status">{setupMessage}</small>{/if}
+							{#if setupError}<small class="error-text">{setupError}</small>{/if}
+						</div>
+					</article>
+				{/if}
+				{#if harborConfig}
+					<ProtectionEditor
+						bind:config={harborConfig}
+						{advanced}
+						{locale}
+						runtime={null}
+						onApplied={async () => {
+							dashboard = await loadDashboardStatus();
+							installationState = await loadInstallationState().catch(() => installationState);
+							harborConfig = await loadHarborConfiguration();
+						}}
+					/>
+				{:else}
+					<article class="callout danger">
+						<CircleAlert size={21} />
+						<div>
+							<strong>{t('systemProblem')}</strong>
+							<p>{configWarning || t('setupIntro')}</p>
+						</div>
+					</article>
+				{/if}
+			</section>
+		{:else if active === 'overview'}
 			<section class="overview-grid">
 				<article class="protection-hero {protection}">
 					<div class="hero-copy">
@@ -378,7 +492,7 @@
 					<div class="panel-head">
 						<div>
 							<p class="eyebrow">{t('volumesProtected')}</p>
-							<h3>4 / 4</h3>
+							<h3>{dashboard.engine.volumes.length}</h3>
 						</div>
 						<div class="chain-pill">
 							<Layers3 size={15} />
@@ -418,29 +532,35 @@
 						</button>
 					</div>
 					<div class="activity-list">
-						<div>
-							<span class="event-dot ok"><Check size={12} /></span>
-							<p>
-								<strong>{t('backupCompleted')}</strong><small
-									>02:13 · {dashboard.transferred} · {dashboard.duration}</small
-								>
-							</p>
-							<span>{t('incremental')}</span>
-						</div>
-						<div>
-							<span class="event-dot ok"><ShieldCheck size={12} /></span>
-							<p>
-								<strong>{t('verificationCompleted')}</strong><small
-									>02:29 · 4 streams · SHA-256</small
-								>
-							</p>
-							<span>{t('verified')}</span>
-						</div>
-						<div>
-							<span class="event-dot neutral"><Clock3 size={12} /></span>
-							<p><strong>{t('scheduleCreated')}</strong><small>Yesterday · systemd timer</small></p>
-							<span>{t('everyDay')}</span>
-						</div>
+						{#if dashboard.source === 'demo'}
+							<div>
+								<span class="event-dot ok"><Check size={12} /></span>
+								<p>
+									<strong>{t('backupCompleted')}</strong><small
+										>02:13 · {dashboard.transferred} · {dashboard.duration}</small
+									>
+								</p>
+								<span>{t('incremental')}</span>
+							</div>
+							<div>
+								<span class="event-dot ok"><ShieldCheck size={12} /></span>
+								<p>
+									<strong>{t('verificationCompleted')}</strong><small
+										>02:29 · 4 streams · SHA-256</small
+									>
+								</p>
+								<span>{t('verified')}</span>
+							</div>
+							<div>
+								<span class="event-dot neutral"><Clock3 size={12} /></span>
+								<p>
+									<strong>{t('scheduleCreated')}</strong><small>Yesterday · systemd timer</small>
+								</p>
+								<span>{t('everyDay')}</span>
+							</div>
+						{:else}
+							<p class="empty-state">{t('noActivityYet')}</p>
+						{/if}
 					</div>
 				</article>
 			</section>
@@ -468,7 +588,7 @@
 					<article class="callout danger">
 						<CircleAlert size={21} />
 						<div>
-							<strong>{t('agentUnavailable')}</strong>
+							<strong>{t('systemProblem')}</strong>
 							<p>{configWarning || t('noLiveProfile')}</p>
 						</div>
 					</article>
@@ -501,26 +621,30 @@
 					</div>
 				</div>
 				<article class="panel timeline">
-					{#each timelineRows as row, index (row.name)}
-						<div class="timeline-row">
-							<div class="timeline-time">{row.time}<span></span></div>
-							<div class="timeline-main">
-								<div><strong>{row.source}</strong><code>{row.name}</code></div>
-								<div class="badges">
-									{#each row.tags as tag (tag)}
-										<span
-											class:good={tag === 'backedUp' ||
-												tag === 'verified' ||
-												tag === 'restoreTested'}>{t(tag)}</span
-										>
-									{/each}
+					{#if dashboard.source === 'demo'}
+						{#each timelineRows as row, index (row.name)}
+							<div class="timeline-row">
+								<div class="timeline-time">{row.time}<span></span></div>
+								<div class="timeline-main">
+									<div><strong>{row.source}</strong><code>{row.name}</code></div>
+									<div class="badges">
+										{#each row.tags as tag (tag)}
+											<span
+												class:good={tag === 'backedUp' ||
+													tag === 'verified' ||
+													tag === 'restoreTested'}>{t(tag)}</span
+											>
+										{/each}
+									</div>
+								</div>
+								<div class="timeline-chain">
+									{index === timelineRows.length - 1 ? t('full') : t('incremental')}
 								</div>
 							</div>
-							<div class="timeline-chain">
-								{index === timelineRows.length - 1 ? t('full') : t('incremental')}
-							</div>
-						</div>
-					{/each}
+						{/each}
+					{:else}
+						<p class="empty-state">{t('noActivityYet')}</p>
+					{/if}
 				</article>
 			</section>
 		{:else if active === 'recover'}
@@ -563,7 +687,7 @@
 					<article class="callout large">
 						<CircleAlert size={22} />
 						<div>
-							<strong>{t('agentUnavailable')}</strong>
+							<strong>{t('systemProblem')}</strong>
 							<p>{configWarning || t('noLiveProfile')}</p>
 						</div>
 					</article>
@@ -615,19 +739,44 @@
 						<h2>{t('destinationTitle')}</h2>
 						<p>{t('anyFilesystem')}</p>
 					</div>
-					<button class="primary compact">+ {t('addDestination')}</button>
+					<button class="primary compact" onclick={() => (active = 'protection')}
+						>+ {t('addDestination')}</button
+					>
 				</div>
-				<article class="panel destination-card">
-					<div class="destination-symbol"><Network size={22} /></div>
-					<div class="destination-copy">
-						<strong>Backup NAS</strong><span>NFS · 192.0.2.10:/backup-systems</span><code
-							>/mnt/backup-nas</code
-						>
-					</div>
-					<div class="destination-meta">
-						<span class="badge good"><Wifi size={12} /> {t('online')}</span><strong>raw://</strong>
-					</div>
-				</article>
+				{#if harborConfig?.destinations.some((destination) => destination.path.trim())}
+					{#each harborConfig.destinations.filter( (destination) => destination.path.trim() ) as destination (destination.id)}
+						<article class="panel destination-card">
+							<div class="destination-symbol">
+								{#if destination.kind === 'nfs' || destination.kind === 'smb'}
+									<Network size={22} />
+								{:else}
+									<HardDrive size={22} />
+								{/if}
+							</div>
+							<div class="destination-copy">
+								<strong>{destination.name}</strong>
+								<span>
+									{destination.kind.toUpperCase()}
+									{#if destination.expected_mount_source}
+										· {destination.expected_mount_source}
+									{/if}
+								</span>
+								<code>{destination.path}</code>
+							</div>
+							<div class="destination-meta">
+								<strong>{destination.compression}</strong>
+							</div>
+						</article>
+					{/each}
+				{:else}
+					<article class="panel empty-panel">
+						<HardDrive size={22} />
+						<p>{t('noDestinations')}</p>
+						<button class="secondary" onclick={() => (active = 'protection')}>
+							{t('configureProtection')}
+						</button>
+					</article>
+				{/if}
 				<div class="transport-grid">
 					{#each [[t('nfs'), 'raw://'], [t('smb'), 'raw://'], [t('localDisk'), 'raw://'], [t('ssh'), 'ssh://']] as transport (transport[0])}
 						<div>
@@ -653,13 +802,17 @@
 					</div>
 				</div>
 				<article class="panel log-panel">
-					{#each [['02:29:18', 'verify', 'completed', '4 streams · SHA-256'], ['02:13:44', 'backup', 'completed', '1.8 GiB · 3m 42s'], ['02:10:02', 'snapshot', 'completed', '@ · @home · @root · @srv'], ['Yesterday', 'schedule', 'created', 'OnCalendar=*-*-* 02:00']] as event (event[0] + event[1])}
-						<div class="log-row">
-							<code>{event[0]}</code><strong>{event[1]}</strong><span class="badge good"
-								>{event[2]}</span
-							><span>{event[3]}</span>
-						</div>
-					{/each}
+					{#if dashboard.source === 'demo'}
+						{#each [['02:29:18', 'verify', 'completed', '4 streams · SHA-256'], ['02:13:44', 'backup', 'completed', '1.8 GiB · 3m 42s'], ['02:10:02', 'snapshot', 'completed', '@ · @home · @root · @srv'], ['Yesterday', 'schedule', 'created', 'OnCalendar=*-*-* 02:00']] as event (event[0] + event[1])}
+							<div class="log-row">
+								<code>{event[0]}</code><strong>{event[1]}</strong><span class="badge good"
+									>{event[2]}</span
+								><span>{event[3]}</span>
+							</div>
+						{/each}
+					{:else}
+						<p class="empty-state">{t('noActivityYet')}</p>
+					{/if}
 				</article>
 			</section>
 		{:else}

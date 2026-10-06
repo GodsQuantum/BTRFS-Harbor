@@ -16,6 +16,35 @@ interface ProfileSummary {
 	verify_after_backup: boolean;
 }
 
+export interface InstallationState {
+	portable_appimage: boolean;
+	helper_installed: boolean;
+	service_unit_installed: boolean;
+	service_available: boolean;
+}
+
+function integrationUnavailable(message: string): boolean {
+	return (
+		message.includes('Btrfs Harbor agent') ||
+		message.includes('system D-Bus') ||
+		message.includes('ServiceUnknown') ||
+		message.includes('NameHasNoOwner')
+	);
+}
+
+export async function loadInstallationState(): Promise<InstallationState> {
+	if (!isTauri()) {
+		return {
+			portable_appimage: false,
+			helper_installed: true,
+			service_unit_installed: true,
+			service_available: true
+		};
+	}
+	const raw = await invoke<string>('installation_state');
+	return JSON.parse(raw) as InstallationState;
+}
+
 export async function loadHarborConfiguration(): Promise<HarborConfig> {
 	if (!isTauri()) {
 		return createDefaultConfiguration();
@@ -29,7 +58,8 @@ export async function loadHarborConfiguration(): Promise<HarborConfig> {
 		if (
 			message.includes('/etc/btrfs-harbor/harbor.toml') ||
 			message.includes('FileNotFound') ||
-			message.includes('No such file')
+			message.includes('No such file') ||
+			integrationUnavailable(message)
 		) {
 			return createDefaultConfiguration();
 		}
@@ -44,6 +74,15 @@ export async function applyHarborConfiguration(
 	if (!isTauri()) {
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		return 'demo';
+	}
+
+	let installation = await loadInstallationState();
+	if (!installation.helper_installed) {
+		await installFullHarbor();
+		installation = await loadInstallationState();
+		if (!installation.helper_installed) {
+			throw new Error('Harbor system installation did not complete.');
+		}
 	}
 
 	return invoke<string>('apply_configuration', {
@@ -63,11 +102,42 @@ export async function chooseDestinationDirectory(defaultPath?: string): Promise<
 	return typeof selected === 'string' ? selected : null;
 }
 
+export interface SystemIdentity {
+	hostname: string;
+	pretty_name: string;
+	architecture: string;
+	root_fs: string;
+}
+
 export interface MountProbe {
 	mount_point: string;
 	source: string;
 	fs_type: string;
 	kind: 'nfs' | 'smb' | 'raw';
+}
+
+export async function loadSystemIdentity(): Promise<SystemIdentity> {
+	if (!isTauri()) {
+		return {
+			hostname: 'workstation',
+			pretty_name: 'Linux',
+			architecture: 'x86_64',
+			root_fs: 'btrfs'
+		};
+	}
+	const raw = await invoke<string>('system_identity');
+	return JSON.parse(raw) as SystemIdentity;
+}
+
+export async function discoverMountedBackupDestinations(): Promise<MountProbe[]> {
+	if (!isTauri()) return [];
+	const raw = await invoke<string>('discover_destination_mounts');
+	return JSON.parse(raw) as MountProbe[];
+}
+
+export async function installFullHarbor(): Promise<string> {
+	if (!isTauri()) return 'demo';
+	return invoke<string>('install_full_package');
 }
 
 export async function inspectDestinationMount(path: string): Promise<MountProbe | null> {
@@ -136,6 +206,8 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 		return demoStatus;
 	}
 
+	const installation = await loadInstallationState().catch(() => null);
+
 	try {
 		const profilesRaw = await invoke<string>('profiles');
 		const profiles = JSON.parse(profilesRaw) as ProfileSummary[];
@@ -172,9 +244,11 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 			message.includes('/etc/btrfs-harbor/harbor.toml') ||
 			message.includes('No Btrfs Harbor profile is configured') ||
 			message.includes('No such file');
+		const setupRequired =
+			unconfigured || integrationUnavailable(message) || installation?.service_available === false;
 
 		return {
-			source: unconfigured ? 'live' : 'offline',
+			source: setupRequired ? 'setup' : 'offline',
 			engine: {
 				schema_version: 1,
 				healthy: false,
@@ -196,7 +270,11 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 			duration: '—',
 			chainHealthy: false,
 			restoreTested: false,
-			warning: unconfigured ? 'No Btrfs Harbor profile is configured.' : message
+			warning: setupRequired
+				? installation?.portable_appimage
+					? 'Portable mode: choose what to protect and a backup destination. Full installation is required only when you activate scheduled backups.'
+					: 'Backup protection has not been configured on this computer yet.'
+				: message
 		};
 	}
 }

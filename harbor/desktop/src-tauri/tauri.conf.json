@@ -1,5 +1,5 @@
 {
-	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+	"$schema": "https://schema.tauri.app/config/2",
 	"productName": "Btrfs Harbor",
 	"version": "0.1.0",
 	"identifier": "io.github.GodsQuantum.BtrfsHarbor",
@@ -29,6 +29,10 @@
 	"bundle": {
 		"active": true,
 		"targets": "all",
+		"publisher": "GodsQuantum",
+		"homepage": "https://github.com/GodsQuantum/BTRFS-Harbor",
+		"license": "MIT",
+		"licenseFile": "../../../LICENSE",
 		"category": "Utility",
 		"shortDescription": "Native Btrfs backup, recovery and system replication control center",
 		"longDescription": "Btrfs Harbor manages Btrfs snapshot replication, verification, disaster recovery and system replicas.",
@@ -38,6 +42,69 @@
 			"icons/128x128@2x.png",
 			"icons/icon.icns",
 			"icons/icon.ico"
-		]
+		],
+		"linux": {
+			"appimage": {
+				"bundleMediaFramework": false
+			},
+			"deb": {
+				"depends": [
+					"btrfs-progs",
+					"dbus",
+					"openssh-client",
+					"policykit-1",
+					"python3 (>= 3.11)",
+					"snapper",
+					"util-linux",
+					"zstd"
+				],
+				"provides": ["btrfs-backup-ng"],
+				"conflicts": ["btrfs-backup-ng"],
+				"files": {
+					"/usr/lib/btrfs-harbor/btrfs-harbor-agent": "../../target/release/harbor-agent",
+					"/usr/bin/btrfs-harborctl": "../../target/release/btrfs-harborctl",
+					"/usr/bin/btrfs-harbor-recovery": "../../target/release/harbor-recovery",
+					"/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz": "../../../packaging/generated/btrfs-backup-ng.pyz",
+					"/usr/bin/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
+					"/usr/lib/systemd/system/btrfs-harbor-agent.service": "../../../packaging/systemd/btrfs-harbor-agent.service",
+					"/usr/share/dbus-1/system.d/io.github.GodsQuantum.BtrfsHarbor1.conf": "../../../packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf",
+					"/usr/share/polkit-1/actions/io.github.GodsQuantum.BtrfsHarbor.policy": "../../../packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy"
+				},
+				"postInstallScript": "../../../packaging/linux/post-install.sh",
+				"preRemoveScript": "../../../packaging/linux/pre-remove.sh",
+				"postRemoveScript": "../../../packaging/linux/post-remove.sh",
+				"section": "utils",
+				"priority": "optional"
+			},
+			"rpm": {
+				"depends": [
+					"btrfs-progs",
+					"dbus",
+					"openssh-clients",
+					"polkit",
+					"python3 >= 3.11",
+					"snapper",
+					"util-linux",
+					"zstd"
+				],
+				"provides": ["btrfs-backup-ng"],
+				"conflicts": ["btrfs-backup-ng"],
+				"files": {
+					"/usr/lib/btrfs-harbor/btrfs-harbor-agent": "../../target/release/harbor-agent",
+					"/usr/bin/btrfs-harborctl": "../../target/release/btrfs-harborctl",
+					"/usr/bin/btrfs-harbor-recovery": "../../target/release/harbor-recovery",
+					"/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz": "../../../packaging/generated/btrfs-backup-ng.pyz",
+					"/usr/bin/btrfs-backup-ng": "../../../packaging/universal/btrfs-backup-ng",
+					"/usr/lib/systemd/system/btrfs-harbor-agent.service": "../../../packaging/systemd/btrfs-harbor-agent.service",
+					"/usr/share/dbus-1/system.d/io.github.GodsQuantum.BtrfsHarbor1.conf": "../../../packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf",
+					"/usr/share/polkit-1/actions/io.github.GodsQuantum.BtrfsHarbor.policy": "../../../packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy"
+				},
+				"postInstallScript": "../../../packaging/linux/post-install.sh",
+				"preRemoveScript": "../../../packaging/linux/pre-remove.sh",
+				"postRemoveScript": "../../../packaging/linux/post-remove.sh",
+				"release": "1",
+				"epoch": 0
+			}
+		}
 	}
 }

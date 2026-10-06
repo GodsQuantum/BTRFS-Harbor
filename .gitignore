@@ -128,3 +128,4 @@ Thumbs.db
 # Project-specific
 *.log
 *.jsonl
+packaging/generated/

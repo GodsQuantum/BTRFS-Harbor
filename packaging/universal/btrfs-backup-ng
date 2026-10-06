@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+ENGINE="/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz"
+
+if [ -x /opt/btrfs-harbor/python/bin/python3 ]; then
+  PYTHON=/opt/btrfs-harbor/python/bin/python3
+elif [ -x /usr/lib/btrfs-harbor/python/bin/python3 ]; then
+  PYTHON=/usr/lib/btrfs-harbor/python/bin/python3
+else
+  PYTHON=$(command -v python3 || true)
+fi
+
+if [ -z "${PYTHON:-}" ]; then
+  echo "Btrfs Harbor requires Python 3.11+ for its inherited backup engine." >&2
+  exit 127
+fi
+if [ ! -r "$ENGINE" ]; then
+  echo "Btrfs Harbor engine is missing: $ENGINE" >&2
+  exit 127
+fi
+
+exec "$PYTHON" "$ENGINE" "$@"

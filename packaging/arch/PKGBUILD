@@ -81,7 +81,7 @@ package() {
 
   python -m installer --destdir="$pkgdir" dist-python/*.whl
 
-  install -Dm755 harbor/target/release/btrfs-harbor-desktop     "$pkgdir/usr/bin/btrfs-harbor"
+  install -Dm755 harbor/target/release/btrfs-harbor     "$pkgdir/usr/bin/btrfs-harbor"
   install -Dm755 harbor/target/release/harbor-agent     "$pkgdir/usr/lib/btrfs-harbor/btrfs-harbor-agent"
   install -Dm755 harbor/target/release/btrfs-harborctl     "$pkgdir/usr/bin/btrfs-harborctl"
   install -Dm755 harbor/target/release/harbor-recovery     "$pkgdir/usr/bin/btrfs-harbor-recovery"

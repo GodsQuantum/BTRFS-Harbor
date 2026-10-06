@@ -1,6 +1,10 @@
 name: Harbor Release Build
 
 on:
+  push:
+    branches:
+      - ui-preview-temp
+  workflow_dispatch:
   release:
     types: [published]
 
@@ -24,35 +28,54 @@ jobs:
 
       - name: Archive Harbor source
         run: |
-          git archive --format=tar.gz --prefix=btrfs-harbor/             -o btrfs-harbor-source.tar.gz HEAD
+          git archive --format=tar.gz --prefix=BTRFS-Harbor/ \
+            -o BTRFS-Harbor-source.tar.gz HEAD
 
       - uses: actions/upload-artifact@v7
         with:
           name: btrfs-harbor-source-and-engine
           path: |
-            btrfs-harbor-source.tar.gz
+            BTRFS-Harbor-source.tar.gz
             dist-python/*.whl
 
-  linux-release:
-    runs-on: ubuntu-24.04
+  linux-packages:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Tauri Linux prerequisites
+      - name: Install Tauri Linux packaging prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             libwebkit2gtk-4.1-dev             build-essential             curl             wget             file             libxdo-dev             libssl-dev             libayatana-appindicator3-dev             librsvg2-dev
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            rpm \
+            wget
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@12.9.1 --activate
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "12.9.1"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
 
       - name: Build and validate desktop frontend
         working-directory: harbor/desktop
@@ -60,24 +83,128 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           pnpm check
+          pnpm lint
           pnpm build
 
-      - name: Build Linux release binaries
+      - name: Build portable inherited engine
+        run: |
+          chmod +x packaging/build-engine-pyz.sh packaging/universal/btrfs-backup-ng
+          ./packaging/build-engine-pyz.sh
+          python3 packaging/generated/btrfs-backup-ng.pyz --help >/dev/null
+
+      - name: Build Rust system helpers
         working-directory: harbor
         run: |
-          cargo build --release --locked             -p btrfs-harbor-desktop             -p harbor-agent             -p harborctl             -p harbor-recovery
+          cargo build --release --locked \
+            -p harbor-agent \
+            -p harborctl \
+            -p harbor-recovery
+
+      - name: Build AppImage, DEB and RPM
+        working-directory: harbor/desktop
+        run: pnpm tauri build --bundles appimage,deb,rpm
+
+      - name: Stage portable Python runtime
+        run: |
+          export UV_PYTHON_INSTALL_DIR="$PWD/packaging/generated/uv-python"
+          uv python install 3.12
+          python_bin="$(find "$UV_PYTHON_INSTALL_DIR" -path '*/bin/python3.12' -print -quit)"
+          test -n "$python_bin"
+          python_root="$(dirname "$(dirname "$python_bin")")"
+          rm -rf packaging/generated/python-runtime
+          cp -a "$python_root" packaging/generated/python-runtime
+          test -x packaging/generated/python-runtime/bin/python3
+          packaging/generated/python-runtime/bin/python3 \
+            packaging/generated/btrfs-backup-ng.pyz --help >/dev/null
+
+      - name: Assemble universal Linux installer
+        run: |
+          set -eux
+          version="0.1.0"
+          appimage="$(find harbor/target/release/bundle/appimage -name '*.AppImage' -print -quit)"
+          deb="$(find harbor/target/release/bundle/deb -name '*.deb' -print -quit)"
+          rpm_pkg="$(find harbor/target/release/bundle/rpm -name '*.rpm' -print -quit)"
+          test -f "$appimage"
+          test -f "$deb"
+          test -f "$rpm_pkg"
+
+          out="$PWD/release-assets"
+          payload="$PWD/packaging/generated/universal-payload"
+          rm -rf "$out" "$payload"
+          mkdir -p "$out" "$payload/icons"
+
+          cp "$appimage" "$out/BTRFS-Harbor-${version}-linux-x86_64.AppImage"
+          cp "$deb" "$out/BTRFS-Harbor-${version}-linux-x86_64.deb"
+          cp "$rpm_pkg" "$out/BTRFS-Harbor-${version}-linux-x86_64.rpm"
+
+          cp "$appimage" "$payload/BTRFS-Harbor.AppImage"
+          cp harbor/target/release/harbor-agent "$payload/btrfs-harbor-agent"
+          cp harbor/target/release/btrfs-harborctl "$payload/btrfs-harborctl"
+          cp harbor/target/release/harbor-recovery "$payload/btrfs-harbor-recovery"
+          cp packaging/generated/btrfs-backup-ng.pyz "$payload/btrfs-backup-ng.pyz"
+          cp packaging/universal/btrfs-backup-ng "$payload/btrfs-backup-ng"
+          cp packaging/systemd/btrfs-harbor-agent.service "$payload/"
+          cp packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf "$payload/"
+          cp packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy "$payload/"
+          cp packaging/desktop/btrfs-harbor.desktop "$payload/"
+          cp harbor/desktop/src-tauri/icons/32x32.png "$payload/icons/32x32.png"
+          cp harbor/desktop/src-tauri/icons/64x64.png "$payload/icons/64x64.png"
+          cp harbor/desktop/src-tauri/icons/128x128.png "$payload/icons/128x128.png"
+          cp harbor/desktop/src-tauri/icons/128x128@2x.png "$payload/icons/256x256.png"
+          cp packaging/universal/install-payload.sh "$payload/install.sh"
+          cp -a packaging/generated/python-runtime "$payload/python"
+
+          chmod 0755 \
+            "$payload/BTRFS-Harbor.AppImage" \
+            "$payload/btrfs-harbor-agent" \
+            "$payload/btrfs-harborctl" \
+            "$payload/btrfs-harbor-recovery" \
+            "$payload/btrfs-backup-ng.pyz" \
+            "$payload/btrfs-backup-ng" \
+            "$payload/install.sh"
+
+          chmod +x packaging/universal/make-run.sh
+          packaging/universal/make-run.sh \
+            "$payload" \
+            "$out/BTRFS-Harbor-${version}-linux-x86_64.run"
+
+          "$out/BTRFS-Harbor-${version}-linux-x86_64.run" --help >/dev/null
+
+      - name: Inspect generated packages
+        run: |
+          set -eux
+          dpkg-deb --info release-assets/*.deb
+          dpkg-deb --contents release-assets/*.deb | tee /tmp/deb-files.txt
+          grep -q 'usr/bin/btrfs-harborctl' /tmp/deb-files.txt
+          grep -q 'usr/lib/btrfs-harbor/btrfs-harbor-agent' /tmp/deb-files.txt
+          grep -q 'usr/lib/btrfs-harbor/btrfs-backup-ng.pyz' /tmp/deb-files.txt
+          grep -q 'btrfs-harbor-agent.service' /tmp/deb-files.txt
+          rpm -qpl release-assets/*.rpm | tee /tmp/rpm-files.txt
+          grep -q '/usr/bin/btrfs-harborctl' /tmp/rpm-files.txt
+          grep -q '/usr/lib/btrfs-harbor/btrfs-harbor-agent' /tmp/rpm-files.txt
+          grep -q '/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz' /tmp/rpm-files.txt
+          grep -q 'btrfs-harbor-agent.service' /tmp/rpm-files.txt
+
+          mkdir -p /tmp/appimage-extract
+          (
+            cd /tmp/appimage-extract
+            "$GITHUB_WORKSPACE/release-assets/BTRFS-Harbor-0.1.0-linux-x86_64.AppImage" \
+              --appimage-extract >/dev/null
+          )
+          test -x /tmp/appimage-extract/squashfs-root/AppRun
+
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS
 
       - uses: actions/upload-artifact@v7
         with:
-          name: btrfs-harbor-linux-x86_64
-          path: |
-            harbor/target/release/btrfs-harbor-desktop
-            harbor/target/release/harbor-agent
-            harbor/target/release/btrfs-harborctl
-            harbor/target/release/harbor-recovery
+          name: btrfs-harbor-linux-packages
+          path: release-assets/*
 
   publish-assets:
-    needs: [source-and-engine, linux-release]
+    if: github.event_name == 'release'
+    needs: [source-and-engine, linux-packages]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v7
@@ -85,16 +212,11 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Generate checksums
-        working-directory: release-assets
-        run: sha256sum * > SHA256SUMS
-
       - name: Attach assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        run: |
-          gh release upload "$TAG" release-assets/* --clobber
+        run: gh release upload "$TAG" release-assets/* --clobber
 
 # Deliberately no PyPI publishing here.
 # This fork preserves btrfs-backup-ng internally but must never publish a

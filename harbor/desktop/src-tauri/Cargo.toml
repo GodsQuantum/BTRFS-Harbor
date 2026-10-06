@@ -8,6 +8,10 @@ repository = "https://github.com/GodsQuantum/btrfs-harbor"
 edition = "2024"
 rust-version = "1.90"
 
+[[bin]]
+name = "btrfs-harbor"
+path = "src/main.rs"
+
 [lib]
 name = "btrfs_harbor_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -16,6 +16,7 @@ harbor-engine = { path = "../harbor-engine" }
 harbor-recovery = { path = "../harbor-recovery" }
 harbor-replica = { path = "../harbor-replica" }
 harbor-storage = { path = "../harbor-storage" }
+serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 uuid.workspace = true

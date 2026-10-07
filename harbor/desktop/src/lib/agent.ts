@@ -321,11 +321,56 @@ export async function sendProfileNow(
 	await invoke<void>('send_snapshot_now_stream', { profileId, onEvent: channel });
 }
 
+export interface RestorePoint {
+	name: string;
+	created: string | null;
+	size: number | null;
+	parent_name: string | null;
+	checksum: string | null;
+	origin: string | null;
+}
+
 export interface StagedRestoreRequest {
 	destination_id: string;
 	source_path: string;
 	staging_root: string;
+	snapshot: string | null;
 	before: string | null;
+}
+
+export async function listRestorePoints(
+	config: HarborConfig,
+	profileId: string,
+	sourcePath: string,
+	destinationId: string
+): Promise<RestorePoint[]> {
+	if (!isTauri()) {
+		return [
+			{
+				name: 'home-20261006T020000',
+				created: '2026-10-06T02:00:00+00:00',
+				size: 1_842_000_000,
+				parent_name: 'home-20261005T020000',
+				checksum: 'demo',
+				origin: 'demo'
+			},
+			{
+				name: 'home-20261005T020000',
+				created: '2026-10-05T02:00:00+00:00',
+				size: 1_790_000_000,
+				parent_name: null,
+				checksum: 'demo',
+				origin: 'demo'
+			}
+		];
+	}
+	const raw = await invoke<string>('list_restore_points', {
+		configuration: JSON.stringify(config),
+		profileId,
+		sourcePath,
+		destinationId
+	});
+	return JSON.parse(raw) as RestorePoint[];
 }
 
 export async function chooseStagingDirectory(defaultPath?: string): Promise<string | null> {
@@ -340,6 +385,7 @@ export async function chooseStagingDirectory(defaultPath?: string): Promise<stri
 }
 
 export async function stageRestoreProfile(
+	config: HarborConfig,
 	profileId: string,
 	request: StagedRestoreRequest,
 	onProgress?: (event: BackupProgressEvent) => void
@@ -361,6 +407,7 @@ export async function stageRestoreProfile(
 	const channel = new Channel<BackupProgressEvent>();
 	channel.onmessage = (event) => onProgress?.(event);
 	await invoke<void>('stage_restore', {
+		configuration: JSON.stringify(config),
 		profileId,
 		request: JSON.stringify(request),
 		onEvent: channel

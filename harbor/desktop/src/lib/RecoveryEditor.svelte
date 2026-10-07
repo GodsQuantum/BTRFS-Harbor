@@ -1,25 +1,34 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import CircleAlert from 'lucide-svelte/icons/circle-alert';
 	import FolderOpen from 'lucide-svelte/icons/folder-open';
 	import HardDrive from 'lucide-svelte/icons/hard-drive';
 	import LifeBuoy from 'lucide-svelte/icons/life-buoy';
 	import Play from 'lucide-svelte/icons/play';
+	import RefreshCw from 'lucide-svelte/icons/refresh-cw';
 	import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
 	import ShieldCheck from 'lucide-svelte/icons/shield-check';
-	import { chooseStagingDirectory, stageRestoreProfile, type StagedRestoreRequest } from './agent';
+	import {
+		chooseStagingDirectory,
+		listRestorePoints,
+		stageRestoreProfile,
+		type RestorePoint,
+		type StagedRestoreRequest
+	} from './agent';
 	import { resolveProfile, type HarborConfig } from './config';
 	import { translate, type Locale, type TranslationKey } from './i18n';
 	import type { BackupProgressEvent } from './status';
 
 	export let config: HarborConfig;
 	export let profileId: string | undefined = undefined;
-	export let advanced = false;
 	export let locale: Locale = 'en';
 
 	let selectedSourcePath = '';
 	let selectedDestinationId = '';
+	let selectedSnapshot = '';
 	let stagingRoot = '/mnt';
-	let before = '';
+	let restorePoints: RestorePoint[] = [];
+	let loadingPoints = false;
 	let restoring = false;
 	let progress: BackupProgressEvent | null = null;
 	let error = '';
@@ -36,8 +45,13 @@
 		selectedDestinationId = destinations[0]?.id ?? '';
 	}
 	$: rootSelected = selectedSourcePath === '/';
+	$: selectedPoint = restorePoints.find((point) => point.name === selectedSnapshot) ?? null;
 
 	const t = (key: TranslationKey) => translate(locale, key);
+
+	onMount(() => {
+		void refreshRestorePoints();
+	});
 
 	function phaseLabel(phase: string): string {
 		switch (phase) {
@@ -58,6 +72,52 @@
 		}
 	}
 
+	function formatPoint(point: RestorePoint): string {
+		const date = point.created ? new Date(point.created).toLocaleString(locale) : point.name;
+		const size =
+			point.size && point.size > 0
+				? ` · ${new Intl.NumberFormat(locale, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(point.size / 1_000_000)}`
+				: '';
+		return `${date}${size}`;
+	}
+
+	async function sourceChanged() {
+		selectedSnapshot = '';
+		await refreshRestorePoints();
+	}
+
+	async function destinationChanged() {
+		selectedSnapshot = '';
+		await refreshRestorePoints();
+	}
+
+	async function refreshRestorePoints() {
+		error = '';
+		if (!profile.id || !selectedSourcePath || !selectedDestinationId) {
+			restorePoints = [];
+			selectedSnapshot = '';
+			return;
+		}
+		loadingPoints = true;
+		try {
+			restorePoints = await listRestorePoints(
+				config,
+				profile.id,
+				selectedSourcePath,
+				selectedDestinationId
+			);
+			if (!restorePoints.some((point) => point.name === selectedSnapshot)) {
+				selectedSnapshot = restorePoints[0]?.name ?? '';
+			}
+		} catch (cause) {
+			restorePoints = [];
+			selectedSnapshot = '';
+			error = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			loadingPoints = false;
+		}
+	}
+
 	async function browseStaging() {
 		error = '';
 		const selected = await chooseStagingDirectory(stagingRoot);
@@ -67,7 +127,13 @@
 	async function runRestore() {
 		error = '';
 		progress = null;
-		if (!profile.id || !selectedSourcePath || !selectedDestinationId || !stagingRoot.trim()) {
+		if (
+			!profile.id ||
+			!selectedSourcePath ||
+			!selectedDestinationId ||
+			!selectedSnapshot ||
+			!stagingRoot.trim()
+		) {
 			error = t('restoreRequiredFields');
 			return;
 		}
@@ -80,13 +146,14 @@
 			destination_id: selectedDestinationId,
 			source_path: selectedSourcePath,
 			staging_root: stagingRoot.trim(),
-			before: before.trim() || null
+			snapshot: selectedSnapshot,
+			before: null
 		};
 
 		restoring = true;
 		try {
-			await stageRestoreProfile(profile.id, request, (event) => {
-				if (event.event !== 'output' || advanced) progress = event;
+			await stageRestoreProfile(config, profile.id, request, (event) => {
+				if (event.event !== 'output') progress = event;
 			});
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
@@ -110,10 +177,10 @@
 		<div class="restore-form">
 			<label>
 				<span>{t('restoreSource')}</span>
-				<select bind:value={selectedSourcePath}>
+				<select bind:value={selectedSourcePath} onchange={sourceChanged}>
 					{#each profile.sources as source (source.path)}
 						<option value={source.path}>
-							{source.path}{source.path === '/' ? ` · ${t('requiresRescue')}` : ''}
+							{source.path}{source.snapper_config ? ` · Snapper ${source.snapper_config}` : ''}
 						</option>
 					{/each}
 				</select>
@@ -121,13 +188,45 @@
 
 			<label>
 				<span>{t('backupDestination')}</span>
-				<select bind:value={selectedDestinationId}>
+				<select bind:value={selectedDestinationId} onchange={destinationChanged}>
 					{#each destinations as destination (destination.id)}
-						<option value={destination.id}
-							>{destination.name} · {destination.kind.toUpperCase()}</option
-						>
+						<option value={destination.id}>{destination.name}</option>
 					{/each}
 				</select>
+			</label>
+
+			<label class="restore-point-field">
+				<span>{t('restorePoint')}</span>
+				<div class="input-action">
+					<select
+						bind:value={selectedSnapshot}
+						disabled={loadingPoints || restorePoints.length === 0}
+					>
+						{#each restorePoints as point (point.name)}
+							<option value={point.name}>{formatPoint(point)}</option>
+						{/each}
+					</select>
+					<button
+						class="secondary"
+						type="button"
+						onclick={refreshRestorePoints}
+						disabled={loadingPoints}
+					>
+						<span class:spin={loadingPoints}><RefreshCw size={15} /></span>
+						{t('refreshSnapshots')}
+					</button>
+				</div>
+				<small>
+					{#if loadingPoints}
+						{t('loadingSnapshots')}
+					{:else if restorePoints.length === 0}
+						{t('noRestorePoints')}
+					{:else if selectedPoint?.parent_name}
+						{t('snapshotParent')}: {selectedPoint.parent_name}
+					{:else}
+						{selectedPoint?.name ?? ''}
+					{/if}
+				</small>
 			</label>
 
 			<label class="staging-field">
@@ -141,14 +240,14 @@
 				</div>
 				<small>{t('stagingBtrfsRequired')}</small>
 			</label>
+		</div>
 
-			{#if advanced}
-				<label>
-					<span>{t('restoreBefore')}</span>
-					<input bind:value={before} placeholder="2026-10-05 02:00:00" spellcheck="false" />
-					<small>{t('restoreBeforeHelp')}</small>
-				</label>
-			{/if}
+		<div class="coverage-card">
+			<ShieldCheck size={18} />
+			<div>
+				<strong>{t('recoveryCoverage')}</strong>
+				<span>{t('recoveryCoverageDesc')}</span>
+			</div>
 		</div>
 
 		{#if rootSelected}
@@ -172,12 +271,12 @@
 		<div class="restore-actions">
 			<div class="restore-target">
 				<HardDrive size={16} />
-				<span>{selectedSourcePath || '—'} → {stagingRoot || '—'}</span>
+				<span>{selectedSnapshot || '—'} → {stagingRoot || '—'}</span>
 			</div>
 			<button
 				type="button"
 				class="primary"
-				disabled={restoring || rootSelected || !selectedDestinationId || !stagingRoot.trim()}
+				disabled={restoring || rootSelected || !selectedSnapshot || !stagingRoot.trim()}
 				onclick={runRestore}
 			>
 				{#if restoring}
@@ -209,23 +308,21 @@
 </div>
 
 <style>
-	.restore-workspace {
-		display: grid;
-		gap: 14px;
-	}
-
+	.restore-workspace,
 	.restore-panel {
 		display: grid;
-		gap: 18px;
-		padding: 20px;
+		gap: 12px;
+	}
+	.restore-panel {
+		padding: 16px;
 		border: 1px solid var(--border);
 		border-radius: 14px;
 		background: var(--surface);
 	}
-
 	.restore-head,
 	.restore-safety,
 	.restore-warning,
+	.coverage-card,
 	.restore-actions,
 	.restore-target,
 	.restore-progress,
@@ -234,277 +331,158 @@
 		display: flex;
 		align-items: center;
 	}
-
 	.restore-head {
 		gap: 12px;
 	}
-
 	.restore-icon {
 		display: grid;
-		width: 42px;
-		height: 42px;
+		width: 40px;
+		height: 40px;
 		place-items: center;
 		border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
 		border-radius: 11px;
 		background: color-mix(in srgb, var(--accent) 10%, transparent);
 		color: var(--accent);
 	}
-
+	.restore-head p,
+	.restore-head h3 {
+		margin: 0;
+	}
 	.restore-head p {
-		margin: 0 0 3px;
 		color: var(--muted);
 		font-size: 9px;
 		font-weight: 700;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 	}
-
 	.restore-head h3 {
-		margin: 0;
 		font-size: 17px;
 	}
-
-	.restore-head span {
-		display: block;
-		margin-top: 4px;
+	.restore-head span,
+	label small,
+	.restore-safety span,
+	.restore-warning span,
+	.coverage-card span,
+	.restore-progress small {
 		color: var(--muted);
 		font-size: 10px;
-		line-height: 1.45;
+		line-height: 1.4;
 	}
-
 	.restore-form {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px;
+		gap: 10px;
 	}
-
+	.restore-point-field,
+	.staging-field {
+		grid-column: span 2;
+	}
 	label {
 		display: grid;
-		gap: 6px;
-		color: var(--muted);
-		font-size: 9px;
+		gap: 5px;
+		font-size: 10px;
 		font-weight: 650;
 	}
-
-	label > span {
-		letter-spacing: 0.02em;
-	}
-
-	input,
-	select {
-		min-height: 38px;
+	select,
+	input {
 		width: 100%;
-		padding: 0 10px;
+		min-width: 0;
+		box-sizing: border-box;
 		border: 1px solid var(--border);
-		border-radius: 8px;
-		background: var(--surface-soft);
+		border-radius: 9px;
+		background: var(--surface-strong);
 		color: var(--text);
+		padding: 9px 10px;
 		font: inherit;
-		font-size: 10px;
-		outline: none;
 	}
-
-	input:focus,
-	select:focus {
-		border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
-	}
-
-	label small {
-		color: var(--muted);
-		font-size: 8px;
-		font-weight: 500;
-		line-height: 1.4;
-	}
-
-	.staging-field {
-		grid-column: 1 / -1;
-	}
-
 	.input-action {
 		gap: 8px;
 	}
-
+	.input-action select,
 	.input-action input {
 		flex: 1;
-		min-width: 0;
 	}
-
-	.secondary {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		min-height: 38px;
-		padding: 0 11px;
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		background: var(--surface-soft);
-		color: var(--text);
-		font-size: 9px;
-		font-weight: 700;
-		white-space: nowrap;
-		cursor: pointer;
-	}
-
 	.restore-safety,
-	.restore-warning {
-		align-items: flex-start;
+	.restore-warning,
+	.coverage-card {
 		gap: 9px;
-		padding: 10px 12px;
-		border: 1px solid var(--border);
-		border-radius: 9px;
-		background: var(--surface-soft);
-		color: var(--muted);
+		padding: 9px 11px;
+		border-radius: 10px;
 	}
-
-	.restore-safety {
-		border-color: color-mix(in srgb, var(--good) 30%, var(--border));
+	.restore-safety,
+	.coverage-card {
+		border: 1px solid color-mix(in srgb, var(--good) 32%, var(--border));
+		background: color-mix(in srgb, var(--good) 7%, var(--surface));
 	}
-
-	.restore-safety > :global(svg) {
-		color: var(--good);
-	}
-
 	.restore-warning {
-		border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+		border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border));
+		background: color-mix(in srgb, var(--warning) 8%, var(--surface));
 	}
-
-	.restore-warning > :global(svg) {
-		color: var(--danger);
-	}
-
 	.restore-safety div,
-	.restore-warning div {
+	.restore-warning div,
+	.coverage-card div,
+	.restore-progress div {
 		display: grid;
 		gap: 2px;
 	}
-
-	.restore-safety strong,
-	.restore-warning strong {
-		color: var(--text);
-		font-size: 9px;
-	}
-
-	.restore-safety span,
-	.restore-warning span {
-		font-size: 8px;
-		line-height: 1.45;
-	}
-
 	.restore-actions {
 		justify-content: space-between;
 		gap: 12px;
-		padding-top: 2px;
 	}
-
 	.restore-target {
 		min-width: 0;
 		gap: 7px;
 		color: var(--muted);
-		font-size: 9px;
+		font-size: 10px;
 	}
-
 	.restore-target span {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-
-	.primary {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 7px;
-		min-height: 38px;
-		padding: 0 14px;
-		border: 0;
-		border-radius: 8px;
-		background: var(--accent);
-		color: var(--accent-contrast);
-		font-size: 9px;
-		font-weight: 750;
-		cursor: pointer;
-	}
-
-	.primary:disabled {
-		opacity: 0.45;
-		cursor: not-allowed;
-	}
-
 	.restore-progress,
 	.restore-error {
-		align-items: flex-start;
 		gap: 8px;
 		padding: 9px 11px;
 		border: 1px solid var(--border);
 		border-radius: 9px;
-		background: var(--surface-soft);
 	}
-
-	.restore-progress .dot {
+	.restore-error {
+		border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+		color: var(--danger);
+		font-size: 10px;
+	}
+	.dot {
 		width: 7px;
 		height: 7px;
-		margin-top: 4px;
 		border-radius: 50%;
 		background: var(--accent);
 	}
-
-	.restore-progress.complete .dot {
+	.complete .dot {
 		background: var(--good);
 	}
-
-	.restore-progress.failed .dot {
+	.failed .dot {
 		background: var(--danger);
 	}
-
-	.restore-progress div {
-		display: grid;
-		gap: 2px;
-		min-width: 0;
+	.spin {
+		animation: spin 1s linear infinite;
 	}
-
-	.restore-progress strong {
-		font-size: 9px;
-	}
-
-	.restore-progress small {
-		color: var(--muted);
-		font-size: 8px;
-		line-height: 1.4;
-		word-break: break-word;
-	}
-
-	.restore-error {
-		color: var(--danger);
-		font-size: 9px;
-	}
-
-	:global(.spin) {
-		animation: spin 0.9s linear infinite;
-	}
-
 	@keyframes spin {
 		to {
 			transform: rotate(360deg);
 		}
 	}
-
-	@media (max-width: 780px) {
+	@media (max-width: 760px) {
 		.restore-form {
 			grid-template-columns: 1fr;
 		}
-
+		.restore-point-field,
 		.staging-field {
 			grid-column: auto;
 		}
-
 		.restore-actions {
 			align-items: stretch;
 			flex-direction: column;
-		}
-
-		.primary {
-			width: 100%;
 		}
 	}
 </style>

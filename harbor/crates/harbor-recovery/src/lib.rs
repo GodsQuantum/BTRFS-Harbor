@@ -108,6 +108,8 @@ pub struct StagedRestoreRequest {
     pub source_path: PathBuf,
     pub staging_root: PathBuf,
     #[serde(default)]
+    pub snapshot: Option<String>,
+    #[serde(default)]
     pub before: Option<String>,
 }
 
@@ -118,6 +120,7 @@ pub struct StagedRestorePlan {
     pub source_path: PathBuf,
     pub staging_path: PathBuf,
     pub target_index: usize,
+    pub snapshot: Option<String>,
     pub before: Option<String>,
     pub requires_rescue_environment: bool,
 }
@@ -264,7 +267,8 @@ mod tests {
             destination_id: Uuid::nil(),
             source_path: PathBuf::from("/home/demo/Vidéos"),
             staging_root: PathBuf::from("/mnt/Récupération"),
-            before: Some("2026-10-05 02:00:00".into()),
+            snapshot: Some("home-20261005T020000".into()),
+            before: None,
         };
         let encoded = serde_json::to_string(&request).unwrap();
         let decoded: StagedRestoreRequest = serde_json::from_str(&encoded).unwrap();

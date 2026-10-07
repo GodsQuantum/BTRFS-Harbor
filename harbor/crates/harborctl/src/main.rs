@@ -12,6 +12,7 @@ use harbor_recovery::{
 use harbor_storage::{
     HarborConfig, MountTable, engine_target_uri, render_engine_config, validate_destination_mount,
 };
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -75,9 +76,17 @@ fn main() -> Result<()> {
             let id = parse_profile_id(args.next())?;
             recovery_kit_profile(id)
         }
+        "list-restore-points-json" => {
+            let id = parse_profile_id(args.next())?;
+            list_restore_points_json(id)
+        }
         "stage-restore-jsonl" => {
             let id = parse_profile_id(args.next())?;
             stage_restore_jsonl(id)
+        }
+        "stage-restore-config-jsonl" => {
+            let id = parse_profile_id(args.next())?;
+            stage_restore_config_jsonl(id)
         }
         "replicate-lxc-jsonl" => lxc_replica::run_lxc_replica_jsonl(),
         "status-profile" => {
@@ -93,7 +102,7 @@ fn main() -> Result<()> {
 
 fn usage() {
     eprintln!(
-        "Usage: btrfs-harborctl <list|render-profile|apply-config|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|stage-restore-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID]"
+        "Usage: btrfs-harborctl <list|render-profile|apply-config|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID]"
     );
 }
 
@@ -181,6 +190,155 @@ fn load_profile_from_json(raw: &str, id: Uuid) -> Result<(HarborConfig, BackupPr
         .cloned()
         .with_context(|| format!("profile {id} not found"))?;
     Ok((config, profile))
+}
+
+#[derive(Debug, Deserialize)]
+struct RestorePointsQuery {
+    configuration: HarborConfig,
+    destination_id: Uuid,
+    source_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RestorePoint {
+    name: String,
+    created: Option<String>,
+    size: Option<u64>,
+    parent_name: Option<String>,
+    checksum: Option<String>,
+    origin: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DraftRestoreEnvelope {
+    configuration: HarborConfig,
+    request: StagedRestoreRequest,
+}
+
+fn parse_restore_points(raw: &str) -> Result<Vec<RestorePoint>> {
+    let values: Vec<serde_json::Value> =
+        serde_json::from_str(raw).context("invalid restore-point JSON from backup engine")?;
+    let mut points = values
+        .into_iter()
+        .filter_map(|value| {
+            let name = value.get("name")?.as_str()?.to_owned();
+            let created = value
+                .get("created")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            let size = value.get("size").and_then(|value| value.as_u64());
+            let parent_name = value
+                .get("parent_name")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            let checksum = value
+                .get("checksum")
+                .and_then(|value| value.get("value"))
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            let origin = value
+                .get("provenance")
+                .and_then(|value| value.get("origin"))
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            Some(RestorePoint {
+                name,
+                created,
+                size,
+                parent_name,
+                checksum,
+                origin,
+            })
+        })
+        .collect::<Vec<_>>();
+    points.sort_by(|left, right| {
+        right
+            .created
+            .cmp(&left.created)
+            .then_with(|| right.name.cmp(&left.name))
+    });
+    Ok(points)
+}
+
+fn resolve_restore_target<'a>(
+    config: &'a HarborConfig,
+    profile: &'a BackupProfile,
+    source_path: &Path,
+    destination_id: Uuid,
+) -> Result<(&'a BackupSource, &'a DestinationSpec)> {
+    let source = profile
+        .sources
+        .iter()
+        .find(|source| source.path == source_path)
+        .with_context(|| {
+            format!(
+                "profile {} does not contain source {}",
+                profile.id,
+                source_path.display()
+            )
+        })?;
+    if !profile.destination_ids.contains(&destination_id) {
+        bail!(
+            "profile {} does not use destination {}",
+            profile.id,
+            destination_id
+        );
+    }
+    let destination = config
+        .destinations
+        .iter()
+        .find(|destination| destination.id == destination_id)
+        .with_context(|| format!("destination {destination_id} not found"))?;
+    Ok((source, destination))
+}
+
+fn list_restore_points_json(id: Uuid) -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin()
+        .read_to_string(&mut raw)
+        .context("cannot read restore-point query from stdin")?;
+    let query: RestorePointsQuery =
+        serde_json::from_str(&raw).context("invalid restore-point query")?;
+    query
+        .configuration
+        .validate()
+        .map_err(|err| anyhow::anyhow!("invalid Harbor configuration: {err}"))?;
+    let profile = query
+        .configuration
+        .profile(id)
+        .cloned()
+        .with_context(|| format!("profile {id} not found"))?;
+    let (source, destination) = resolve_restore_target(
+        &query.configuration,
+        &profile,
+        &query.source_path,
+        query.destination_id,
+    )?;
+
+    if destination.kind != DestinationKind::Ssh {
+        let mountinfo =
+            fs::read_to_string("/proc/self/mountinfo").context("cannot read mount table")?;
+        let mounts = MountTable::from_mountinfo(&mountinfo);
+        validate_destination_mount(destination, &mounts)
+            .with_context(|| format!("destination {} failed mount guard", destination.name))?;
+    }
+
+    let uri = engine_target_uri(source, destination)?;
+    let output = Command::new(engine_executable())
+        .args(["raw", "list", &uri, "--json"])
+        .output()
+        .context("failed to list backup snapshots")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        bail!(
+            "backup snapshot listing failed: {}",
+            if stderr.is_empty() { stdout } else { stderr }
+        );
+    }
+    let points = parse_restore_points(&String::from_utf8_lossy(&output.stdout))?;
+    serde_json::to_writer(std::io::stdout(), &points)?;
+    Ok(())
 }
 
 fn load_profile(id: Uuid) -> Result<(HarborConfig, BackupProfile)> {
@@ -780,6 +938,20 @@ fn staged_restore_plan(
         }
     }
 
+    let snapshot = request
+        .snapshot
+        .as_ref()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let before = request
+        .before
+        .as_ref()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if snapshot.is_some() && before.is_some() {
+        bail!("choose either an exact snapshot or a point in time, not both");
+    }
+
     let stage_path = staged_restore_path(&staging_root, profile.id, &source.target_subdir);
     Ok((
         StagedRestorePlan {
@@ -788,11 +960,8 @@ fn staged_restore_plan(
             source_path: source.path.clone(),
             staging_path: stage_path,
             target_index,
-            before: request
-                .before
-                .as_ref()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty()),
+            snapshot,
+            before,
             requires_rescue_environment: source.path == Path::new("/"),
         },
         source,
@@ -817,7 +986,9 @@ fn build_restore_command(
         .arg("--to")
         .arg(&plan.staging_path)
         .arg("--no-progress");
-    if let Some(before) = &plan.before {
+    if let Some(snapshot) = &plan.snapshot {
+        command.arg("--snapshot").arg(snapshot);
+    } else if let Some(before) = &plan.before {
         command.arg("--before").arg(before);
     }
     if dry_run {
@@ -845,6 +1016,73 @@ fn verify_staged_subvolumes(path: &Path) -> Result<String> {
     Ok(listing)
 }
 
+fn execute_stage_restore_jsonl(
+    config: &HarborConfig,
+    profile: &BackupProfile,
+    request: &StagedRestoreRequest,
+    generated_path: &Path,
+) -> Result<()> {
+    let (plan, _source, destination) = staged_restore_plan(config, profile, request)?;
+
+    let mountinfo =
+        fs::read_to_string("/proc/self/mountinfo").context("cannot read mount table")?;
+    let mounts = MountTable::from_mountinfo(&mountinfo);
+    validate_destination_mount(&destination, &mounts)
+        .with_context(|| format!("destination {} failed mount guard", destination.name))?;
+
+    let generated = render_engine_config(profile, &config.destinations)?;
+    atomic_write_mode(generated_path, generated.as_bytes(), 0o600)?;
+    if let Some(parent) = plan.staging_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create staging parent {}", parent.display()))?;
+    }
+
+    emit_progress(
+        "phase",
+        "restore_plan",
+        &format!("Dry-running restore of {}", plan.source_path.display()),
+        None,
+    )?;
+    let status = run_streaming_command(
+        build_restore_command(generated_path, &plan, true),
+        "restore_plan",
+    )?;
+    if !status.success() {
+        bail!("restore dry-run failed with {status}");
+    }
+
+    emit_progress(
+        "phase",
+        "restore",
+        &format!("Restoring into {}", plan.staging_path.display()),
+        None,
+    )?;
+    let status = run_streaming_command(
+        build_restore_command(generated_path, &plan, false),
+        "restore",
+    )?;
+    if !status.success() {
+        bail!("staged restore failed with {status}");
+    }
+
+    emit_progress(
+        "phase",
+        "restore_verify",
+        "Verifying staged Btrfs subvolumes",
+        None,
+    )?;
+    let listing = verify_staged_subvolumes(&plan.staging_path)?;
+    emit_progress("output", "restore_verify", &listing, Some("stdout"))?;
+
+    emit_progress(
+        "finished",
+        "restore_complete",
+        &format!("Staged restore ready at {}", plan.staging_path.display()),
+        None,
+    )?;
+    Ok(())
+}
+
 fn stage_restore_jsonl(id: Uuid) -> Result<()> {
     ensure_root()?;
     emit_progress(
@@ -857,69 +1095,51 @@ fn stage_restore_jsonl(id: Uuid) -> Result<()> {
     let result = (|| -> Result<()> {
         let request = read_staged_restore_request()?;
         let (config, profile) = load_profile(id)?;
-        let (plan, _source, destination) = staged_restore_plan(&config, &profile, &request)?;
-
-        let mountinfo =
-            fs::read_to_string("/proc/self/mountinfo").context("cannot read mount table")?;
-        let mounts = MountTable::from_mountinfo(&mountinfo);
-        validate_destination_mount(&destination, &mounts)
-            .with_context(|| format!("destination {} failed mount guard", destination.name))?;
-
         fs::create_dir_all(generated_dir())?;
-        let generated = render_engine_config(&profile, &config.destinations)?;
-        let generated_path = generated_config_path(id);
-        atomic_write(&generated_path, generated.as_bytes())?;
-        if let Some(parent) = plan.staging_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create staging parent {}", parent.display()))?;
-        }
-
-        emit_progress(
-            "phase",
-            "restore_plan",
-            &format!("Dry-running restore of {}", plan.source_path.display()),
-            None,
-        )?;
-        let status = run_streaming_command(
-            build_restore_command(&generated_path, &plan, true),
-            "restore_plan",
-        )?;
-        if !status.success() {
-            bail!("restore dry-run failed with {status}");
-        }
-
-        emit_progress(
-            "phase",
-            "restore",
-            &format!("Restoring into {}", plan.staging_path.display()),
-            None,
-        )?;
-        let status = run_streaming_command(
-            build_restore_command(&generated_path, &plan, false),
-            "restore",
-        )?;
-        if !status.success() {
-            bail!("staged restore failed with {status}");
-        }
-
-        emit_progress(
-            "phase",
-            "restore_verify",
-            "Verifying staged Btrfs subvolumes",
-            None,
-        )?;
-        let listing = verify_staged_subvolumes(&plan.staging_path)?;
-        emit_progress("output", "restore_verify", &listing, Some("stdout"))?;
-
-        emit_progress(
-            "finished",
-            "restore_complete",
-            &format!("Staged restore ready at {}", plan.staging_path.display()),
-            None,
-        )?;
-        Ok(())
+        execute_stage_restore_jsonl(&config, &profile, &request, &generated_config_path(id))
     })();
 
+    if let Err(err) = &result {
+        let _ = emit_progress("failed", "restore_error", &err.to_string(), None);
+    }
+    result
+}
+
+fn stage_restore_config_jsonl(id: Uuid) -> Result<()> {
+    ensure_root()?;
+    emit_progress(
+        "phase",
+        "restore_start",
+        &format!("Preparing portable restore for {id}"),
+        None,
+    )?;
+
+    let generated_path = draft_generated_config_path(id);
+    let result = (|| -> Result<()> {
+        let mut raw = String::new();
+        std::io::stdin()
+            .read_to_string(&mut raw)
+            .context("cannot read portable restore request from stdin")?;
+        let envelope: DraftRestoreEnvelope =
+            serde_json::from_str(&raw).context("invalid portable restore request")?;
+        envelope
+            .configuration
+            .validate()
+            .map_err(|err| anyhow::anyhow!("invalid Harbor configuration: {err}"))?;
+        let profile = envelope
+            .configuration
+            .profile(id)
+            .cloned()
+            .with_context(|| format!("profile {id} not found"))?;
+        execute_stage_restore_jsonl(
+            &envelope.configuration,
+            &profile,
+            &envelope.request,
+            &generated_path,
+        )
+    })();
+
+    let _ = fs::remove_file(&generated_path);
     if let Err(err) = &result {
         let _ = emit_progress("failed", "restore_error", &err.to_string(), None);
     }
@@ -1423,6 +1643,7 @@ line two"
             source_path: PathBuf::from("/home"),
             staging_path: PathBuf::from("/mnt/stage/profile/home"),
             target_index: 2,
+            snapshot: None,
             before: None,
             requires_rescue_environment: false,
         };
@@ -1450,6 +1671,56 @@ line two"
     }
 
     #[test]
+    fn restore_command_targets_exact_snapshot_by_name() {
+        let plan = StagedRestorePlan {
+            profile_id: Uuid::nil(),
+            destination_id: Uuid::nil(),
+            source_path: PathBuf::from("/home"),
+            staging_path: PathBuf::from("/mnt/stage/home"),
+            target_index: 0,
+            snapshot: Some("home-20261006T020000".into()),
+            before: None,
+            requires_rescue_environment: false,
+        };
+        let command = build_restore_command(Path::new("/tmp/generated.toml"), &plan, false);
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args.windows(2).any(|pair| {
+            pair == ["--snapshot".to_string(), "home-20261006T020000".to_string()]
+        }));
+        assert!(!args.iter().any(|arg| arg == "--before"));
+    }
+
+    #[test]
+    fn raw_restore_points_keep_name_date_size_and_parent() {
+        let raw = r#"[
+          {
+            "name": "home-20261006T020000",
+            "created": "2026-10-06T02:00:00+00:00",
+            "size": 1048576,
+            "parent_name": "home-20261005T020000",
+            "checksum": {"algorithm": "sha256", "value": "abc123"},
+            "provenance": {"origin": "native"}
+          }
+        ]"#;
+        let points = parse_restore_points(raw).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].name, "home-20261006T020000");
+        assert_eq!(
+            points[0].created.as_deref(),
+            Some("2026-10-06T02:00:00+00:00")
+        );
+        assert_eq!(points[0].size, Some(1_048_576));
+        assert_eq!(
+            points[0].parent_name.as_deref(),
+            Some("home-20261005T020000")
+        );
+        assert_eq!(points[0].checksum.as_deref(), Some("abc123"));
+    }
+
+    #[test]
     fn restore_command_carries_point_in_time_as_one_argument() {
         let plan = StagedRestorePlan {
             profile_id: Uuid::nil(),
@@ -1457,6 +1728,7 @@ line two"
             source_path: PathBuf::from("/home"),
             staging_path: PathBuf::from("/mnt/stage/home"),
             target_index: 0,
+            snapshot: None,
             before: Some("2026-10-05 02:00:00".into()),
             requires_rescue_environment: false,
         };

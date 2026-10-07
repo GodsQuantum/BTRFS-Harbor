@@ -350,6 +350,56 @@ async fn run_privileged_profile_command(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+async fn run_profile_command_with_stdin(
+    app: &tauri::AppHandle,
+    command: &str,
+    profile_id: &str,
+    input: &[u8],
+) -> Result<String, String> {
+    let profile_id = Uuid::parse_str(profile_id)
+        .map_err(|err| format!("Invalid profile UUID: {err}"))?
+        .to_string();
+    let helper = helper_executable(app)?;
+
+    let mut child = Command::new(helper)
+        .arg(command)
+        .arg(profile_id)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("Cannot start Harbor helper: {err}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input)
+            .await
+            .map_err(|err| format!("Cannot send data to Harbor helper: {err}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|err| format!("Cannot finish Harbor helper input: {err}"))?;
+    } else {
+        return Err("Harbor helper stdin was unavailable".into());
+    }
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|err| format!("Cannot wait for Harbor helper: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("Harbor helper failed with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 async fn run_privileged_profile_command_with_stdin(
     app: &tauri::AppHandle,
     command: &str,
@@ -563,17 +613,56 @@ async fn send_draft_now_stream(
 }
 
 #[tauri::command]
+async fn list_restore_points(
+    app: tauri::AppHandle,
+    configuration: String,
+    profile_id: String,
+    source_path: String,
+    destination_id: String,
+) -> Result<String, String> {
+    let configuration: Value = serde_json::from_str(&configuration)
+        .map_err(|err| format!("Invalid Harbor configuration: {err}"))?;
+    let destination_id = Uuid::parse_str(&destination_id)
+        .map_err(|err| format!("Invalid destination UUID: {err}"))?;
+    let query = serde_json::json!({
+        "configuration": configuration,
+        "destination_id": destination_id,
+        "source_path": source_path,
+    });
+    run_profile_command_with_stdin(
+        &app,
+        "list-restore-points-json",
+        &profile_id,
+        serde_json::to_vec(&query)
+            .map_err(|err| format!("Cannot encode restore-point query: {err}"))?
+            .as_slice(),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn stage_restore(
     app: tauri::AppHandle,
+    configuration: String,
     profile_id: String,
     request: String,
     on_event: Channel<Value>,
 ) -> Result<(), String> {
+    let configuration: Value = serde_json::from_str(&configuration)
+        .map_err(|err| format!("Invalid Harbor configuration: {err}"))?;
+    let request: Value =
+        serde_json::from_str(&request).map_err(|err| format!("Invalid restore request: {err}"))?;
+    let envelope = serde_json::json!({
+        "configuration": configuration,
+        "request": request,
+    });
+    let encoded = serde_json::to_vec(&envelope)
+        .map_err(|err| format!("Cannot encode portable restore request: {err}"))?;
     run_privileged_profile_stream(
         &app,
-        "stage-restore-jsonl",
+        "stage-restore-config-jsonl",
         &profile_id,
-        Some(request.as_bytes()),
+        Some(&encoded),
         on_event,
     )
     .await
@@ -734,6 +823,7 @@ pub fn run() {
             send_snapshot_now,
             send_snapshot_now_stream,
             send_draft_now_stream,
+            list_restore_points,
             stage_restore,
             replicate_lxc,
             install_profile,

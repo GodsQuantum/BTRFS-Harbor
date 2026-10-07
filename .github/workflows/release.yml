@@ -105,28 +105,28 @@ jobs:
           python_bin="$(find "$UV_PYTHON_INSTALL_DIR" -path '*/bin/python3.12' -print -quit)"
           test -n "$python_bin"
           python_root="$(dirname "$(dirname "$python_bin")")"
-          rm -rf packaging/generated/python-runtime harbor/desktop/src-tauri/portable
+          rm -rf packaging/generated/python-runtime harbor/desktop/portable
           cp -a "$python_root" packaging/generated/python-runtime
           test -x packaging/generated/python-runtime/bin/python3
           packaging/generated/python-runtime/bin/python3 \
             packaging/generated/btrfs-backup-ng.pyz --help >/dev/null
 
-          mkdir -p harbor/desktop/src-tauri/portable
-          cp harbor/target/release/btrfs-harborctl harbor/desktop/src-tauri/portable/
-          cp packaging/universal/btrfs-backup-ng harbor/desktop/src-tauri/portable/
-          cp packaging/generated/btrfs-backup-ng.pyz harbor/desktop/src-tauri/portable/
-          cp -a packaging/generated/python-runtime harbor/desktop/src-tauri/portable/python
+          mkdir -p harbor/desktop/portable
+          cp harbor/target/release/btrfs-harborctl harbor/desktop/portable/
+          cp packaging/universal/btrfs-backup-ng harbor/desktop/portable/
+          cp packaging/generated/btrfs-backup-ng.pyz harbor/desktop/portable/
+          cp -a packaging/generated/python-runtime harbor/desktop/portable/python
           chmod 0755 \
-            harbor/desktop/src-tauri/portable/btrfs-harborctl \
-            harbor/desktop/src-tauri/portable/btrfs-backup-ng \
-            harbor/desktop/src-tauri/portable/btrfs-backup-ng.pyz \
-            harbor/desktop/src-tauri/portable/python/bin/python3
+            harbor/desktop/portable/btrfs-harborctl \
+            harbor/desktop/portable/btrfs-backup-ng \
+            harbor/desktop/portable/btrfs-backup-ng.pyz \
+            harbor/desktop/portable/python/bin/python3
 
       - name: Build portable AppImage
         working-directory: harbor/desktop
         run: |
           pnpm tauri build --bundles appimage \
-            --config '{"bundle":{"resources":["portable/**"]}}'
+            --config '{"bundle":{"resources":{"portable/":"portable/"}}}'
 
       - name: Build native DEB and RPM
         working-directory: harbor/desktop

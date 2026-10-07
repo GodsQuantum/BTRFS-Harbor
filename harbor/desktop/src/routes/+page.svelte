@@ -71,7 +71,6 @@
 
 	let locale: Locale = 'en';
 	let active: Page = 'overview';
-	let advanced = false;
 	let dark = false;
 	let loading = true;
 	let sending = false;
@@ -89,13 +88,6 @@
 	$: activeSchedule = activeProfile?.on_calendar ?? '';
 	$: activeProfileHasSnapper =
 		activeProfile?.sources.some((source) => Boolean(source.snapper_config)) ?? false;
-	$: if (
-		!advanced &&
-		(active === 'destinations' || active === 'replicate' || active === 'activity')
-	) {
-		active = 'overview';
-	}
-
 	const t = (key: TranslationKey) => translate(locale, key);
 
 	onMount(async () => {
@@ -195,7 +187,7 @@
 		backupProgress = null;
 		try {
 			await sendProfileNow(dashboard.profileId, (event) => {
-				if (event.event !== 'output' || advanced) backupProgress = event;
+				if (event.event !== 'output') backupProgress = event;
 			});
 			dashboard = await loadDashboardStatus();
 		} catch (error) {
@@ -261,20 +253,6 @@
 				<button class:active={active === 'recover'} onclick={() => (active = 'recover')}>
 					<LifeBuoy size={18} strokeWidth={1.8} /><span>{t('recover')}</span>
 				</button>
-				{#if advanced}
-					<button
-						class:active={active === 'destinations'}
-						onclick={() => (active = 'destinations')}
-					>
-						<HardDrive size={18} strokeWidth={1.8} /><span>{t('destinations')}</span>
-					</button>
-					<button class:active={active === 'replicate'} onclick={() => (active = 'replicate')}>
-						<Copy size={18} strokeWidth={1.8} /><span>{t('replicate')}</span>
-					</button>
-					<button class:active={active === 'activity'} onclick={() => (active = 'activity')}>
-						<Activity size={18} strokeWidth={1.8} /><span>{t('activity')}</span>
-					</button>
-				{/if}
 			{/if}
 			<button class:active={active === 'settings'} onclick={() => (active = 'settings')}>
 				<Settings size={18} strokeWidth={1.8} /><span>{t('settings')}</span>
@@ -320,10 +298,6 @@
 				<h1>{pageTitle(active)}</h1>
 			</div>
 			<div class="top-actions">
-				<div class="segmented" aria-label="Complexity">
-					<button class:active={!advanced} onclick={() => (advanced = false)}>{t('simple')}</button>
-					<button class:active={advanced} onclick={() => (advanced = true)}>{t('advanced')}</button>
-				</div>
 				<div class="locale">
 					<Languages size={16} />
 					<select
@@ -391,7 +365,6 @@
 				{#if harborConfig}
 					<ProtectionEditor
 						bind:config={harborConfig}
-						{advanced}
 						{locale}
 						runtime={null}
 						onApplied={async () => {
@@ -458,7 +431,7 @@
 								<span></span>
 								<div>
 									<strong>{progressLabel(backupProgress.phase)}</strong>
-									{#if advanced}<small>{backupProgress.message}</small>{/if}
+									<small>{backupProgress.message}</small>
 								</div>
 							</div>
 						{/if}
@@ -623,7 +596,6 @@
 				{#if harborConfig}
 					<ProtectionEditor
 						bind:config={harborConfig}
-						{advanced}
 						{locale}
 						onApplied={async () => {
 							dashboard = await loadDashboardStatus();
@@ -723,12 +695,7 @@
 					</article>
 				</div>
 				{#if harborConfig}
-					<RecoveryEditor
-						config={harborConfig}
-						profileId={dashboard.profileId}
-						{advanced}
-						{locale}
-					/>
+					<RecoveryEditor config={harborConfig} profileId={dashboard.profileId} {locale} />
 				{:else}
 					<article class="callout large">
 						<CircleAlert size={22} />
@@ -775,7 +742,7 @@
 						<p>{t('btrfsStagingDesc')}</p>
 					</div>
 				</article>
-				<ReplicaEditor {advanced} {locale} />
+				<ReplicaEditor advanced={false} {locale} />
 			</section>
 		{:else if active === 'destinations'}
 			<section class="content-stack">
@@ -870,9 +837,6 @@
 						</div>
 						<div class="setting-row">
 							<span>{t('theme')}</span><strong>{dark ? 'Dark' : 'Light'}</strong>
-						</div>
-						<div class="setting-row">
-							<span>Mode</span><strong>{advanced ? t('advanced') : t('simple')}</strong>
 						</div>
 					</article>
 					<article class="panel">

@@ -4,6 +4,9 @@ import {
 	createDefaultConfiguration,
 	describeDraftIssue,
 	draftIssues,
+	formatSshDestination,
+	parseSshDestination,
+	sourceDisplayName,
 	resolveDestination,
 	resolveProfile,
 	setSourceEnabled
@@ -13,6 +16,29 @@ const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-22
 const uuidFactory = () => ids.shift() ?? '33333333-3333-4333-8333-333333333333';
 
 describe('Harbor profile editor model', () => {
+	it('gives common Btrfs sources human names before technical paths', () => {
+		expect(sourceDisplayName('/')).toBe('System');
+		expect(sourceDisplayName('/home')).toBe('Personal files');
+		expect(sourceDisplayName('/srv')).toBe('Data');
+		expect(sourceDisplayName('/var/lib/libvirt')).toBe('libvirt');
+	});
+
+	it('round-trips structured SSH destination fields', () => {
+		const endpoint = formatSshDestination({
+			user: 'backup',
+			host: '10.0.0.5',
+			port: 2222,
+			path: '/backups/workstation'
+		});
+		expect(endpoint).toBe('ssh://backup@10.0.0.5:2222/backups/workstation');
+		expect(parseSshDestination(endpoint)).toEqual({
+			user: 'backup',
+			host: '10.0.0.5',
+			port: 2222,
+			path: '/backups/workstation'
+		});
+	});
+
 	it('creates a conservative recovery draft without inventing a network target', () => {
 		const config = createDefaultConfiguration(uuidFactory);
 		const profile = resolveProfile(config);

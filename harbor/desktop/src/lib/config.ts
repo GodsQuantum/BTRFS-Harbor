@@ -127,6 +127,57 @@ const recommendedSources: Readonly<Record<string, BackupSource>> = {
 
 const recommendedOrder = Object.keys(recommendedSources);
 
+export interface SshDestinationFields {
+	user: string;
+	host: string;
+	port: number;
+	path: string;
+}
+
+export function sourceDisplayName(path: string): string {
+	if (path === '/') return 'System';
+	if (path === '/home') return 'Personal files';
+	if (path === '/srv') return 'Data';
+	if (path === '/root') return 'Administrator files';
+	const parts = path.split('/').filter(Boolean);
+	return parts.at(-1) ?? path;
+}
+
+export function formatSshDestination(fields: SshDestinationFields): string {
+	const user = fields.user.trim();
+	const host = fields.host.trim();
+	const path = fields.path.trim().startsWith('/') ? fields.path.trim() : '/' + fields.path.trim();
+	const port = Number.isFinite(fields.port) && fields.port > 0 ? Math.trunc(fields.port) : 22;
+	const auth = user ? encodeURIComponent(user) + '@' : '';
+	const portSuffix = port === 22 ? '' : ':' + port;
+	return 'ssh://' + auth + host + portSuffix + path;
+}
+
+export function parseSshDestination(value: string): SshDestinationFields {
+	const raw = value.trim().replace(/^raw\+ssh:\/\//, 'ssh://');
+	if (!raw) return { user: '', host: '', port: 22, path: '' };
+
+	let normalized = raw;
+	if (!normalized.startsWith('ssh://')) {
+		const match = normalized.match(/^(?:([^@\s]+)@)?([^:\s/]+):\/?(.*)$/);
+		if (!match) return { user: '', host: '', port: 22, path: raw };
+		normalized =
+			'ssh://' + (match[1] ? encodeURIComponent(match[1]) + '@' : '') + match[2] + '/' + match[3];
+	}
+
+	try {
+		const url = new URL(normalized);
+		return {
+			user: decodeURIComponent(url.username),
+			host: url.hostname,
+			port: url.port ? Number(url.port) : 22,
+			path: url.pathname || '/'
+		};
+	} catch {
+		return { user: '', host: '', port: 22, path: raw };
+	}
+}
+
 function copySource(source: BackupSource): BackupSource {
 	return { ...source };
 }

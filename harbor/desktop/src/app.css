@@ -1011,7 +1011,83 @@ main {
 
 .protection-editor {
 	display: grid;
-	gap: 12px;
+	gap: 10px;
+}
+.source-section {
+	order: 1;
+}
+.destination-section {
+	order: 2;
+}
+.schedule-section {
+	order: 3;
+}
+.editor-actions {
+	order: 4;
+}
+.compact-sources {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+.source-label {
+	display: grid;
+	min-width: 0;
+	gap: 1px;
+}
+.source-label strong {
+	font-size: 10px;
+	line-height: 1.2;
+}
+.source-label small {
+	overflow: hidden;
+	color: var(--muted);
+	font-size: 8px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ssh-grid {
+	display: grid;
+	grid-template-columns: minmax(150px, 1.4fr) minmax(120px, 1fr) 82px minmax(170px, 1.6fr);
+	gap: 8px;
+}
+.ssh-grid .field {
+	margin-top: 8px;
+}
+.destination-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 8px;
+}
+.advanced-details {
+	margin-top: 9px;
+	border-top: 1px solid var(--border);
+	padding-top: 8px;
+}
+.advanced-details > summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	cursor: pointer;
+	list-style: none;
+	color: var(--muted);
+	font-size: 9px;
+	font-weight: 700;
+}
+.advanced-details > summary::-webkit-details-marker {
+	display: none;
+}
+.advanced-details[open] > summary svg {
+	transform: rotate(180deg);
+}
+.details-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	margin-top: 9px;
+}
+.source-options {
+	margin-left: 27px;
 }
 .setup-stack {
 	max-width: 980px;
@@ -1460,6 +1536,13 @@ footer span {
 }
 
 @media (max-width: 900px) {
+	.compact-sources,
+	.ssh-grid {
+		grid-template-columns: 1fr;
+	}
+	.details-grid {
+		grid-template-columns: 1fr;
+	}
 	.app-shell {
 		grid-template-columns: 66px minmax(0, 1fr);
 	}

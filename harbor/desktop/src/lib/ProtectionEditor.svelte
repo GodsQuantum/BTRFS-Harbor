@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Check from 'lucide-svelte/icons/check';
+	import ChevronDown from 'lucide-svelte/icons/chevron-down';
 	import FolderOpen from 'lucide-svelte/icons/folder-open';
 	import Save from 'lucide-svelte/icons/save';
 	import Server from 'lucide-svelte/icons/server';
-	import ShieldCheck from 'lucide-svelte/icons/shield-check';
 	import {
 		applyHarborConfiguration,
 		chooseDestinationDirectory,
@@ -16,22 +16,24 @@
 		cloneConfiguration,
 		describeDraftIssue,
 		draftIssues,
+		formatSshDestination,
 		isSourceEnabled,
-		recommendedSourcePaths,
+		parseSshDestination,
 		resolveDestination,
 		resolveProfile,
 		setSourceEnabled,
+		sourceDisplayName,
 		type BackupProfile,
 		type BackupSource,
 		type DestinationSpec,
 		type DiscoveredSource,
-		type HarborConfig
+		type HarborConfig,
+		type SshDestinationFields
 	} from './config';
 	import { translate, type Locale, type TranslationKey } from './i18n';
 	import type { ProfileRuntime } from './status';
 
 	export let config: HarborConfig;
-	export let advanced = false;
 	export let locale: Locale = 'en';
 	export let runtime: ProfileRuntime | null | undefined = null;
 	export let onApplied: () => Promise<void> | void = () => {};
@@ -43,16 +45,18 @@
 	let destinationValidated = false;
 	let validatingDestination = false;
 	let discoveredSources: DiscoveredSource[] = [];
+	let sshFields: SshDestinationFields = { user: '', host: '', port: 22, path: '/backups' };
 
 	$: profile = resolveProfile(config);
 	$: destination = resolveDestination(config, profile);
-	$: sourceChoices = buildSourceChoices(discoveredSources, profile, advanced);
+	$: sourceChoices = buildSourceChoices(discoveredSources, profile);
 	$: destinationIsSsh = destination.kind === 'ssh';
 	$: hasSnapperSource = profile.sources.some((source) => Boolean(source.snapper_config));
 
 	const t = (key: TranslationKey) => translate(locale, key);
 
 	onMount(async () => {
+		if (destination.kind === 'ssh') sshFields = parseSshDestination(destination.path);
 		try {
 			discoveredSources = await discoverBtrfsSources();
 			if (profile.sources.length === 0 && discoveredSources.length > 0) {
@@ -91,40 +95,38 @@
 			snapshot_count: 0,
 			sendable_snapshot_count: 0,
 			latest_snapshot_number: null,
-			hint: recommendedSourcePaths.includes(path) ? 'recommended' : 'optional'
+			hint: 'optional'
 		};
 	}
 
 	function buildSourceChoices(
 		discovered: DiscoveredSource[],
-		current: BackupProfile,
-		showAdvanced: boolean
+		current: BackupProfile
 	): DiscoveredSource[] {
 		const byPath: Record<string, DiscoveredSource> = {};
-
 		for (const source of discovered) byPath[source.mount_point] = source;
 		for (const source of current.sources) {
 			if (!(source.path in byPath)) byPath[source.path] = fallbackSource(source.path);
 		}
-
-		return Object.values(byPath)
-			.filter(
-				(source) =>
-					showAdvanced ||
-					source.hint === 'recommended' ||
-					current.sources.some((configured) => configured.path === source.mount_point)
-			)
-			.sort((a, b) => {
-				const rank = (source: DiscoveredSource) =>
-					source.hint === 'recommended' ? 0 : source.hint === 'optional' ? 1 : 2;
-				return rank(a) - rank(b) || a.mount_point.localeCompare(b.mount_point);
-			});
+		return Object.values(byPath).sort((a, b) => {
+			const rank = (source: DiscoveredSource) =>
+				source.hint === 'recommended' ? 0 : source.hint === 'optional' ? 1 : 2;
+			return rank(a) - rank(b) || a.mount_point.localeCompare(b.mount_point);
+		});
 	}
 
 	function sourceHintLabel(source: DiscoveredSource): string {
 		if (source.hint === 'recommended') return t('recommended');
 		if (source.hint === 'usually_disposable') return t('usuallyDisposable');
 		return t('optionalSource');
+	}
+
+	function sourceName(path: string): string {
+		if (path === '/') return t('sourceSystem');
+		if (path === '/home') return t('sourcePersonalFiles');
+		if (path === '/srv') return t('sourceData');
+		if (path === '/root') return t('sourceAdministratorFiles');
+		return sourceDisplayName(path);
 	}
 
 	function timerLabel(): string {
@@ -164,12 +166,11 @@
 	function toggleSource(source: DiscoveredSource, enabled: boolean) {
 		const next = cloneConfiguration(config);
 		const index = next.profiles.findIndex((candidate) => candidate.id === profile.id);
-		const template = backupSourceFromDiscovery(source);
 		next.profiles[index] = setSourceEnabled(
 			next.profiles[index],
 			source.mount_point,
 			enabled,
-			template
+			backupSourceFromDiscovery(source)
 		);
 		config = next;
 		clearFeedback();
@@ -179,44 +180,37 @@
 		clearFeedback();
 		const selected = await chooseDestinationDirectory(destination.path);
 		if (!selected) return;
-
-		let probe = null;
-		let probeError = '';
-		try {
-			probe = await inspectDestinationMount(selected);
-		} catch (cause) {
-			probeError = cause instanceof Error ? cause.message : String(cause);
-		}
-
 		updateDestination((current) => {
+			current.kind = 'raw';
 			current.path = selected;
-			if (!probe) return;
-			current.kind = probe.kind;
-			if (probe.kind === 'nfs' || probe.kind === 'smb') {
-				current.mount_point = probe.mount_point;
-				current.expected_mount_source = probe.source;
-			} else {
-				current.mount_point = null;
-				current.expected_mount_source = null;
-			}
+			current.mount_point = null;
+			current.expected_mount_source = null;
 		});
-
-		if (probeError) {
-			destinationValidated = false;
-			error = probeError;
-		} else if (probe) {
-			destinationValidated = true;
-			message = t('destinationReady');
-		}
+		await validateDestination();
 	}
 
 	function setDestinationMode(mode: 'folder' | 'ssh') {
+		const wasSsh = destination.kind === 'ssh';
 		updateDestination((current) => {
-			const wasSsh = current.kind === 'ssh';
 			current.kind = mode === 'ssh' ? 'ssh' : 'raw';
 			current.mount_point = null;
 			current.expected_mount_source = null;
 			if ((mode === 'ssh') !== wasSsh) current.path = '';
+		});
+		if (mode === 'ssh') {
+			sshFields = wasSsh
+				? parseSshDestination(destination.path)
+				: { user: '', host: '', port: 22, path: '/backups' };
+		}
+	}
+
+	function setSshFields(next: SshDestinationFields) {
+		sshFields = next;
+		updateDestination((current) => {
+			current.kind = 'ssh';
+			current.path = formatSshDestination(next);
+			current.mount_point = null;
+			current.expected_mount_source = null;
 		});
 	}
 
@@ -226,17 +220,16 @@
 		const current = resolveDestination(next, currentProfile);
 
 		if (current.kind === 'ssh') {
-			const endpoint = current.path.trim();
-			const valid = /^(?:raw\+ssh:\/\/|ssh:\/\/)?(?:[^@\s/:]+@)?(?:\[[^\]]+\]|[^:\s/]+):\/.+$/.test(
-				endpoint
-			);
-			if (!valid) throw new Error(t('invalidSshDestination'));
-			current.path = endpoint;
+			if (!sshFields.host.trim() || !sshFields.path.trim() || sshFields.path.trim() === '/') {
+				throw new Error(t('invalidSshDestination'));
+			}
+			current.path = formatSshDestination(sshFields);
 			current.mount_point = null;
 			current.expected_mount_source = null;
 			return next;
 		}
 
+		if (!current.path.trim()) throw new Error(t('destinationNeedsPath'));
 		const probe = await inspectDestinationMount(current.path);
 		if (!probe) {
 			current.kind = 'raw';
@@ -259,12 +252,6 @@
 	async function validateDestination() {
 		error = '';
 		message = '';
-		if (!destination.path.trim()) {
-			error = t('destinationNeedsPath');
-			focusSection('destination');
-			return;
-		}
-
 		validatingDestination = true;
 		try {
 			const next = await normalizedConfiguration();
@@ -309,250 +296,24 @@
 		['hourly', 'hourlySchedule'],
 		['*-*-* 02:00:00', 'dailySchedule'],
 		['Sun *-*-* 02:00:00', 'weeklySchedule'],
-		['@snapshots', 'snapshotSchedule'],
-		['*-*-01 02:00:00', 'scheduleMonthly']
+		['@snapshots', 'snapshotSchedule']
 	] as const;
-
-	const simpleSchedules = schedules.slice(0, 4);
 </script>
 
 <div class="protection-editor">
-	{#if !advanced}
-		<div class="simple-schedule">
-			<div>
-				<strong>{t('schedule')}</strong>
-				<small>{t('simpleScheduleHelp')}</small>
-			</div>
-			<div class="schedule-options">
-				{#each simpleSchedules as [value, key] (value)}
-					<button
-						type="button"
-						class:active={profile.on_calendar === value}
-						disabled={value === '@snapshots' && !hasSnapperSource}
-						title={value === '@snapshots' && !hasSnapperSource
-							? t('snapshotScheduleNeedsSnapper')
-							: ''}
-						onclick={() => updateProfile((current) => (current.on_calendar = value))}
-					>
-						{t(key)}
-					</button>
-				{/each}
-			</div>
-			<div class="simple-defaults">
-				<Check size={14} />
-				<span>{t('simpleDefaults')}</span>
-			</div>
-		</div>
-	{/if}
-	<div class="editor-grid" class:single={!advanced}>
-		{#if advanced}
-			<article class="panel editor-card">
-				<div class="panel-head">
-					<div>
-						<p class="eyebrow">{t('profile')}</p>
-						<h3>{profile.name || t('profileName')}</h3>
-						<div class="runtime-summary">
-							<span class:good-status={runtime?.timer_active} class:warn={!runtime?.timer_active}>
-								{timerLabel()}
-							</span>
-							{#if runtime?.next_elapse_realtime}
-								<small>{t('nextScheduledRun')}: {runtime.next_elapse_realtime}</small>
-							{/if}
-							{#if runtime?.last_trigger}
-								<small>{t('lastTrigger')}: {runtime.last_trigger}</small>
-							{/if}
-						</div>
-					</div>
-					<span class="badge good"><ShieldCheck size={14} /> {t('recommended')}</span>
-				</div>
-
-				<label class="field">
-					<span>{t('profileName')}</span>
-					<input
-						value={profile.name}
-						oninput={(event) =>
-							updateProfile(
-								(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
-							)}
-					/>
-				</label>
-
-				<label class="field">
-					<span>{t('schedule')}</span>
-					<select
-						value={schedules.some(([value]) => value === profile.on_calendar)
-							? profile.on_calendar
-							: 'custom'}
-						onchange={(event) => {
-							const value = (event.currentTarget as HTMLSelectElement).value;
-							if (value !== 'custom') updateProfile((current) => (current.on_calendar = value));
-						}}
-					>
-						{#each schedules as [value, key] (value)}
-							<option {value}>{t(key)}</option>
-						{/each}
-						<option value="custom">{t('advanced')}</option>
-					</select>
-				</label>
-
-				{#if profile.on_calendar !== '@snapshots'}
-					<label class="field">
-						<span>{t('scheduleSpec')}</span>
-						<input
-							value={profile.on_calendar}
-							oninput={(event) =>
-								updateProfile(
-									(current) =>
-										(current.on_calendar = (event.currentTarget as HTMLInputElement).value)
-								)}
-						/>
-					</label>
-				{/if}
-
-				<div class="retention-grid">
-					{#each [['hourly', 'retentionHourly'], ['daily', 'dailyCopies'], ['weekly', 'weeklyCopies'], ['monthly', 'monthlyCopies'], ['yearly', 'retentionYearly']] as [field, key] (field)}
-						<label class="field compact">
-							<span>{t(key as TranslationKey)}</span>
-							<input
-								type="number"
-								min="0"
-								value={profile.retention[field as keyof typeof profile.retention]}
-								oninput={(event) =>
-									updateProfile((current) => {
-										current.retention[field as keyof typeof current.retention] = Math.max(
-											0,
-											Number((event.currentTarget as HTMLInputElement).value) || 0
-										);
-									})}
-							/>
-						</label>
-					{/each}
-				</div>
-
-				<label class="toggle-row">
-					<input
-						type="checkbox"
-						checked={profile.verify_after_backup}
-						onchange={(event) =>
-							updateProfile(
-								(current) =>
-									(current.verify_after_backup = (event.currentTarget as HTMLInputElement).checked)
-							)}
-					/>
-					<span>
-						<strong>{t('verifyAfterBackup')}</strong>
-						<small>SHA-256 · raw verify</small>
-					</span>
-				</label>
-			</article>
-		{/if}
-
-		<article class="panel editor-card" id="harbor-destination">
-			<div class="panel-head">
-				<div>
-					<p class="eyebrow">{t('destination')}</p>
-					<h3>{t('backupDestination')}</h3>
-				</div>
-				<Server size={20} />
-			</div>
-
-			{#if advanced}
-				<label class="field">
-					<span>{t('destinationName')}</span>
-					<input
-						value={destination.name}
-						oninput={(event) =>
-							updateDestination(
-								(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
-							)}
-					/>
-				</label>
-			{/if}
-
-			<div class="destination-mode" role="group" aria-label={t('destinationType')}>
-				<button
-					type="button"
-					class:active={!destinationIsSsh}
-					onclick={() => setDestinationMode('folder')}
-				>
-					<FolderOpen size={15} />
-					{t('folderDestination')}
-				</button>
-				<button
-					type="button"
-					class:active={destinationIsSsh}
-					onclick={() => setDestinationMode('ssh')}
-				>
-					<Server size={15} />
-					{t('sshDestination')}
-				</button>
-			</div>
-
-			<label class="field">
-				<span>{destinationIsSsh ? t('sshAddress') : t('backupFolder')}</span>
-				<div class:path-picker={!destinationIsSsh} class="destination-input">
-					<input
-						value={destination.path}
-						placeholder={destinationIsSsh ? 'user@server:/backups' : '/mnt/backup'}
-						oninput={(event) =>
-							updateDestination(
-								(current) => (current.path = (event.currentTarget as HTMLInputElement).value)
-							)}
-					/>
-					{#if !destinationIsSsh}
-						<button class="secondary" type="button" onclick={browseDestination}>
-							<FolderOpen size={16} />
-							{t('chooseFolder')}
-						</button>
-					{/if}
-					<button
-						class="secondary validation-button"
-						class:validated={destinationValidated}
-						type="button"
-						disabled={validatingDestination}
-						onclick={validateDestination}
-					>
-						<Check size={15} />
-						{destinationValidated ? t('destinationReady') : t('validateDestination')}
-					</button>
-				</div>
-				<small class="field-help">
-					{destinationIsSsh ? t('sshDestinationHelp') : t('folderDestinationHelp')}
-				</small>
-			</label>
-
-			{#if advanced}
-				<label class="field">
-					<span>{t('compression')}</span>
-					<select
-						value={destination.compression}
-						onchange={(event) =>
-							updateDestination(
-								(current) =>
-									(current.compression = (event.currentTarget as HTMLSelectElement).value)
-							)}
-					>
-						<option value="zstd">zstd</option>
-						<option value="none">none</option>
-					</select>
-				</label>
-			{/if}
-		</article>
-	</div>
-
-	<article class="panel editor-card" id="harbor-sources">
+	<article class="panel editor-card source-section" id="harbor-sources">
 		<div class="panel-head">
 			<div>
-				<p class="eyebrow">{t('selectVolumes')}</p>
-				<h3>{t('sourceDetails')}</h3>
+				<p class="eyebrow">{t('whatBackedUp')}</p>
+				<h3>{t('coverageSummary')}</h3>
 			</div>
-			<span class="badge good">{profile.sources.length} enabled</span>
+			<span class="badge good">{profile.sources.length} {t('sourcesSelected')}</span>
 		</div>
 
 		{#if discoveryError}
 			<p class="error-text">{t('sourceDiscoveryFailed')}: {discoveryError}</p>
 		{/if}
-		<div class="source-editor-list">
+		<div class="source-editor-list compact-sources">
 			{#if sourceChoices.length === 0}
 				<p class="empty-state">{t('noBtrfsSources')}</p>
 			{/if}
@@ -567,17 +328,19 @@
 								toggleSource(sourceChoice, (event.currentTarget as HTMLInputElement).checked)}
 						/>
 						<span class="check-box"><Check size={13} /></span>
-						<code>{path}</code>
+						<span class="source-label">
+							<strong>{sourceName(path)}</strong>
+							<small
+								><code>{path}</code>{sourceChoice.subvolume
+									? ' · ' + sourceChoice.subvolume
+									: ''}</small
+							>
+						</span>
 						<span class:good={sourceChoice.hint === 'recommended'} class="badge">
 							{sourceHintLabel(sourceChoice)}
 						</span>
-						{#if sourceChoice.subvolume}
-							<span class="badge">{sourceChoice.subvolume}</span>
-						{/if}
 						{#if sourceChoice.snapper_config}
-							<span class="badge good">
-								{t('snapperManaged')}: {sourceChoice.snapper_config}
-							</span>
+							<span class="badge good">{t('snapperManaged')}</span>
 						{/if}
 						{#if (sourceChoice.snapshot_count ?? 0) > 0}
 							<span class="badge">
@@ -585,64 +348,293 @@
 								{t('snapshotCount').toLowerCase()}
 							</span>
 						{/if}
-						{#if (sourceChoice.sendable_snapshot_count ?? 0) > 0}
-							<span class="badge good">
-								{sourceChoice.sendable_snapshot_count}
-								{t('sendable')}
-							</span>
-						{/if}
 					</label>
-
-					{#if advanced && isSourceEnabled(profile, path)}
+					{#if isSourceEnabled(profile, path)}
 						{@const source = profile.sources.find((candidate) => candidate.path === path)}
-						{#if source}
-							<div class="source-advanced">
-								<label class="field compact">
-									<span>snapshot_prefix</span>
-									<input
-										value={source.snapshot_prefix}
-										oninput={(event) =>
-											updateSource(
-												path,
-												(current) =>
-													(current.snapshot_prefix = (
-														event.currentTarget as HTMLInputElement
-													).value)
-											)}
-									/>
-								</label>
-								<label class="field compact">
-									<span>snapper_config</span>
-									<input
-										value={source.snapper_config ?? ''}
-										oninput={(event) =>
-											updateSource(
-												path,
-												(current) =>
-													(current.snapper_config =
-														(event.currentTarget as HTMLInputElement).value || null)
-											)}
-									/>
-								</label>
-								<label class="field compact">
-									<span>target_subdir</span>
-									<input
-										value={source.target_subdir}
-										oninput={(event) =>
-											updateSource(
-												path,
-												(current) =>
-													(current.target_subdir = (event.currentTarget as HTMLInputElement).value)
-											)}
-									/>
-								</label>
-							</div>
-						{/if}
+						<details class="advanced-details source-options">
+							<summary>{t('technicalDetails')} <ChevronDown size={13} /></summary>
+							{#if source}
+								<div class="source-advanced">
+									<label class="field compact">
+										<span>snapshot_prefix</span>
+										<input
+											value={source.snapshot_prefix}
+											oninput={(event) =>
+												updateSource(
+													path,
+													(current) =>
+														(current.snapshot_prefix = (
+															event.currentTarget as HTMLInputElement
+														).value)
+												)}
+										/>
+									</label>
+									<label class="field compact">
+										<span>snapper_config</span>
+										<input
+											value={source.snapper_config ?? ''}
+											oninput={(event) =>
+												updateSource(
+													path,
+													(current) =>
+														(current.snapper_config =
+															(event.currentTarget as HTMLInputElement).value || null)
+												)}
+										/>
+									</label>
+									<label class="field compact">
+										<span>target_subdir</span>
+										<input
+											value={source.target_subdir}
+											oninput={(event) =>
+												updateSource(
+													path,
+													(current) =>
+														(current.target_subdir = (
+															event.currentTarget as HTMLInputElement
+														).value)
+												)}
+										/>
+									</label>
+								</div>
+							{/if}
+						</details>
 					{/if}
 				</div>
 			{/each}
 		</div>
 	</article>
+
+	<article class="panel editor-card destination-section" id="harbor-destination">
+		<div class="panel-head">
+			<div>
+				<p class="eyebrow">{t('destination')}</p>
+				<h3>{t('backupDestination')}</h3>
+			</div>
+			<Server size={20} />
+		</div>
+
+		<div class="destination-mode" role="group" aria-label={t('destinationType')}>
+			<button
+				type="button"
+				class:active={!destinationIsSsh}
+				onclick={() => setDestinationMode('folder')}
+			>
+				<FolderOpen size={15} />
+				{t('folderDestination')}
+			</button>
+			<button
+				type="button"
+				class:active={destinationIsSsh}
+				onclick={() => setDestinationMode('ssh')}
+			>
+				<Server size={15} />
+				{t('sshDestination')}
+			</button>
+		</div>
+
+		{#if destinationIsSsh}
+			<div class="ssh-grid">
+				<label class="field">
+					<span>{t('sshHost')}</span>
+					<input
+						value={sshFields.host}
+						placeholder="192.0.2.10"
+						oninput={(event) =>
+							setSshFields({ ...sshFields, host: (event.currentTarget as HTMLInputElement).value })}
+					/>
+				</label>
+				<label class="field">
+					<span>{t('sshUser')}</span>
+					<input
+						value={sshFields.user}
+						placeholder="backup"
+						oninput={(event) =>
+							setSshFields({ ...sshFields, user: (event.currentTarget as HTMLInputElement).value })}
+					/>
+				</label>
+				<label class="field">
+					<span>{t('sshPort')}</span>
+					<input
+						type="number"
+						min="1"
+						max="65535"
+						value={sshFields.port}
+						oninput={(event) =>
+							setSshFields({
+								...sshFields,
+								port: Number((event.currentTarget as HTMLInputElement).value) || 22
+							})}
+					/>
+				</label>
+				<label class="field ssh-folder">
+					<span>{t('sshFolder')}</span>
+					<input
+						value={sshFields.path}
+						placeholder="/backups/workstation"
+						oninput={(event) =>
+							setSshFields({ ...sshFields, path: (event.currentTarget as HTMLInputElement).value })}
+					/>
+				</label>
+			</div>
+			<div class="destination-actions">
+				<button
+					class="secondary validation-button"
+					class:validated={destinationValidated}
+					type="button"
+					disabled={validatingDestination}
+					onclick={validateDestination}
+				>
+					<Check size={15} />
+					{destinationValidated ? t('destinationReady') : t('testConnection')}
+				</button>
+			</div>
+		{:else}
+			<label class="field">
+				<span>{t('backupFolder')}</span>
+				<div class="path-picker">
+					<input
+						value={destination.path}
+						placeholder="/mnt/backup"
+						oninput={(event) =>
+							updateDestination(
+								(current) => (current.path = (event.currentTarget as HTMLInputElement).value)
+							)}
+					/>
+					<button class="secondary" type="button" onclick={browseDestination}>
+						<FolderOpen size={16} />
+						{t('chooseFolder')}
+					</button>
+					<button
+						class="secondary validation-button"
+						class:validated={destinationValidated}
+						type="button"
+						disabled={validatingDestination}
+						onclick={validateDestination}
+					>
+						<Check size={15} />
+						{destinationValidated ? t('destinationReady') : t('validateDestination')}
+					</button>
+				</div>
+				<small class="field-help">{t('folderDestinationHelp')}</small>
+			</label>
+		{/if}
+
+		<details class="advanced-details">
+			<summary>{t('moreOptions')} <ChevronDown size={13} /></summary>
+			<div class="details-grid">
+				<label class="field compact">
+					<span>{t('destinationName')}</span>
+					<input
+						value={destination.name}
+						oninput={(event) =>
+							updateDestination(
+								(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
+							)}
+					/>
+				</label>
+				<label class="field compact">
+					<span>{t('compression')}</span>
+					<select
+						value={destination.compression}
+						onchange={(event) =>
+							updateDestination(
+								(current) =>
+									(current.compression = (event.currentTarget as HTMLSelectElement).value)
+							)}
+					>
+						<option value="zstd">zstd</option>
+						<option value="none">none</option>
+					</select>
+				</label>
+			</div>
+		</details>
+	</article>
+
+	<section class="simple-schedule schedule-section" id="harbor-schedule">
+		<div>
+			<strong>{t('schedule')}</strong>
+			<small>{t('simpleScheduleHelp')}</small>
+		</div>
+		<div class="schedule-options">
+			{#each schedules as [value, key] (value)}
+				<button
+					type="button"
+					class:active={profile.on_calendar === value}
+					disabled={value === '@snapshots' && !hasSnapperSource}
+					title={value === '@snapshots' && !hasSnapperSource
+						? t('snapshotScheduleNeedsSnapper')
+						: ''}
+					onclick={() => updateProfile((current) => (current.on_calendar = value))}
+				>
+					{t(key)}
+				</button>
+			{/each}
+		</div>
+		{#if runtime}
+			<small class:good-status={runtime.timer_active}>{timerLabel()}</small>
+		{/if}
+		<details class="advanced-details">
+			<summary>{t('moreOptions')} <ChevronDown size={13} /></summary>
+			<div class="details-grid">
+				<label class="field compact" id="harbor-profile">
+					<span>{t('profileName')}</span>
+					<input
+						value={profile.name}
+						oninput={(event) =>
+							updateProfile(
+								(current) => (current.name = (event.currentTarget as HTMLInputElement).value)
+							)}
+					/>
+				</label>
+				<label class="field compact">
+					<span>{t('scheduleSpec')}</span>
+					<input
+						disabled={profile.on_calendar === '@snapshots'}
+						value={profile.on_calendar}
+						oninput={(event) =>
+							updateProfile(
+								(current) => (current.on_calendar = (event.currentTarget as HTMLInputElement).value)
+							)}
+					/>
+				</label>
+			</div>
+			<div class="retention-grid">
+				{#each [['hourly', 'retentionHourly'], ['daily', 'dailyCopies'], ['weekly', 'weeklyCopies'], ['monthly', 'monthlyCopies'], ['yearly', 'retentionYearly']] as [field, key] (field)}
+					<label class="field compact">
+						<span>{t(key as TranslationKey)}</span>
+						<input
+							type="number"
+							min="0"
+							value={profile.retention[field as keyof typeof profile.retention]}
+							oninput={(event) =>
+								updateProfile((current) => {
+									current.retention[field as keyof typeof current.retention] = Math.max(
+										0,
+										Number((event.currentTarget as HTMLInputElement).value) || 0
+									);
+								})}
+						/>
+					</label>
+				{/each}
+			</div>
+			<label class="toggle-row">
+				<input
+					type="checkbox"
+					checked={profile.verify_after_backup}
+					onchange={(event) =>
+						updateProfile(
+							(current) =>
+								(current.verify_after_backup = (event.currentTarget as HTMLInputElement).checked)
+						)}
+				/>
+				<span>
+					<strong>{t('verifyAfterBackup')}</strong>
+					<small>SHA-256 · raw verify</small>
+				</span>
+			</label>
+		</details>
+	</section>
 
 	<div class="editor-actions">
 		<div class="editor-feedback">

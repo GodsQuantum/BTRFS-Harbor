@@ -22,6 +22,12 @@ describe('translations', () => {
 		);
 	});
 
+	it('labels the dedicated multi-job page as Scheduled Jobs', () => {
+		expect(dictionaries.en.scheduledJobs).toBe('Scheduled Jobs');
+		expect(dictionaries.fr.scheduledJobs).toBe('Tâches planifiées');
+		expect(dictionaries['zh-CN'].scheduledJobs.length).toBeGreaterThan(0);
+	});
+
 	it('does not leave empty translated strings', () => {
 		for (const dictionary of Object.values(dictionaries)) {
 			expect(Object.values(dictionary).every((value) => value.trim().length > 0)).toBe(true);

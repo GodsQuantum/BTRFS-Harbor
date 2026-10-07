@@ -1172,6 +1172,69 @@ main {
 	margin: 0;
 	font-size: 10px;
 }
+.jobs-intro > div:nth-child(2) {
+	min-width: 0;
+	flex: 1;
+}
+.scheduled-jobs-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 10px;
+}
+.scheduled-job-card {
+	display: grid;
+	gap: 10px;
+}
+.scheduled-job-card.editing {
+	border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.scheduled-job-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.scheduled-job-head h3 {
+	margin: 2px 0 0;
+	font-size: 12px;
+}
+.scheduled-job-summary {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.scheduled-job-summary > div {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+	padding: 8px;
+	border: 1px solid var(--border);
+	border-radius: 7px;
+	background: var(--surface-soft);
+}
+.scheduled-job-summary span {
+	color: var(--subtle);
+	font-size: 8px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.scheduled-job-summary strong,
+.scheduled-job-summary code {
+	overflow: hidden;
+	font-size: 9px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.scheduled-job-editor {
+	display: grid;
+	gap: 10px;
+}
+@media (max-width: 900px) {
+	.scheduled-job-summary {
+		grid-template-columns: 1fr;
+	}
+}
 .simple-defaults {
 	display: flex;
 	align-items: center;

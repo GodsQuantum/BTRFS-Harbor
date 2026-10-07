@@ -39,6 +39,7 @@
 	import type { ProfileRuntime } from './status';
 
 	export let config: HarborConfig;
+	export let profileId: string | undefined = undefined;
 	export let locale: Locale = 'en';
 	export let runtime: ProfileRuntime | null | undefined = null;
 	export let onApplied: () => Promise<void> | void = () => {};
@@ -54,7 +55,7 @@
 	let discoveredSources: DiscoveredSource[] = [];
 	let sshFields: SshDestinationFields = { user: '', host: '', port: 22, path: '/backups' };
 
-	$: profile = resolveProfile(config);
+	$: profile = resolveProfile(config, profileId);
 	$: destination = resolveDestination(config, profile);
 	$: sourceChoices = buildSourceChoices(discoveredSources, profile);
 	$: destinationIsSsh = destination.kind === 'ssh';

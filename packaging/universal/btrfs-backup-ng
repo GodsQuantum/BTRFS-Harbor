@@ -27,4 +27,9 @@ if [ ! -r "$ENGINE" ]; then
   exit 127
 fi
 
+# The portable engine can run through pkexec from an extracted AppImage. Keep the
+# extracted runtime immutable so root does not leave bytecode that the user-side
+# AppImage cleanup cannot remove afterwards.
+export PYTHONDONTWRITEBYTECODE=1
+
 exec "$PYTHON" "$ENGINE" "$@"

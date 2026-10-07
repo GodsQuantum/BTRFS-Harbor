@@ -22,6 +22,8 @@
 	import Moon from 'lucide-svelte/icons/moon';
 	import Network from 'lucide-svelte/icons/network';
 	import Play from 'lucide-svelte/icons/play';
+	import Plus from 'lucide-svelte/icons/plus';
+	import Pencil from 'lucide-svelte/icons/pencil';
 	import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
 	import Server from 'lucide-svelte/icons/server';
 	import Settings from 'lucide-svelte/icons/settings';
@@ -41,7 +43,15 @@
 		type InstallationState,
 		type SystemIdentity
 	} from '#lib/agent.ts';
-	import { cloneConfiguration, resolveProfile, type HarborConfig } from '#lib/config.ts';
+	import {
+		appendDefaultBackupJob,
+		cloneConfiguration,
+		resolveDestination,
+		resolveProfile,
+		sourceDisplayName,
+		type BackupProfile,
+		type HarborConfig
+	} from '#lib/config.ts';
 	import {
 		dictionaries,
 		localeLabels,
@@ -83,6 +93,7 @@
 	let scheduleSaving = false;
 	let scheduleFeedback = '';
 	let scheduleError = '';
+	let editingJobId: string | null = null;
 	$: protection = protectionState(dashboard.engine);
 	$: activeProfile = harborConfig?.profiles[0] ?? null;
 	$: activeSchedule = activeProfile?.on_calendar ?? '';
@@ -198,7 +209,30 @@
 	}
 
 	function pageTitle(page: Page): string {
+		if (page === 'protection') return t('scheduledJobs');
 		return t(page as TranslationKey);
+	}
+
+	function addBackupJob() {
+		if (!harborConfig) return;
+		const next = appendDefaultBackupJob(harborConfig);
+		harborConfig = next;
+		editingJobId = next.profiles.at(-1)?.id ?? null;
+	}
+
+	function jobDestination(profile: BackupProfile): string {
+		if (!harborConfig) return t('notConfigured');
+		try {
+			const destination = resolveDestination(harborConfig, profile);
+			return destination.path.trim() || destination.name || t('notConfigured');
+		} catch {
+			return t('notConfigured');
+		}
+	}
+
+	function jobSources(profile: BackupProfile): string {
+		if (profile.sources.length === 0) return t('notConfigured');
+		return profile.sources.map((source) => sourceDisplayName(source.path)).join(', ');
 	}
 
 	const timelineRows = [
@@ -244,7 +278,7 @@
 				<Gauge size={18} strokeWidth={1.8} /><span>{t('overview')}</span>
 			</button>
 			<button class:active={active === 'protection'} onclick={() => (active = 'protection')}>
-				<Clock3 size={18} strokeWidth={1.8} /><span>{t('protection')}</span>
+				<Clock3 size={18} strokeWidth={1.8} /><span>{t('scheduledJobs')}</span>
 			</button>
 			{#if dashboard.source === 'live' || dashboard.source === 'demo'}
 				<button class:active={active === 'timeline'} onclick={() => (active = 'timeline')}>
@@ -584,24 +618,66 @@
 				</article>
 			</section>
 		{:else if active === 'protection'}
-			<section class="content-stack">
-				<div class="page-intro">
-					<div class="intro-icon"><ShieldCheck size={24} /></div>
+			<section class="content-stack scheduled-jobs-page">
+				<div class="page-intro jobs-intro">
+					<div class="intro-icon"><Clock3 size={24} /></div>
 					<div>
-						<h2>{t('protectionTitle')}</h2>
-						<p>{t('protectionIntro')}</p>
+						<h2>{t('scheduledJobs')}</h2>
+						<p>{t('scheduledJobsIntro')}</p>
 					</div>
+					{#if harborConfig}
+						<button class="primary compact" type="button" onclick={addBackupJob}>
+							<Plus size={16} />
+							{t('addBackupJob')}
+						</button>
+					{/if}
 				</div>
 
 				{#if harborConfig}
-					<ProtectionEditor
-						bind:config={harborConfig}
-						{locale}
-						onApplied={async () => {
-							dashboard = await loadDashboardStatus();
-							harborConfig = await loadHarborConfiguration();
-						}}
-					/>
+					<div class="scheduled-jobs-grid">
+						{#each harborConfig.profiles as job (job.id)}
+							<article class:editing={editingJobId === job.id} class="panel scheduled-job-card">
+								<div class="scheduled-job-head">
+									<div>
+										<span class="eyebrow">{t('profile')}</span>
+										<h3>{job.name}</h3>
+									</div>
+									<button
+										class="secondary compact"
+										type="button"
+										onclick={() => (editingJobId = editingJobId === job.id ? null : job.id)}
+									>
+										<Pencil size={14} />
+										{editingJobId === job.id ? t('doneEditing') : t('editJob')}
+									</button>
+								</div>
+								<div class="scheduled-job-summary">
+									<div><span>{t('source')}</span><strong>{jobSources(job)}</strong></div>
+									<div><span>{t('destination')}</span><code>{jobDestination(job)}</code></div>
+									<div>
+										<span>{t('schedule')}</span><strong>{readableSchedule(job.on_calendar)}</strong>
+									</div>
+								</div>
+							</article>
+						{/each}
+					</div>
+
+					{#if editingJobId}
+						{#key editingJobId}
+							<div class="scheduled-job-editor">
+								<ProtectionEditor
+									bind:config={harborConfig}
+									profileId={editingJobId}
+									{locale}
+									runtime={editingJobId === dashboard.profileId ? dashboard.runtime : null}
+									onApplied={async () => {
+										dashboard = await loadDashboardStatus();
+										harborConfig = await loadHarborConfiguration();
+									}}
+								/>
+							</div>
+						{/key}
+					{/if}
 				{:else}
 					<article class="callout danger">
 						<CircleAlert size={21} />
@@ -611,23 +687,6 @@
 						</div>
 					</article>
 				{/if}
-
-				<div class="two-column">
-					<article class="callout">
-						<Network size={21} />
-						<div>
-							<strong>{t('mountGuard')}</strong>
-							<p>{t('mountGuardDesc')}</p>
-						</div>
-					</article>
-					<article class="callout">
-						<LifeBuoy size={21} />
-						<div>
-							<strong>{t('recoveryKit')}</strong>
-							<p>{t('recoveryKitDesc')}</p>
-						</div>
-					</article>
-				</div>
 			</section>
 		{:else if active === 'timeline'}
 			<section class="content-stack">

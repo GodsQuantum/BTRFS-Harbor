@@ -1,6 +1,7 @@
 use harbor_storage::MountTable;
 use serde::Serialize;
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -12,6 +13,47 @@ use uuid::Uuid;
 const BUS_NAME: &str = "io.github.GodsQuantum.BtrfsHarbor1";
 const OBJECT_PATH: &str = "/io/github/GodsQuantum/BtrfsHarbor1";
 const INTERFACE: &str = "io.github.GodsQuantum.BtrfsHarbor1";
+
+fn appimage_extract_reexec_required(
+    appimage: Option<&OsStr>,
+    extract_and_run: Option<&OsStr>,
+) -> bool {
+    appimage.is_some() && extract_and_run.is_none()
+}
+
+pub fn reexec_appimage_extract_and_run_if_needed() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let appimage = std::env::var_os("APPIMAGE");
+        let extract_and_run = std::env::var_os("APPIMAGE_EXTRACT_AND_RUN");
+        if appimage_extract_reexec_required(appimage.as_deref(), extract_and_run.as_deref()) {
+            use std::os::unix::process::CommandExt;
+            let image = appimage.expect("APPIMAGE was checked above");
+            let error = std::process::Command::new(image)
+                .args(std::env::args_os().skip(1))
+                .env("APPIMAGE_EXTRACT_AND_RUN", "1")
+                .exec();
+            return Err(format!(
+                "Cannot restart Btrfs Harbor in AppImage extract-and-run mode: {error}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn helper_failure_message(status: &std::process::ExitStatus, stderr: &[String]) -> String {
+    let detail = stderr
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if detail.is_empty() {
+        format!("Harbor helper failed with {status}")
+    } else {
+        detail
+    }
+}
 
 #[cfg_attr(not(test), allow(dead_code))]
 fn bundled_helper_path(resource_dir: &Path) -> PathBuf {
@@ -519,6 +561,7 @@ async fn run_privileged_profile_stream(
 
     let mut stdout_lines = BufReader::new(stdout).lines();
     let mut stderr_lines = BufReader::new(stderr).lines();
+    let mut stderr_tail = Vec::<String>::new();
     let mut stdout_done = false;
     let mut stderr_done = false;
 
@@ -552,6 +595,10 @@ async fn run_privileged_profile_stream(
             line = stderr_lines.next_line(), if !stderr_done => {
                 match line {
                     Ok(Some(line)) => {
+                        stderr_tail.push(line.clone());
+                        if stderr_tail.len() > 8 {
+                            stderr_tail.remove(0);
+                        }
                         let _ = on_event.send(serde_json::json!({
                             "event": "output",
                             "phase": "helper",
@@ -580,7 +627,7 @@ async fn run_privileged_profile_stream(
         .map_err(|err| format!("Cannot wait for privileged Harbor helper: {err}"))?;
 
     if !status.success() {
-        return Err(format!("Harbor helper failed with {status}"));
+        return Err(helper_failure_message(&status, &stderr_tail));
     }
 
     Ok(())
@@ -836,6 +883,32 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appimage_reexec_is_required_before_privileged_helpers_touch_fuse_payload() {
+        assert!(appimage_extract_reexec_required(
+            Some(std::ffi::OsStr::new("/home/user/Btrfs-Harbor.AppImage")),
+            None
+        ));
+        assert!(!appimage_extract_reexec_required(None, None));
+        assert!(!appimage_extract_reexec_required(
+            Some(std::ffi::OsStr::new("/home/user/Btrfs-Harbor.AppImage")),
+            Some(std::ffi::OsStr::new("1"))
+        ));
+    }
+
+    #[test]
+    fn helper_failure_prefers_captured_stderr_over_generic_exit_status() {
+        let status = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 127"])
+            .status()
+            .unwrap();
+        assert_eq!(
+            helper_failure_message(&status, &["Permission denied".to_string()]),
+            "Permission denied"
+        );
+        assert!(helper_failure_message(&status, &[]).contains("exit status: 127"));
+    }
 
     #[test]
     fn bundled_helper_lives_under_portable_resource_directory() {

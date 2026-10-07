@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	appendDefaultBackupJob,
 	backupSourceFromDiscovery,
 	createDefaultConfiguration,
 	describeDraftIssue,
@@ -50,6 +51,27 @@ describe('Harbor profile editor model', () => {
 		expect(destination.path).toBe('');
 		expect(destination.mount_point).toBeNull();
 		expect(destination.expected_mount_source).toBeNull();
+	});
+
+	it('adds an independent backup job with its own destination', () => {
+		const generated = [
+			'11111111-1111-4111-8111-111111111111',
+			'22222222-2222-4222-8222-222222222222',
+			'33333333-3333-4333-8333-333333333333',
+			'44444444-4444-4444-8444-444444444444'
+		];
+		const nextId = () => generated.shift() ?? crypto.randomUUID();
+		const original = createDefaultConfiguration(nextId);
+		const next = appendDefaultBackupJob(original, nextId);
+
+		expect(original.profiles).toHaveLength(1);
+		expect(original.destinations).toHaveLength(1);
+		expect(next.profiles).toHaveLength(2);
+		expect(next.destinations).toHaveLength(2);
+		expect(next.profiles[1].id).toBe('33333333-3333-4333-8333-333333333333');
+		expect(next.profiles[1].destination_ids).toEqual(['44444444-4444-4444-8444-444444444444']);
+		expect(next.profiles[1].name).toBe('Backup job 2');
+		expect(next.destinations[1].name).toBe('Backup destination 2');
 	});
 
 	it('turns internal draft issue tokens into actionable user guidance', () => {

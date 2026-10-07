@@ -237,6 +237,37 @@ export function createDefaultConfiguration(
 	};
 }
 
+export function appendDefaultBackupJob(
+	config: HarborConfig,
+	uuidFactory: () => string = () => crypto.randomUUID()
+): HarborConfig {
+	const next = cloneConfiguration(config);
+	const profileId = uuidFactory();
+	const destinationId = uuidFactory();
+	const number = next.profiles.length + 1;
+
+	next.destinations.push({
+		id: destinationId,
+		name: `Backup destination ${number}`,
+		kind: 'raw',
+		path: '',
+		mount_point: null,
+		expected_mount_source: null,
+		compression: 'zstd',
+		optional: false
+	});
+	next.profiles.push({
+		id: profileId,
+		name: `Backup job ${number}`,
+		sources: [],
+		destination_ids: [destinationId],
+		on_calendar: '*-*-* 02:00:00',
+		retention: { hourly: 0, daily: 7, weekly: 4, monthly: 3, yearly: 0 },
+		verify_after_backup: true
+	});
+	return next;
+}
+
 export function cloneConfiguration(config: HarborConfig): HarborConfig {
 	return structuredClone(config);
 }

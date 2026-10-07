@@ -125,8 +125,13 @@ jobs:
       - name: Build portable AppImage
         working-directory: harbor/desktop
         run: |
+          test -x portable/btrfs-harborctl
+          test -x portable/btrfs-backup-ng
+          test -f portable/btrfs-backup-ng.pyz
+          test -x portable/python/bin/python3
+          test -x src-tauri/../portable/btrfs-harborctl
           pnpm tauri build --bundles appimage \
-            --config '{"bundle":{"resources":{"portable/":"portable/"}}}'
+            --config '{"bundle":{"resources":{"../portable/":"portable/"}}}'
 
       - name: Build native DEB and RPM
         working-directory: harbor/desktop

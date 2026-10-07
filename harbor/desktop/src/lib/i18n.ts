@@ -24,6 +24,14 @@ const en = {
 	scheduledJobs: 'Scheduled Jobs',
 	scheduledJobsIntro:
 		'Manage separate backup jobs when different data needs different destinations or schedules.',
+	noScheduledJobs: 'No automatic jobs installed',
+	noScheduledJobsDesc:
+		'Manual backups stay manual. A job appears here only after Harbor automation has been installed for it.',
+	scheduleInactiveUntilInstalled:
+		'This frequency is only a draft until you install automatic backups.',
+	workflowProgress: 'Backup workflow progress',
+	progressStageEstimate: 'Stage progress, not a byte-transfer percentage.',
+	recoverFromSnapshot: 'Recover from backup snapshot',
 	addBackupJob: 'Add backup job',
 	editJob: 'Edit',
 	doneEditing: 'Done',
@@ -262,9 +270,9 @@ const en = {
 	backgroundAgent: 'Background backups',
 	systemdManaged: 'Starts automatically with the system',
 	closeSafe: 'Closing this window does not stop backups.',
-	upstreamEngine: 'Backup engine included with Harbor',
+	upstreamEngine: 'btrfs-backup-ng engine selection',
 	inheritedEngine:
-		'Harbor includes and uses btrfs-backup-ng itself to create, send and verify Btrfs backup streams. You do not need to install a separate engine.',
+		'Harbor prefers a compatible system btrfs-backup-ng (0.9.12 or newer). If none is installed, it automatically uses the engine bundled with Harbor. The engine actually used is shown during each backup.',
 	safety: 'Safety',
 	safetyText: 'Destructive recovery actions always generate a plan before execution.',
 	comingFoundation: 'Btrfs backup control center',
@@ -340,6 +348,14 @@ const fr: Dictionary = {
 	scheduledJobs: 'Tâches planifiées',
 	scheduledJobsIntro:
 		'Gère des tâches distinctes lorsque des données différentes doivent aller vers des destinations ou des fréquences différentes.',
+	noScheduledJobs: 'Aucune tâche automatique installée',
+	noScheduledJobsDesc:
+		'Une sauvegarde manuelle reste manuelle. Une tâche n’apparaît ici qu’après installation de l’automatisation Harbor.',
+	scheduleInactiveUntilInstalled:
+		'Cette fréquence reste un brouillon tant que les sauvegardes automatiques ne sont pas installées.',
+	workflowProgress: 'Progression des étapes de sauvegarde',
+	progressStageEstimate: 'Progression des étapes, pas un pourcentage des octets transférés.',
+	recoverFromSnapshot: 'Récupérer depuis un snapshot sauvegardé',
 	addBackupJob: 'Ajouter une tâche',
 	editJob: 'Modifier',
 	doneEditing: 'Terminer',
@@ -583,9 +599,9 @@ const fr: Dictionary = {
 	backgroundAgent: 'Sauvegardes en arrière-plan',
 	systemdManaged: 'Démarrage automatique avec le système',
 	closeSafe: 'Fermer cette fenêtre n’interrompt pas les sauvegardes.',
-	upstreamEngine: 'Moteur de sauvegarde inclus dans Harbor',
+	upstreamEngine: 'Sélection du moteur btrfs-backup-ng',
 	inheritedEngine:
-		'Harbor inclut et utilise lui-même btrfs-backup-ng pour créer, envoyer et vérifier les flux de sauvegarde Btrfs. Aucun moteur séparé n’est à installer.',
+		'Harbor préfère un btrfs-backup-ng système compatible (0.9.12 ou plus récent). S’il n’est pas installé, Harbor utilise automatiquement le moteur embarqué. Le moteur réellement utilisé est affiché pendant chaque sauvegarde.',
 	safety: 'Sécurité',
 	safetyText: 'Les restaurations destructives génèrent toujours un plan avant exécution.',
 	comingFoundation: 'Centre de contrôle Btrfs',
@@ -657,6 +673,12 @@ const zhCN: Dictionary = {
 	protection: '计划备份',
 	scheduledJobs: '计划任务',
 	scheduledJobsIntro: '当不同数据需要备份到不同位置或使用不同频率时，在此管理独立的备份任务。',
+	noScheduledJobs: '尚未安装自动备份任务',
+	noScheduledJobsDesc: '手动备份始终是手动的。只有安装 Harbor 自动化后，任务才会显示在这里。',
+	scheduleInactiveUntilInstalled: '在安装自动备份之前，此频率仅为草稿设置。',
+	workflowProgress: '备份工作流进度',
+	progressStageEstimate: '显示工作流阶段，而不是传输字节百分比。',
+	recoverFromSnapshot: '从备份快照恢复',
 	addBackupJob: '添加备份任务',
 	editJob: '编辑',
 	doneEditing: '完成',
@@ -880,9 +902,9 @@ const zhCN: Dictionary = {
 	backgroundAgent: '后台备份',
 	systemdManaged: '随系统自动启动',
 	closeSafe: '关闭此窗口不会停止备份。',
-	upstreamEngine: 'Harbor 内置备份引擎',
+	upstreamEngine: 'btrfs-backup-ng 引擎选择',
 	inheritedEngine:
-		'Harbor 自带并使用 btrfs-backup-ng 来创建、发送和验证 Btrfs 备份流，无需单独安装备份引擎。',
+		'Harbor 优先使用兼容的系统 btrfs-backup-ng（0.9.12 或更高版本）。如果系统未安装，则自动使用 Harbor 内置引擎。每次备份时都会显示实际使用的引擎。',
 	safety: '安全',
 	safetyText: '任何破坏性恢复操作都会先生成计划再执行。',
 	comingFoundation: 'Btrfs 备份控制中心',

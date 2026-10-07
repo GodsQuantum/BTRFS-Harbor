@@ -1,6 +1,6 @@
 [package]
 name = "btrfs-harbor-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "Native Btrfs Harbor backup, recovery and replication desktop"
 authors = ["Btrfs Harbor contributors"]
 license = "MIT"

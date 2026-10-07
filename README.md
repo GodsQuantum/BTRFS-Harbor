@@ -63,9 +63,9 @@ The release provides:
 Universal installer:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.2/BTRFS-Harbor-0.2.2-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.2-linux-x86_64.run
-./BTRFS-Harbor-0.2.2-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.3/BTRFS-Harbor-0.2.3-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.3-linux-x86_64.run
+./BTRFS-Harbor-0.2.3-linux-x86_64.run
 ```
 
 Harbor **prefers a compatible system `btrfs-backup-ng` (>= 0.9.12)** when one is already installed. Otherwise it uses the compatible engine bundled with Harbor. Harbor no longer replaces or conflicts with a user-installed upstream engine.

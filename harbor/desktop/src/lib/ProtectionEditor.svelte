@@ -6,6 +6,7 @@
 	import Play from 'lucide-svelte/icons/play';
 	import Save from 'lucide-svelte/icons/save';
 	import Server from 'lucide-svelte/icons/server';
+	import LifeBuoy from 'lucide-svelte/icons/life-buoy';
 	import {
 		applyHarborConfiguration,
 		chooseDestinationDirectory,
@@ -35,14 +36,16 @@
 		type HarborConfig,
 		type SshDestinationFields
 	} from './config';
+	import BackupProgress from './BackupProgress.svelte';
 	import { translate, type Locale, type TranslationKey } from './i18n';
-	import type { ProfileRuntime } from './status';
+	import type { BackupProgressEvent, ProfileRuntime } from './status';
 
 	export let config: HarborConfig;
 	export let profileId: string | undefined = undefined;
 	export let locale: Locale = 'en';
 	export let runtime: ProfileRuntime | null | undefined = null;
 	export let onApplied: () => Promise<void> | void = () => {};
+	export let onRecover: () => Promise<void> | void = () => {};
 
 	let applying = false;
 	let backingUp = false;
@@ -52,6 +55,9 @@
 	let discoveryError = '';
 	let destinationValidated = false;
 	let validatingDestination = false;
+	let backupProgress: BackupProgressEvent | null = null;
+	let backupDetail = '';
+	let backupEngine = '';
 	let discoveredSources: DiscoveredSource[] = [];
 	let sshFields: SshDestinationFields = { user: '', host: '', port: 22, path: '/backups' };
 
@@ -300,16 +306,27 @@
 	async function backupNow() {
 		error = '';
 		message = '';
+		backupProgress = null;
+		backupDetail = '';
+		backupEngine = '';
 		backingUp = true;
 		try {
 			const draft = await validatedDraft();
 			if (!draft) return;
 			await runDraftBackup(draft.config, draft.profile.id, (event) => {
-				if (event.event !== 'output') message = event.message;
+				if (event.phase === 'engine') backupEngine = event.message;
+				if (event.event === 'output') {
+					backupDetail = event.message;
+				} else {
+					backupProgress = event;
+					message = event.message;
+				}
 			});
 			await onApplied();
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : String(cause);
+			const failure = cause instanceof Error ? cause.message : String(cause);
+			error = failure;
+			backupProgress ??= { event: 'failed', phase: 'error', message: failure };
 		} finally {
 			backingUp = false;
 		}
@@ -619,6 +636,8 @@
 		</div>
 		{#if runtime}
 			<small class:good-status={runtime.timer_active}>{timerLabel()}</small>
+		{:else if !installation?.helper_installed}
+			<small class="field-help">{t('scheduleInactiveUntilInstalled')}</small>
 		{/if}
 		<details class="advanced-details">
 			<summary>{t('moreOptions')} <ChevronDown size={13} /></summary>
@@ -682,6 +701,13 @@
 		</details>
 	</section>
 
+	<BackupProgress
+		progress={backupProgress}
+		detail={backupDetail}
+		engineLabel={backupEngine}
+		{locale}
+	/>
+
 	<div class="editor-actions">
 		<div class="editor-feedback">
 			{#if error}<span class="error-text">{error}</span>{/if}
@@ -691,6 +717,10 @@
 			{/if}
 		</div>
 		<div class="editor-action-buttons">
+			<button class="secondary" type="button" onclick={onRecover} disabled={backingUp || applying}>
+				<LifeBuoy size={16} />
+				{t('recoverFromSnapshot')}
+			</button>
 			<button class="secondary" type="button" onclick={backupNow} disabled={backingUp || applying}>
 				<Play size={16} />
 				{backingUp ? t('sending') : t('backupNow')}

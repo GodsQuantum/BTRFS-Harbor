@@ -140,10 +140,14 @@ fn portable_engine_near_helper(helper: &Path) -> Option<PathBuf> {
     (wrapper.is_file() && payload.is_file()).then_some(wrapper)
 }
 
-fn engine_executable() -> PathBuf {
+fn engine_resolution() -> harbor_engine::EngineResolution {
     #[cfg(debug_assertions)]
     if let Some(value) = env::var_os("BTRFS_HARBOR_ENGINE") {
-        return PathBuf::from(value);
+        return harbor_engine::EngineResolution {
+            executable: PathBuf::from(value),
+            origin: harbor_engine::EngineOrigin::System,
+            version: None,
+        };
     }
 
     let portable = env::current_exe()
@@ -154,10 +158,42 @@ fn engine_executable() -> PathBuf {
         installed.is_file().then_some(installed)
     });
 
-    harbor_engine::discover_engine(bundled.clone())
-        .map(|resolution| resolution.executable)
-        .or_else(|_| bundled.ok_or(harbor_engine::EngineError::NoCompatibleEngine))
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_BUNDLED_ENGINE))
+    harbor_engine::discover_engine(bundled.clone()).unwrap_or_else(|_| {
+        harbor_engine::EngineResolution {
+            executable: bundled.unwrap_or_else(|| PathBuf::from(DEFAULT_BUNDLED_ENGINE)),
+            origin: harbor_engine::EngineOrigin::Bundled,
+            version: None,
+        }
+    })
+}
+
+fn engine_executable() -> PathBuf {
+    engine_resolution().executable
+}
+
+fn engine_progress_message(resolution: &harbor_engine::EngineResolution) -> String {
+    let version = resolution
+        .version
+        .as_deref()
+        .map(|version| format!("btrfs-backup-ng {version}"))
+        .unwrap_or_else(|| "btrfs-backup-ng".to_owned());
+    match resolution.origin {
+        harbor_engine::EngineOrigin::System => format!(
+            "System engine · {version} · {}",
+            resolution.executable.display()
+        ),
+        harbor_engine::EngineOrigin::Bundled => {
+            if resolution
+                .executable
+                .to_string_lossy()
+                .contains("/portable/")
+            {
+                format!("Bundled AppImage engine · {version}")
+            } else {
+                format!("Bundled Harbor engine · {version}")
+            }
+        }
+    }
 }
 
 fn systemctl_executable() -> PathBuf {
@@ -713,8 +749,15 @@ fn execute_profile_jsonl(
     let generated = render_engine_config(profile, &config.destinations)?;
     atomic_write_mode(generated_path, generated.as_bytes(), 0o600)?;
 
+    let engine_resolution = engine_resolution();
+    emit_progress(
+        "phase",
+        "engine",
+        &engine_progress_message(&engine_resolution),
+        None,
+    )?;
     emit_progress("phase", "backup", "Running btrfs-backup-ng", None)?;
-    let mut engine = Command::new(engine_executable());
+    let mut engine = Command::new(&engine_resolution.executable);
     engine.arg("-c").arg(generated_path).arg("run");
     let status = run_streaming_command(engine, "backup")?;
     if !status.success() {
@@ -731,7 +774,7 @@ fn execute_profile_jsonl(
                     &format!("Verifying {}", source.path.display()),
                     None,
                 )?;
-                let mut verify = Command::new(engine_executable());
+                let mut verify = Command::new(&engine_resolution.executable);
                 verify.args(["raw", "verify", &uri, "--json"]);
                 let status = run_streaming_command(verify, "verify")?;
                 if !status.success() {
@@ -1600,6 +1643,29 @@ mod tests {
 
         assert!(!timer.contains("safe name\n"));
         assert!(timer.contains(&p.id.to_string()));
+    }
+
+    #[test]
+    fn engine_progress_message_reports_actual_origin_version_and_path() {
+        let bundled = harbor_engine::EngineResolution {
+            executable: PathBuf::from("/tmp/AppDir/portable/btrfs-backup-ng"),
+            origin: harbor_engine::EngineOrigin::Bundled,
+            version: Some("0.9.12".into()),
+        };
+        let system = harbor_engine::EngineResolution {
+            executable: PathBuf::from("/usr/bin/btrfs-backup-ng"),
+            origin: harbor_engine::EngineOrigin::System,
+            version: Some("0.10.1".into()),
+        };
+
+        assert_eq!(
+            engine_progress_message(&bundled),
+            "Bundled AppImage engine · btrfs-backup-ng 0.9.12"
+        );
+        assert_eq!(
+            engine_progress_message(&system),
+            "System engine · btrfs-backup-ng 0.10.1 · /usr/bin/btrfs-backup-ng"
+        );
     }
 
     #[test]

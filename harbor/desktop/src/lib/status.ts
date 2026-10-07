@@ -49,6 +49,35 @@ export interface BackupProgressEvent {
 	stream?: 'stdout' | 'stderr';
 }
 
+export function backupProgressPercent(event: BackupProgressEvent | null | undefined): number {
+	if (!event) return 0;
+	if (event.event === 'finished') return 100;
+	switch (event.phase) {
+		case 'start':
+			return 2;
+		case 'prepare':
+			return 8;
+		case 'engine':
+			return 12;
+		case 'mount_guard':
+			return 20;
+		case 'backup':
+			return 65;
+		case 'verify':
+			return 86;
+		case 'recovery_kit':
+			return 96;
+		case 'complete':
+			return 100;
+		default:
+			return 5;
+	}
+}
+
+export function runtimeRepresentsScheduledJob(runtime: ProfileRuntime | null | undefined): boolean {
+	return Boolean(runtime?.timer_installed);
+}
+
 export type DataSource = 'live' | 'demo' | 'setup' | 'offline';
 
 export interface DashboardStatus {

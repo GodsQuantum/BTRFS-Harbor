@@ -63,9 +63,9 @@ Release 提供：
 通用安装器：
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.2/BTRFS-Harbor-0.2.2-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.2-linux-x86_64.run
-./BTRFS-Harbor-0.2.2-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.3/BTRFS-Harbor-0.2.3-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.3-linux-x86_64.run
+./BTRFS-Harbor-0.2.3-linux-x86_64.run
 ```
 
 如果系统已经安装兼容的 **`btrfs-backup-ng` (>= 0.9.12)**，Harbor 会优先使用它；否则使用 Harbor 自带的兼容引擎。Harbor 不再替换或与用户安装的 upstream 引擎冲突。

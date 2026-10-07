@@ -224,7 +224,9 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 			),
 			lastBackup: '—',
 			lastVerify: '—',
-			nextRun: runtime?.next_elapse_realtime ?? active.on_calendar,
+			nextRun: runtime?.timer_installed
+				? (runtime.next_elapse_realtime ?? active.on_calendar)
+				: '—',
 			transferred: '—',
 			duration: '—',
 			chainHealthy: engine.healthy,

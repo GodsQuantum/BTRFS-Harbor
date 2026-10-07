@@ -38,6 +38,7 @@
 		loadDashboardStatus,
 		loadHarborConfiguration,
 		loadInstallationState,
+		loadProfileRuntime,
 		loadSystemIdentity,
 		sendProfileNow,
 		type InstallationState,
@@ -59,14 +60,17 @@
 		type Locale,
 		type TranslationKey
 	} from '#lib/i18n.ts';
+	import BackupProgress from '#lib/BackupProgress.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
 	import RecoveryEditor from '#lib/RecoveryEditor.svelte';
 	import ReplicaEditor from '#lib/ReplicaEditor.svelte';
 	import {
 		demoStatus,
 		protectionState,
+		runtimeRepresentsScheduledJob,
 		type BackupProgressEvent,
-		type DashboardStatus
+		type DashboardStatus,
+		type ProfileRuntime
 	} from '#lib/status.ts';
 
 	type Page =
@@ -85,6 +89,8 @@
 	let loading = true;
 	let sending = false;
 	let backupProgress: BackupProgressEvent | null = null;
+	let backupDetail = '';
+	let backupEngine = '';
 	let dashboard: DashboardStatus = demoStatus;
 	let harborConfig: HarborConfig | null = null;
 	let configWarning = '';
@@ -94,11 +100,17 @@
 	let scheduleFeedback = '';
 	let scheduleError = '';
 	let editingJobId: string | null = null;
+	let jobRuntimes: Record<string, ProfileRuntime | null> = {};
 	$: protection = protectionState(dashboard.engine);
 	$: activeProfile = harborConfig?.profiles[0] ?? null;
 	$: activeSchedule = activeProfile?.on_calendar ?? '';
 	$: activeProfileHasSnapper =
 		activeProfile?.sources.some((source) => Boolean(source.snapper_config)) ?? false;
+	$: scheduledJobs =
+		harborConfig?.profiles.filter(
+			(profile) =>
+				runtimeRepresentsScheduledJob(jobRuntimes[profile.id]) || profile.id === editingJobId
+		) ?? [];
 	const t = (key: TranslationKey) => translate(locale, key);
 
 	onMount(async () => {
@@ -119,6 +131,7 @@
 		systemIdentity = identity;
 		try {
 			harborConfig = await loadHarborConfiguration();
+			await refreshJobRuntimes(harborConfig, installState);
 		} catch (error) {
 			configWarning = error instanceof Error ? error.message : String(error);
 		}
@@ -167,28 +180,6 @@
 		}
 	}
 
-	function progressLabel(phase: string): string {
-		switch (phase) {
-			case 'start':
-			case 'prepare':
-				return t('progressPreparing');
-			case 'mount_guard':
-				return t('progressDestination');
-			case 'backup':
-				return t('progressBackup');
-			case 'verify':
-				return t('progressVerify');
-			case 'recovery_kit':
-				return t('progressRecoveryKit');
-			case 'complete':
-				return t('progressComplete');
-			case 'error':
-				return t('progressError');
-			default:
-				return t('backupProgress');
-		}
-	}
-
 	async function sendSnapshot() {
 		if (!dashboard.profileId) {
 			dashboard.warning = t('noLiveProfile');
@@ -196,13 +187,19 @@
 		}
 		sending = true;
 		backupProgress = null;
+		backupDetail = '';
+		backupEngine = '';
 		try {
 			await sendProfileNow(dashboard.profileId, (event) => {
-				if (event.event !== 'output') backupProgress = event;
+				if (event.phase === 'engine') backupEngine = event.message;
+				if (event.event === 'output') backupDetail = event.message;
+				else backupProgress = event;
 			});
 			dashboard = await loadDashboardStatus();
 		} catch (error) {
-			dashboard.warning = error instanceof Error ? error.message : String(error);
+			const failure = error instanceof Error ? error.message : String(error);
+			dashboard.warning = failure;
+			backupProgress ??= { event: 'failed', phase: 'error', message: failure };
 		} finally {
 			sending = false;
 		}
@@ -213,8 +210,24 @@
 		return t(page as TranslationKey);
 	}
 
+	async function refreshJobRuntimes(
+		config: HarborConfig | null = harborConfig,
+		installation: InstallationState | null = installationState
+	) {
+		if (!config || !installation?.helper_installed) {
+			jobRuntimes = {};
+			return;
+		}
+		const entries = await Promise.all(
+			config.profiles.map(
+				async (profile) => [profile.id, await loadProfileRuntime(profile.id)] as const
+			)
+		);
+		jobRuntimes = Object.fromEntries(entries);
+	}
+
 	function addBackupJob() {
-		if (!harborConfig) return;
+		if (!harborConfig || !installationState?.helper_installed) return;
 		const next = appendDefaultBackupJob(harborConfig);
 		harborConfig = next;
 		editingJobId = next.profiles.at(-1)?.id ?? null;
@@ -284,6 +297,8 @@
 				<button class:active={active === 'timeline'} onclick={() => (active = 'timeline')}>
 					<History size={18} strokeWidth={1.8} /><span>{t('timeline')}</span>
 				</button>
+			{/if}
+			{#if dashboard.source !== 'offline'}
 				<button class:active={active === 'recover'} onclick={() => (active = 'recover')}>
 					<LifeBuoy size={18} strokeWidth={1.8} /><span>{t('recover')}</span>
 				</button>
@@ -401,10 +416,14 @@
 						bind:config={harborConfig}
 						{locale}
 						runtime={null}
+						onRecover={() => {
+							active = 'recover';
+						}}
 						onApplied={async () => {
 							dashboard = await loadDashboardStatus();
 							installationState = await loadInstallationState().catch(() => installationState);
 							harborConfig = await loadHarborConfiguration();
+							await refreshJobRuntimes(harborConfig, installationState);
 						}}
 					/>
 				{:else}
@@ -449,26 +468,25 @@
 						</div>
 					</div>
 					<div class="hero-action-stack">
-						<button class="primary" onclick={sendSnapshot} disabled={sending || loading}>
-							{#if sending}
-								<RotateCcw class="spin" size={17} /> {t('sending')}
-							{:else}
-								<Play size={17} fill="currentColor" /> {t('sendNow')}
-							{/if}
-						</button>
-						{#if backupProgress}
-							<div
-								class="backup-progress"
-								class:complete={backupProgress.event === 'finished'}
-								class:failed={backupProgress.event === 'failed'}
-							>
-								<span></span>
-								<div>
-									<strong>{progressLabel(backupProgress.phase)}</strong>
-									<small>{backupProgress.message}</small>
-								</div>
-							</div>
-						{/if}
+						<div class="hero-buttons">
+							<button class="secondary" onclick={() => (active = 'recover')} disabled={sending}>
+								<LifeBuoy size={16} />
+								{t('recoverFromSnapshot')}
+							</button>
+							<button class="primary" onclick={sendSnapshot} disabled={sending || loading}>
+								{#if sending}
+									<RotateCcw class="spin" size={17} /> {t('sending')}
+								{:else}
+									<Play size={17} fill="currentColor" /> {t('sendNow')}
+								{/if}
+							</button>
+						</div>
+						<BackupProgress
+							progress={backupProgress}
+							detail={backupDetail}
+							engineLabel={backupEngine}
+							{locale}
+						/>
 					</div>
 				</article>
 
@@ -625,7 +643,7 @@
 						<h2>{t('scheduledJobs')}</h2>
 						<p>{t('scheduledJobsIntro')}</p>
 					</div>
-					{#if harborConfig}
+					{#if harborConfig && installationState?.helper_installed}
 						<button class="primary compact" type="button" onclick={addBackupJob}>
 							<Plus size={16} />
 							{t('addBackupJob')}
@@ -633,9 +651,20 @@
 					{/if}
 				</div>
 
-				{#if harborConfig}
+				{#if !installationState?.helper_installed}
+					<article class="panel empty-panel scheduled-empty">
+						<Clock3 size={24} />
+						<div>
+							<h3>{t('noScheduledJobs')}</h3>
+							<p>{t('noScheduledJobsDesc')}</p>
+						</div>
+						<button class="primary" type="button" onclick={() => (active = 'overview')}>
+							{t('installAutomation')}
+						</button>
+					</article>
+				{:else if harborConfig}
 					<div class="scheduled-jobs-grid">
-						{#each harborConfig.profiles as job (job.id)}
+						{#each scheduledJobs as job (job.id)}
 							<article class:editing={editingJobId === job.id} class="panel scheduled-job-card">
 								<div class="scheduled-job-head">
 									<div>
@@ -656,11 +685,20 @@
 									<div><span>{t('destination')}</span><code>{jobDestination(job)}</code></div>
 									<div>
 										<span>{t('schedule')}</span><strong>{readableSchedule(job.on_calendar)}</strong>
+										<small class:good-status={jobRuntimes[job.id]?.timer_active}>
+											{jobRuntimes[job.id]?.timer_active ? t('timerActive') : t('timerDisabled')}
+										</small>
 									</div>
 								</div>
 							</article>
 						{/each}
 					</div>
+					{#if scheduledJobs.length === 0 && !editingJobId}
+						<article class="panel empty-panel scheduled-empty">
+							<Clock3 size={22} />
+							<p>{t('noScheduledJobs')}</p>
+						</article>
+					{/if}
 
 					{#if editingJobId}
 						{#key editingJobId}
@@ -669,10 +707,17 @@
 									bind:config={harborConfig}
 									profileId={editingJobId}
 									{locale}
-									runtime={editingJobId === dashboard.profileId ? dashboard.runtime : null}
+									runtime={jobRuntimes[editingJobId] ?? null}
+									onRecover={() => {
+										active = 'recover';
+									}}
 									onApplied={async () => {
 										dashboard = await loadDashboardStatus();
 										harborConfig = await loadHarborConfiguration();
+										installationState = await loadInstallationState().catch(
+											() => installationState
+										);
+										await refreshJobRuntimes(harborConfig, installationState);
 									}}
 								/>
 							</div>

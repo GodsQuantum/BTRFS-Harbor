@@ -350,6 +350,7 @@
 			<div>
 				<p class="eyebrow">{t('whatBackedUp')}</p>
 				<h3>{t('coverageSummary')}</h3>
+				<small class="field-help">{t('coverageSummaryHelp')}</small>
 			</div>
 			<span class="badge good">{profile.sources.length} {t('sourcesSelected')}</span>
 		</div>

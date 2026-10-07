@@ -58,6 +58,13 @@ fn snapper_executable() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("snapper"))
 }
 
+fn host_system_tool_command(executable: PathBuf) -> Command {
+    // AppImages prepend bundled libraries; host tools must resolve against the host ABI.
+    let mut command = Command::new(executable);
+    command.env_remove("LD_LIBRARY_PATH");
+    command
+}
+
 fn source_hint(path: &str) -> SourceHint {
     match path {
         "/" | "/home" | "/root" | "/srv" => SourceHint::Recommended,
@@ -112,6 +119,24 @@ fn collect_findmnt(node: FindmntNode, out: &mut Vec<DiscoveredSource>) {
     }
 }
 
+fn source_device(source: &str) -> &str {
+    source.split_once('[').map_or(source, |(device, _)| device)
+}
+
+fn source_preference(source: &DiscoveredSource) -> (u8, usize, usize) {
+    let hint = match source.hint {
+        SourceHint::Recommended => 0,
+        SourceHint::Optional => 1,
+        SourceHint::UsuallyDisposable => 2,
+    };
+    let depth = source
+        .mount_point
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .count();
+    (hint, depth, source.mount_point.len())
+}
+
 pub fn parse_findmnt_sources(raw: &str) -> Result<Vec<DiscoveredSource>> {
     let document: FindmntDocument =
         serde_json::from_str(raw).context("invalid findmnt JSON output")?;
@@ -120,11 +145,48 @@ pub fn parse_findmnt_sources(raw: &str) -> Result<Vec<DiscoveredSource>> {
         collect_findmnt(node, &mut sources);
     }
 
-    let mut by_target = BTreeMap::new();
+    let mut by_identity: BTreeMap<(String, String), DiscoveredSource> = BTreeMap::new();
     for source in sources {
-        by_target.insert(source.mount_point.clone(), source);
+        let identity = (
+            source_device(&source.source).to_owned(),
+            source
+                .subvolume
+                .clone()
+                .unwrap_or_else(|| source.mount_point.clone()),
+        );
+        match by_identity.entry(identity) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(source);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                if source_preference(&source) < source_preference(entry.get()) {
+                    entry.insert(source);
+                }
+            }
+        }
     }
-    Ok(by_target.into_values().collect())
+
+    let mut sources = by_identity.into_values().collect::<Vec<_>>();
+    sources.sort_by(|a, b| a.mount_point.cmp(&b.mount_point));
+    Ok(sources)
+}
+
+fn parse_findmnt_command_result(
+    success: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Vec<DiscoveredSource>> {
+    if !success {
+        let detail = String::from_utf8_lossy(stderr).trim().to_owned();
+        if stdout.is_empty() && detail.is_empty() {
+            return Ok(Vec::new());
+        }
+        if detail.is_empty() {
+            bail!("findmnt Btrfs discovery failed");
+        }
+        bail!("findmnt Btrfs discovery failed: {detail}");
+    }
+    parse_findmnt_sources(&String::from_utf8_lossy(stdout))
 }
 
 fn collect_snapper_pairs(
@@ -242,7 +304,7 @@ async fn attach_snapper_snapshot_stats(sources: &mut [DiscoveredSource]) {
             continue;
         };
 
-        let output = Command::new(snapper_executable())
+        let output = host_system_tool_command(snapper_executable())
             .args([
                 "--jsonout",
                 "--config",
@@ -268,7 +330,7 @@ async fn attach_snapper_snapshot_stats(sources: &mut [DiscoveredSource]) {
 }
 
 pub async fn discover_sources() -> Result<Vec<DiscoveredSource>> {
-    let output = Command::new(findmnt_executable())
+    let output = host_system_tool_command(findmnt_executable())
         .args([
             "--json",
             "--types",
@@ -280,19 +342,10 @@ pub async fn discover_sources() -> Result<Vec<DiscoveredSource>> {
         .await
         .context("cannot execute findmnt for Btrfs discovery")?;
 
-    if !output.status.success() {
-        if output.stdout.is_empty() {
-            return Ok(Vec::new());
-        }
-        bail!(
-            "findmnt Btrfs discovery failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+    let mut sources =
+        parse_findmnt_command_result(output.status.success(), &output.stdout, &output.stderr)?;
 
-    let mut sources = parse_findmnt_sources(&String::from_utf8_lossy(&output.stdout))?;
-
-    let snapper = Command::new(snapper_executable())
+    let snapper = host_system_tool_command(snapper_executable())
         .args(["--jsonout", "list-configs", "--columns", "config,subvolume"])
         .output()
         .await;
@@ -408,6 +461,71 @@ mod tests {
         attach_snapper_configs(&mut sources, &configs);
 
         assert_eq!(sources[0].snapper_config.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn deduplicates_bind_mounts_of_the_same_btrfs_subvolume() {
+        let raw = r#"{
+          "filesystems": [
+            {
+              "target": "/",
+              "source": "/dev/mapper/root[/@]",
+              "fstype": "btrfs",
+              "options": "rw,subvol=/@",
+              "children": [
+                {
+                  "target": "/home",
+                  "source": "/dev/mapper/root[/@home]",
+                  "fstype": "btrfs",
+                  "options": "rw,subvol=/@home",
+                  "children": [
+                    {
+                      "target": "/home/user/.local/share/fonts",
+                      "source": "/dev/mapper/root[/@home/user/Downloads/Fonts]",
+                      "fstype": "btrfs",
+                      "options": "rw,subvol=/@home"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let sources = parse_findmnt_sources(raw).unwrap();
+        let home = sources
+            .iter()
+            .filter(|source| source.subvolume.as_deref() == Some("@home"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(home.len(), 1);
+        assert_eq!(home[0].mount_point, "/home");
+    }
+
+    #[test]
+    fn host_system_tools_drop_appimage_library_overrides() {
+        let command = host_system_tool_command(PathBuf::from("/usr/bin/findmnt"));
+        let removed = command
+            .as_std()
+            .get_envs()
+            .any(|(key, value)| key == "LD_LIBRARY_PATH" && value.is_none());
+
+        assert!(
+            removed,
+            "system tools must use host libraries, not AppImage libraries"
+        );
+    }
+
+    #[test]
+    fn findmnt_no_match_is_an_empty_source_list() {
+        let sources = parse_findmnt_command_result(false, b"", b"").unwrap();
+        assert!(sources.is_empty());
+    }
+
+    #[test]
+    fn failed_findmnt_is_an_error_instead_of_an_empty_source_list() {
+        let error = parse_findmnt_command_result(false, b"", b"broken libmount").unwrap_err();
+        assert!(error.to_string().contains("broken libmount"));
     }
 
     #[test]

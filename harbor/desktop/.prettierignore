@@ -1,6 +1,7 @@
 node_modules
 .svelte-kit
 build
+portable
 src-tauri/target
 src-tauri/icons
 src-tauri/gen/schemas

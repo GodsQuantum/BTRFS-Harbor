@@ -1,5 +1,5 @@
 pkgname=btrfs-harbor-git
-pkgver=0.2.0.r0.g0000000
+pkgver=0.2.1.r0.g0000000
 pkgrel=1
 pkgdesc="Native Btrfs backup, recovery and system replication control center"
 arch=('x86_64')
@@ -47,7 +47,7 @@ sha256sums=('SKIP')
 
 pkgver() {
   cd btrfs-harbor
-  printf "0.2.0.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  printf "0.2.1.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {

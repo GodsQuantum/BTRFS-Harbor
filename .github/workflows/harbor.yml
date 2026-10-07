@@ -133,6 +133,57 @@ jobs:
             exit 1
           fi
 
+      - name: Validate tracked text integrity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          text_extensions = {
+              ".cfg", ".conf", ".css", ".desktop", ".env", ".html", ".ini",
+              ".js", ".json", ".json5", ".jsx", ".md", ".path", ".policy",
+              ".py", ".rs", ".rst", ".scss", ".service", ".sh", ".svelte",
+              ".svg", ".timer", ".toml", ".ts", ".tsx", ".txt", ".xml",
+              ".yaml", ".yml",
+          }
+          text_names = {"Dockerfile", "LICENSE", "Makefile", "PKGBUILD", "README"}
+          suspicious = {
+              "Unicode replacement character": chr(0xFFFD),
+              "HTML hex space entity": "&#x" + "20;",
+              "HTML hex non-breaking-space entity": "&#x" + "A0;",
+              "HTML decimal non-breaking-space entity": "&#" + "160;",
+              "HTML non-breaking-space entity": "&" + "nbsp;",
+              "UTF-8/cp1252 mojibake prefix": chr(0x00E2) + chr(0x20AC),
+              "UTF-8/Latin-1 mojibake e-acute": chr(0x00C3) + chr(0x00A9),
+              "UTF-8/Latin-1 mojibake e-grave": chr(0x00C3) + chr(0x00A8),
+              "UTF-8/Latin-1 mojibake a-grave": chr(0x00C3) + chr(0x00A0),
+              "UTF-8/Latin-1 mojibake c-cedilla": chr(0x00C3) + chr(0x00A7),
+              "UTF-8/Latin-1 mojibake nbsp": chr(0x00C2) + chr(0x00A0),
+          }
+
+          failures = []
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          for raw in tracked:
+              if not raw:
+                  continue
+              path = Path(raw.decode("utf-8", errors="surrogateescape"))
+              if path.suffix.lower() not in text_extensions and path.name not in text_names:
+                  continue
+              data = path.read_bytes()
+              try:
+                  text = data.decode("utf-8")
+              except UnicodeDecodeError as error:
+                  failures.append(f"{path}: invalid UTF-8 ({error})")
+                  continue
+              for label, marker in suspicious.items():
+                  if marker in text:
+                      failures.append(f"{path}: {label}")
+
+          if failures:
+              raise SystemExit("\n".join(failures))
+          print("tracked text integrity: OK")
+          PY
+
       - name: Validate release security contract
         run: |
           python - <<"PY"

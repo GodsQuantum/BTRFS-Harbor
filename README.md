@@ -48,22 +48,27 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 
 ## 📦 Download & install
 
-For most x86_64 Linux systems, use the **universal installer**. It installs the desktop app, Rust helpers, the included btrfs-backup-ng engine, systemd service, D-Bus policy and polkit integration together:
+The easiest way to **try Harbor or run manual backups** is the **Portable AppImage**. It stays portable: opening it does not install Harbor. It can detect the current Btrfs layout, choose sources and destinations, validate the target, browse backup snapshots, run **Back up now**, and stage a restore. Privileged Btrfs operations use polkit only when needed.
+
+Install Harbor on the system only when you want **automatic/background backups** that keep working after the AppImage is closed: systemd scheduling, startup integration and “after each Snapper snapshot” triggers.
+
+The release provides:
+
+- **Portable AppImage** — complete manual backup + recovery UI without system installation.
+- **Universal `.run` installer** — x86_64 glibc + systemd Linux; installs persistent automation and may install required host tools through pacman, apt, dnf or zypper.
+- **DEB** — Debian / Ubuntu and derivatives.
+- **RPM** — Fedora / RHEL-family / openSUSE-compatible workflows.
+- **SHA256SUMS** — checksums for every Linux release artifact.
+
+Universal installer:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.2/BTRFS-Harbor-0.1.2-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.2-linux-x86_64.run
-./BTRFS-Harbor-0.1.2-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.0/BTRFS-Harbor-0.2.0-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.0-linux-x86_64.run
+./BTRFS-Harbor-0.2.0-linux-x86_64.run
 ```
 
-Supported by the universal installer: **x86_64 Linux with glibc + systemd**. It can install required host tools through pacman, apt, dnf or zypper. Alpine/musl and non-systemd systems are not currently supported.
-
-The release also provides:
-
-- **DEB** — Debian / Ubuntu and derivatives.
-- **RPM** — Fedora / RHEL-family / openSUSE-compatible package workflows.
-- **Portable AppImage** — runs directly and does **not install Harbor**. Use it to inspect the computer and prepare a backup. System installation is only needed when you enable automatic/periodic `btrfs send` jobs that must keep running after the AppImage is closed.
-- **SHA256SUMS** — checksums for every Linux release artifact.
+Harbor **prefers a compatible system `btrfs-backup-ng` (>= 0.9.12)** when one is already installed. Otherwise it uses the compatible engine bundled with Harbor. Harbor no longer replaces or conflicts with a user-installed upstream engine.
 
 ## 🚀 Build from source on CachyOS / Arch Linux
 
@@ -108,16 +113,17 @@ The same package recipe is intended to become the AUR package after public testi
 
 ## 🛟 Your first backup
 
-1. Open Harbor. It identifies the current computer and scans its mounted **Btrfs subvolumes**.
-2. Review what Harbor found. Existing **Snapper** configurations and snapshots are detected; read-only snapshots that can be used by `btrfs send` are shown explicitly.
-3. Choose what to protect. Harbor preselects recommended persistent Btrfs sources and leaves disposable/cache-style mounts out of the simple view.
-4. Choose a destination. In normal mode there are only two choices: **Folder** or **SSH server**. For a folder, pick exactly one directory; Harbor silently detects whether it lives on local storage, NFS or SMB and keeps the mount-safety metadata internally. For SSH, enter `user@host:/path/to/backups`.
-5. Choose the schedule directly: **hourly**, **daily**, **weekly**, or **after each Snapper snapshot**. Verification after backup stays enabled by default. Advanced mode is only for retention and low-level options.
-6. Click **Save & enable automatic backups**. If you started from the portable AppImage, this is the point where Harbor asks for polkit permission to install the system components required for periodic/background `btrfs send`; the AppImage itself remains portable.
-7. Run one manual backup and confirm the result becomes **BACKED UP** and **VERIFIED**.
-8. Perform a staged restore test before relying on Harbor for unique data.
+1. Open Harbor. It identifies the current computer and scans its mounted **Btrfs subvolumes**, Snapper configurations and existing sendable read-only snapshots.
+2. Under **What will be backed up**, review the detected persistent subvolumes. Harbor presents human labels first and keeps `@`, mount paths and Snapper details secondary.
+3. Choose a destination:
+   - **Folder** — select exactly one directory and press **Validate**. Harbor detects local/NFS/SMB internally and keeps mount-safety details out of the normal UI.
+   - **SSH server** — enter host, user, port and remote folder, then test the connection.
+4. Click **Back up now**. This works from the Portable AppImage without installing Harbor.
+5. If you want recurring/background backups, choose the schedule and click **Install Harbor for automatic backups**. Installation exists for persistence/automation, not for manual backup.
+6. Confirm the first run becomes **BACKED UP** and **VERIFIED**.
+7. Open **Recover**, select a real backup snapshot and perform a staged restore test.
 
-Nothing is pre-filled with a demo IP, machine name or source path in the native first-run flow: Harbor uses the computer it is actually running on.
+Nothing is pre-filled with a demo IP, machine name, recent directory or private source path in the native first-run flow.
 
 ## 🧭 What the status means
 
@@ -131,6 +137,17 @@ Harbor deliberately separates local snapshots from off-host protection:
 | **FULL** | Independent full send |
 | **INCREMENTAL** | Send references a valid parent chain |
 | **RESTORE TESTED** | A staged recovery rehearsal completed |
+
+## ♻️ Recover a snapshot
+
+The **Recover** tab reads the real backup repository and lists available snapshots newest first. Choose the protected subvolume, destination and exact snapshot, then restore it into a separate **Btrfs staging location**. Harbor verifies the received data before considering the rehearsal complete.
+
+- A non-root subvolume can be staged from the running system.
+- The live `/` root is never overwritten in place. Root/system recovery is intentionally redirected to a **rescue/live-ISO workflow** using the Recovery Kit.
+- The Recovery Kit records system topology, `fstab`/`crypttab`, Snapper configuration, package inventories, boot/initramfs information and Harbor intent beside the backup.
+- Btrfs Assistant can still be useful afterwards for inspecting or rolling back local Snapper snapshots, but Harbor does not require it for receiving the off-host backup.
+
+A Btrfs snapshot does not automatically include EFI partitions, partition tables or secrets outside the selected Btrfs subvolumes. Harbor therefore reports recovery coverage instead of promising “whole-computer recovery” when those prerequisites are not covered.
 
 ## 🧬 System Replica
 
@@ -174,7 +191,7 @@ flowchart LR
     UI -->|polkit + fixed helper| Ctl["Rust btrfs-harborctl"]
     Agent --> Engine["btrfs-backup-ng engine"]
     Ctl --> Engine
-    Ctl --> Systemd["systemd timers"]
+    Ctl --> Systemd["systemd timer/path units"]
     Engine --> Btrfs["Btrfs / Snapper"]
     Engine --> Raw["raw:// streams"]
     Raw --> Target["NFS / SMB / local filesystem"]
@@ -219,7 +236,7 @@ The repository also includes CI for the Python engine, Rust control plane, deskt
 
 ## 📦 Project status
 
-Btrfs Harbor is an early public **v0.1**. Core backup, verification, staged recovery and stopped-target LXC replication paths have been exercised with disposable integration rehearsals.
+Btrfs Harbor is an early public **v0.2**. Core backup, verification, staged recovery and stopped-target LXC replication paths have been exercised with disposable integration rehearsals.
 
 **Do not make an unreleased backup tool the only copy of important data.** Keep another backup and prove a restore before trusting any backup workflow.
 

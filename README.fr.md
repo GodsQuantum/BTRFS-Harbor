@@ -48,22 +48,27 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 
 ## 📦 Télécharger et installer
 
-Sur la plupart des Linux x86_64, utilise l’**installateur universel**. Il installe ensemble l’application desktop, les helpers Rust, le moteur btrfs-backup-ng inclus, le service systemd, la politique D-Bus et l’intégration polkit :
+Le moyen le plus simple de **tester Harbor ou faire des sauvegardes manuelles** est l’**AppImage portable**. Elle reste portable : son lancement n’installe rien. Elle détecte Btrfs/Snapper, permet de choisir les sources et la destination, de la valider, de lancer **Sauvegarder maintenant**, de parcourir les snapshots sauvegardés et de préparer une restauration. Les opérations Btrfs privilégiées demandent polkit seulement quand c’est nécessaire.
+
+Installe Harbor sur le système uniquement si tu veux des **sauvegardes automatiques en arrière-plan** qui continuent quand l’AppImage est fermée : planification systemd, démarrage et déclenchement après chaque snapshot Snapper.
+
+La release fournit :
+
+- **AppImage portable** — sauvegarde manuelle + récupération sans installation système.
+- **Installateur universel `.run`** — Linux x86_64 glibc + systemd ; installe l’automatisation persistante.
+- **DEB** — Debian / Ubuntu et dérivées.
+- **RPM** — Fedora / famille RHEL / openSUSE.
+- **SHA256SUMS** — checksums de tous les artefacts.
+
+Installateur universel :
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.1.2/BTRFS-Harbor-0.1.2-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.1.2-linux-x86_64.run
-./BTRFS-Harbor-0.1.2-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.0/BTRFS-Harbor-0.2.0-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.0-linux-x86_64.run
+./BTRFS-Harbor-0.2.0-linux-x86_64.run
 ```
 
-L’installateur universel cible **Linux x86_64 avec glibc + systemd**. Il peut installer les outils système requis via pacman, apt, dnf ou zypper. Alpine/musl et les systèmes sans systemd ne sont pas pris en charge actuellement.
-
-La release fournit aussi :
-
-- **DEB** — Debian / Ubuntu et dérivées.
-- **RPM** — Fedora / famille RHEL / workflows compatibles openSUSE.
-- **AppImage portable** — se lance directement et **n’installe pas Harbor**. Elle permet d’inspecter l’ordinateur et de préparer la sauvegarde. L’installation système sert uniquement à activer les `btrfs send` automatiques/périodiques qui doivent continuer même lorsque l’AppImage est fermée.
-- **SHA256SUMS** — checksums de tous les artefacts Linux.
+Harbor **préfère un `btrfs-backup-ng` système compatible (>= 0.9.12)** s’il existe déjà. Sinon il utilise le moteur compatible embarqué. Harbor ne remplace plus et n’entre plus en conflit avec un moteur upstream installé par l’utilisateur.
 
 ## 🚀 Compilation depuis les sources sur CachyOS / Arch Linux
 
@@ -94,16 +99,17 @@ btrfs-harbor
 
 ## 🛟 Première sauvegarde
 
-1. Ouvre Harbor. Il identifie l’ordinateur courant et scanne ses **subvolumes Btrfs montés**.
-2. Vérifie ce qu’Harbor a détecté. Les configurations et snapshots **Snapper** existants sont reconnus ; les snapshots read-only utilisables par `btrfs send` sont indiqués explicitement.
-3. Choisis ce que tu veux protéger. Harbor présélectionne les sources Btrfs persistantes recommandées et masque les montages de type cache/jetable dans la vue simple.
-4. Choisis la destination. En mode normal il n’y a que deux choix : **Dossier** ou **Serveur SSH**. Pour un dossier, choisis un seul répertoire ; Harbor détecte silencieusement s’il est local, NFS ou SMB et garde les informations de sécurité du montage en interne. Pour SSH, saisis `utilisateur@hôte:/chemin/des/backups`.
-5. Choisis directement la fréquence : **toutes les heures**, **tous les jours**, **toutes les semaines** ou **après chaque snapshot Snapper**. La vérification après sauvegarde reste activée par défaut. Le mode Avancé sert uniquement à la rétention et aux options bas niveau.
-6. Clique **Enregistrer et activer les sauvegardes automatiques**. Si tu as lancé l’AppImage portable, c’est seulement à ce moment que Harbor demande l’autorisation polkit d’installer les composants système nécessaires aux `btrfs send` périodiques/en arrière-plan ; l’AppImage elle-même reste portable.
-7. Lance une première sauvegarde manuelle et vérifie qu’elle passe à **SAUVEGARDÉ** puis **VÉRIFIÉ**.
-8. Fais un test de restauration en staging avant de considérer Harbor comme validé pour des données uniques.
+1. Ouvre Harbor. Il identifie la machine courante et détecte ses **subvolumes Btrfs**, ses configurations Snapper et les snapshots read-only utilisables par `btrfs send`.
+2. Dans **Ce qui sera sauvegardé**, vérifie les subvolumes persistants détectés. Les libellés humains passent avant `@`, chemins et détails Snapper.
+3. Choisis la destination :
+   - **Dossier** — choisis un seul répertoire puis clique **Valider**. Harbor détecte local/NFS/SMB en interne sans afficher la plomberie de montage.
+   - **Serveur SSH** — renseigne hôte, utilisateur, port et dossier distant, puis teste la connexion.
+4. Clique **Sauvegarder maintenant**. Cela fonctionne depuis l’AppImage portable sans installer Harbor.
+5. Si tu veux des sauvegardes récurrentes/en arrière-plan, choisis la fréquence puis clique **Installer Harbor pour les sauvegardes automatiques**.
+6. Vérifie que le premier envoi passe à **SAUVEGARDÉ** puis **VÉRIFIÉ**.
+7. Ouvre **Récupérer**, choisis un vrai snapshot sauvegardé et fais un test de restauration en staging.
 
-Aucune IP de démonstration, aucun nom de machine et aucun chemin source ne sont préremplis dans le premier lancement natif : Harbor utilise la machine sur laquelle il tourne réellement.
+Le premier lancement natif n’affiche aucune IP de démonstration, aucun dossier récent, aucun nom de machine ni chemin privé.
 
 ## 🧭 Comprendre les statuts
 
@@ -115,6 +121,17 @@ Aucune IP de démonstration, aucun nom de machine et aucun chemin source ne sont
 | **COMPLET** | Envoi full indépendant |
 | **INCRÉMENTAL** | Envoi basé sur une chaîne de parent valide |
 | **RESTAURATION TESTÉE** | Une restauration en staging a réussi |
+
+## ♻️ Récupérer un snapshot
+
+L’onglet **Récupérer** lit réellement le dépôt de sauvegarde et liste les snapshots disponibles du plus récent au plus ancien. Choisis le subvolume, la destination et le snapshot exact, puis restaure-le dans un **staging Btrfs séparé**. Harbor vérifie les données reçues avant de considérer le test terminé.
+
+- Un subvolume non-root peut être restauré en staging depuis le système en cours d’exécution.
+- Harbor n’écrase jamais le `/` actif. La récupération du système/root passe volontairement par un **mode rescue/live ISO** avec le Recovery Kit.
+- Le Recovery Kit conserve notamment topologie système, `fstab`/`crypttab`, configuration Snapper, inventaires de paquets et informations boot/initramfs.
+- Btrfs Assistant peut ensuite servir à inspecter/rollback des snapshots Snapper locaux, mais n’est pas nécessaire pour recevoir la sauvegarde hors machine.
+
+Un snapshot Btrfs ne contient pas automatiquement l’ESP/EFI, la table de partitions ni les secrets situés hors des subvolumes sélectionnés. Harbor affiche donc une **couverture de récupération** au lieu de promettre abusivement une restauration intégrale du PC.
 
 ## 🧬 System Replica
 
@@ -199,7 +216,7 @@ pnpm build
 
 ## 📦 État du projet
 
-Btrfs Harbor est une **v0.1** publique précoce. Les chemins principaux de sauvegarde, vérification, récupération en staging et réplication LXC arrêté ont été exercés sur des environnements de test jetables.
+Btrfs Harbor est une **v0.2** publique précoce. Les chemins principaux de sauvegarde, vérification, récupération en staging et réplication LXC arrêté ont été exercés sur des environnements de test jetables.
 
 **Ne fais jamais d’un outil de sauvegarde non stabilisé l’unique copie de données importantes.** Garde une autre sauvegarde et valide une restauration réelle.
 

@@ -43,7 +43,7 @@ const en = {
 	atRiskDescription:
 		'Local snapshots exist, but at least one off-host copy is missing, pending, or unverified.',
 	unprotectedDescription: 'Local snapshots alone cannot recover this machine after disk loss.',
-	sendNow: 'Send snapshot now',
+	sendNow: 'Back up now',
 	sending: 'Sending snapshot…',
 	backupProgress: 'Backup progress',
 	progressPreparing: 'Preparing backup',
@@ -352,7 +352,7 @@ const fr: Dictionary = {
 		'Des snapshots locaux existent, mais au moins une copie distante manque, est en attente ou non vérifiée.',
 	unprotectedDescription:
 		'Des snapshots locaux seuls ne permettent pas de récupérer la machine après la perte du disque.',
-	sendNow: 'Envoyer un snapshot maintenant',
+	sendNow: 'Sauvegarder maintenant',
 	sending: 'Envoi du snapshot…',
 	backupProgress: 'Progression de la sauvegarde',
 	progressPreparing: 'Préparation de la sauvegarde',
@@ -657,7 +657,7 @@ const zhCN: Dictionary = {
 	protectedDescription: '此机器之外存在已验证的快照副本，增量链健康。',
 	atRiskDescription: '存在本地快照，但至少一个异机副本缺失、待处理或尚未验证。',
 	unprotectedDescription: '只有本地快照无法在磁盘损坏后恢复此机器。',
-	sendNow: '立即发送快照',
+	sendNow: '立即备份',
 	sending: '正在发送快照…',
 	backupProgress: '备份进度',
 	progressPreparing: '正在准备备份',

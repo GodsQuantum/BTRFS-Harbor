@@ -97,22 +97,40 @@ jobs:
             -p harborctl \
             -p harbor-recovery
 
-      - name: Build AppImage, DEB and RPM
-        working-directory: harbor/desktop
-        run: pnpm tauri build --bundles appimage,deb,rpm
-
-      - name: Stage portable Python runtime
+      - name: Stage portable AppImage runtime
         run: |
+          set -eux
           export UV_PYTHON_INSTALL_DIR="$PWD/packaging/generated/uv-python"
           uv python install 3.12
           python_bin="$(find "$UV_PYTHON_INSTALL_DIR" -path '*/bin/python3.12' -print -quit)"
           test -n "$python_bin"
           python_root="$(dirname "$(dirname "$python_bin")")"
-          rm -rf packaging/generated/python-runtime
+          rm -rf packaging/generated/python-runtime harbor/desktop/src-tauri/portable
           cp -a "$python_root" packaging/generated/python-runtime
           test -x packaging/generated/python-runtime/bin/python3
           packaging/generated/python-runtime/bin/python3 \
             packaging/generated/btrfs-backup-ng.pyz --help >/dev/null
+
+          mkdir -p harbor/desktop/src-tauri/portable
+          cp harbor/target/release/btrfs-harborctl harbor/desktop/src-tauri/portable/
+          cp packaging/universal/btrfs-backup-ng harbor/desktop/src-tauri/portable/
+          cp packaging/generated/btrfs-backup-ng.pyz harbor/desktop/src-tauri/portable/
+          cp -a packaging/generated/python-runtime harbor/desktop/src-tauri/portable/python
+          chmod 0755 \
+            harbor/desktop/src-tauri/portable/btrfs-harborctl \
+            harbor/desktop/src-tauri/portable/btrfs-backup-ng \
+            harbor/desktop/src-tauri/portable/btrfs-backup-ng.pyz \
+            harbor/desktop/src-tauri/portable/python/bin/python3
+
+      - name: Build portable AppImage
+        working-directory: harbor/desktop
+        run: |
+          pnpm tauri build --bundles appimage \
+            --config '{"bundle":{"resources":["portable/**"]}}'
+
+      - name: Build native DEB and RPM
+        working-directory: harbor/desktop
+        run: pnpm tauri build --bundles deb,rpm
 
       - name: Assemble universal Linux installer
         run: |
@@ -177,11 +195,19 @@ jobs:
           grep -q 'usr/lib/btrfs-harbor/btrfs-harbor-agent' /tmp/deb-files.txt
           grep -q 'usr/lib/btrfs-harbor/btrfs-backup-ng.pyz' /tmp/deb-files.txt
           grep -q 'btrfs-harbor-agent.service' /tmp/deb-files.txt
+          if grep -q 'usr/bin/btrfs-backup-ng' /tmp/deb-files.txt; then
+            echo "DEB must not replace a user-installed btrfs-backup-ng" >&2
+            exit 1
+          fi
           rpm -qpl release-assets/*.rpm | tee /tmp/rpm-files.txt
           grep -q '/usr/bin/btrfs-harborctl' /tmp/rpm-files.txt
           grep -q '/usr/lib/btrfs-harbor/btrfs-harbor-agent' /tmp/rpm-files.txt
           grep -q '/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz' /tmp/rpm-files.txt
           grep -q 'btrfs-harbor-agent.service' /tmp/rpm-files.txt
+          if grep -q '/usr/bin/btrfs-backup-ng' /tmp/rpm-files.txt; then
+            echo "RPM must not replace a user-installed btrfs-backup-ng" >&2
+            exit 1
+          fi
 
           mkdir -p /tmp/appimage-extract
           (
@@ -190,6 +216,16 @@ jobs:
               --appimage-extract >/dev/null
           )
           test -x /tmp/appimage-extract/squashfs-root/AppRun
+          helper="$(find /tmp/appimage-extract/squashfs-root -path '*/portable/btrfs-harborctl' -type f -print -quit)"
+          engine="$(find /tmp/appimage-extract/squashfs-root -path '*/portable/btrfs-backup-ng' -type f -print -quit)"
+          pyz="$(find /tmp/appimage-extract/squashfs-root -path '*/portable/btrfs-backup-ng.pyz' -type f -print -quit)"
+          python="$(find /tmp/appimage-extract/squashfs-root -path '*/portable/python/bin/python3' -type f -print -quit)"
+          test -x "$helper"
+          test -x "$engine"
+          test -s "$pyz"
+          test -x "$python"
+          "$python" --version
+          "$engine" --help >/dev/null
 
       - name: Generate checksums
         working-directory: release-assets

@@ -1,9 +1,16 @@
 #!/bin/sh
 set -eu
 
-ENGINE="/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz"
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -r "$SELF_DIR/btrfs-backup-ng.pyz" ]; then
+  ENGINE="$SELF_DIR/btrfs-backup-ng.pyz"
+else
+  ENGINE="/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz"
+fi
 
-if [ -x /opt/btrfs-harbor/python/bin/python3 ]; then
+if [ -x "$SELF_DIR/python/bin/python3" ]; then
+  PYTHON="$SELF_DIR/python/bin/python3"
+elif [ -x /opt/btrfs-harbor/python/bin/python3 ]; then
   PYTHON=/opt/btrfs-harbor/python/bin/python3
 elif [ -x /usr/lib/btrfs-harbor/python/bin/python3 ]; then
   PYTHON=/usr/lib/btrfs-harbor/python/bin/python3

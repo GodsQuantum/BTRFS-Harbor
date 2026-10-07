@@ -67,6 +67,10 @@ fn main() -> Result<()> {
             let id = parse_profile_id(args.next())?;
             run_profile_jsonl(id)
         }
+        "run-config-jsonl" => {
+            let id = parse_profile_id(args.next())?;
+            run_config_jsonl(id)
+        }
         "recovery-kit" => {
             let id = parse_profile_id(args.next())?;
             recovery_kit_profile(id)
@@ -89,7 +93,7 @@ fn main() -> Result<()> {
 
 fn usage() {
     eprintln!(
-        "Usage: btrfs-harborctl <list|render-profile|apply-config|install-profile|uninstall-profile|run-profile|run-profile-jsonl|recovery-kit|stage-restore-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID]"
+        "Usage: btrfs-harborctl <list|render-profile|apply-config|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|stage-restore-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID]"
     );
 }
 
@@ -120,14 +124,30 @@ fn systemd_dir() -> PathBuf {
     debug_path_override("BTRFS_HARBOR_SYSTEMD_DIR", DEFAULT_SYSTEMD_DIR)
 }
 
+fn portable_engine_near_helper(helper: &Path) -> Option<PathBuf> {
+    let parent = helper.parent()?;
+    let wrapper = parent.join("btrfs-backup-ng");
+    let payload = parent.join("btrfs-backup-ng.pyz");
+    (wrapper.is_file() && payload.is_file()).then_some(wrapper)
+}
+
 fn engine_executable() -> PathBuf {
     #[cfg(debug_assertions)]
     if let Some(value) = env::var_os("BTRFS_HARBOR_ENGINE") {
         return PathBuf::from(value);
     }
 
-    harbor_engine::discover_engine(Some(PathBuf::from(DEFAULT_BUNDLED_ENGINE)))
+    let portable = env::current_exe()
+        .ok()
+        .and_then(|helper| portable_engine_near_helper(&helper));
+    let bundled = portable.or_else(|| {
+        let installed = PathBuf::from(DEFAULT_BUNDLED_ENGINE);
+        installed.is_file().then_some(installed)
+    });
+
+    harbor_engine::discover_engine(bundled.clone())
         .map(|resolution| resolution.executable)
+        .or_else(|_| bundled.ok_or(harbor_engine::EngineError::NoCompatibleEngine))
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_BUNDLED_ENGINE))
 }
 
@@ -154,6 +174,15 @@ fn read_config() -> Result<HarborConfig> {
     Ok(config)
 }
 
+fn load_profile_from_json(raw: &str, id: Uuid) -> Result<(HarborConfig, BackupProfile)> {
+    let config = parse_config_json(raw)?;
+    let profile = config
+        .profile(id)
+        .cloned()
+        .with_context(|| format!("profile {id} not found"))?;
+    Ok((config, profile))
+}
+
 fn load_profile(id: Uuid) -> Result<(HarborConfig, BackupProfile)> {
     let config = read_config()?;
     let profile = config
@@ -171,6 +200,14 @@ fn list_config() -> Result<()> {
 
 fn generated_config_path(id: Uuid) -> PathBuf {
     generated_dir().join(format!("{id}.toml"))
+}
+
+fn draft_generated_config_path(id: Uuid) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "btrfs-harbor-draft-{id}-{}-{}.toml",
+        std::process::id(),
+        Uuid::new_v4()
+    ))
 }
 
 #[derive(Debug)]
@@ -492,102 +529,135 @@ fn run_streaming_command(mut command: Command, phase: &str) -> Result<ExitStatus
     Ok(status)
 }
 
+fn execute_profile_jsonl(
+    config: &HarborConfig,
+    profile: &BackupProfile,
+    generated_path: &Path,
+) -> Result<()> {
+    let selected = validate_profile_destinations(config, profile)?;
+    emit_progress(
+        "phase",
+        "prepare",
+        &format!("Loaded {}", profile.name),
+        None,
+    )?;
+
+    for destination in &selected {
+        prepare_local_target_dirs(profile, destination)?;
+        emit_progress(
+            "phase",
+            "mount_guard",
+            &format!("Destination {} is ready", destination.name),
+            None,
+        )?;
+    }
+
+    let generated = render_engine_config(profile, &config.destinations)?;
+    atomic_write_mode(generated_path, generated.as_bytes(), 0o600)?;
+
+    emit_progress("phase", "backup", "Running btrfs-backup-ng", None)?;
+    let mut engine = Command::new(engine_executable());
+    engine.arg("-c").arg(generated_path).arg("run");
+    let status = run_streaming_command(engine, "backup")?;
+    if !status.success() {
+        bail!("btrfs-backup-ng run failed with {status}");
+    }
+
+    if profile.verify_after_backup {
+        for destination in &selected {
+            for source in &profile.sources {
+                let uri = engine_target_uri(source, destination)?;
+                emit_progress(
+                    "phase",
+                    "verify",
+                    &format!("Verifying {}", source.path.display()),
+                    None,
+                )?;
+                let mut verify = Command::new(engine_executable());
+                verify.args(["raw", "verify", &uri, "--json"]);
+                let status = run_streaming_command(verify, "verify")?;
+                if !status.success() {
+                    bail!("raw verification failed for {uri} with {status}");
+                }
+            }
+        }
+    }
+
+    emit_progress("phase", "recovery_kit", "Refreshing Recovery Kit", None)?;
+    match refresh_recovery_kit(config, profile, &selected) {
+        Ok(report) => {
+            for path in report.written_directories {
+                emit_progress(
+                    "output",
+                    "recovery_kit",
+                    &format!("Recovery Kit: {}", path.display()),
+                    Some("stdout"),
+                )?;
+            }
+            for destination in report.skipped_destinations {
+                emit_progress(
+                    "output",
+                    "recovery_kit",
+                    &format!("Recovery Kit skipped for {destination}"),
+                    Some("stderr"),
+                )?;
+            }
+        }
+        Err(err) => {
+            emit_progress(
+                "output",
+                "recovery_kit",
+                &format!("Recovery Kit refresh failed: {err}"),
+                Some("stderr"),
+            )?;
+        }
+    }
+
+    emit_progress(
+        "finished",
+        "complete",
+        &format!("Profile {} completed successfully", profile.name),
+        None,
+    )?;
+    Ok(())
+}
+
 fn run_profile_jsonl(id: Uuid) -> Result<()> {
     ensure_root()?;
     emit_progress("phase", "start", &format!("Starting profile {id}"), None)?;
 
     let result = (|| -> Result<()> {
         let (config, profile) = load_profile(id)?;
-        let selected = validate_profile_destinations(&config, &profile)?;
-        emit_progress(
-            "phase",
-            "prepare",
-            &format!("Loaded {}", profile.name),
-            None,
-        )?;
-
-        for destination in &selected {
-            prepare_local_target_dirs(&profile, destination)?;
-            emit_progress(
-                "phase",
-                "mount_guard",
-                &format!("Destination {} is ready", destination.name),
-                None,
-            )?;
-        }
-
         fs::create_dir_all(generated_dir())?;
-        let generated = render_engine_config(&profile, &config.destinations)?;
-        let generated_path = generated_config_path(id);
-        atomic_write(&generated_path, generated.as_bytes())?;
-
-        emit_progress("phase", "backup", "Running btrfs-backup-ng", None)?;
-        let mut engine = Command::new(engine_executable());
-        engine.arg("-c").arg(&generated_path).arg("run");
-        let status = run_streaming_command(engine, "backup")?;
-        if !status.success() {
-            bail!("btrfs-backup-ng run failed with {status}");
-        }
-
-        if profile.verify_after_backup {
-            for destination in &selected {
-                for source in &profile.sources {
-                    let uri = engine_target_uri(source, destination)?;
-                    emit_progress(
-                        "phase",
-                        "verify",
-                        &format!("Verifying {}", source.path.display()),
-                        None,
-                    )?;
-                    let mut verify = Command::new(engine_executable());
-                    verify.args(["raw", "verify", &uri, "--json"]);
-                    let status = run_streaming_command(verify, "verify")?;
-                    if !status.success() {
-                        bail!("raw verification failed for {uri} with {status}");
-                    }
-                }
-            }
-        }
-
-        emit_progress("phase", "recovery_kit", "Refreshing Recovery Kit", None)?;
-        match refresh_recovery_kit(&config, &profile, &selected) {
-            Ok(report) => {
-                for path in report.written_directories {
-                    emit_progress(
-                        "output",
-                        "recovery_kit",
-                        &format!("Recovery Kit: {}", path.display()),
-                        Some("stdout"),
-                    )?;
-                }
-                for destination in report.skipped_destinations {
-                    emit_progress(
-                        "output",
-                        "recovery_kit",
-                        &format!("Recovery Kit skipped for {destination}"),
-                        Some("stderr"),
-                    )?;
-                }
-            }
-            Err(err) => {
-                emit_progress(
-                    "output",
-                    "recovery_kit",
-                    &format!("Recovery Kit refresh failed: {err}"),
-                    Some("stderr"),
-                )?;
-            }
-        }
-
-        emit_progress(
-            "finished",
-            "complete",
-            &format!("Profile {} completed successfully", profile.name),
-            None,
-        )?;
-        Ok(())
+        execute_profile_jsonl(&config, &profile, &generated_config_path(id))
     })();
 
+    if let Err(err) = &result {
+        let _ = emit_progress("failed", "error", &err.to_string(), None);
+    }
+    result
+}
+
+fn run_config_jsonl(id: Uuid) -> Result<()> {
+    ensure_root()?;
+    emit_progress(
+        "phase",
+        "start",
+        &format!("Starting portable profile {id}"),
+        None,
+    )?;
+
+    let generated_path = draft_generated_config_path(id);
+    let result = (|| -> Result<()> {
+        let mut raw = String::new();
+        std::io::stdin()
+            .read_to_string(&mut raw)
+            .context("cannot read portable Harbor configuration from stdin")?;
+        let (config, profile) = load_profile_from_json(&raw, id)?;
+        execute_profile_jsonl(&config, &profile, &generated_path)
+    })();
+
+    let _ = fs::remove_file(&generated_path);
     if let Err(err) = &result {
         let _ = emit_progress("failed", "error", &err.to_string(), None);
     }
@@ -1153,6 +1223,53 @@ mod tests {
 
         assert_eq!(parsed.profiles[0].name, "Workstation recovery");
         assert_eq!(parsed.destinations[0].name, "Backup NAS");
+    }
+
+    #[test]
+    fn draft_config_selects_profile_without_reading_system_configuration() {
+        let config = configuration();
+        let id = config.profiles[0].id;
+        let raw = serde_json::to_string(&config).unwrap();
+
+        let (parsed, selected) = load_profile_from_json(&raw, id).unwrap();
+
+        assert_eq!(selected.id, id);
+        assert_eq!(selected.name, "Workstation recovery");
+        assert_eq!(parsed.destinations.len(), 1);
+    }
+
+    #[test]
+    fn draft_backup_uses_ephemeral_config_outside_persistent_harbor_state() {
+        let id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let path = draft_generated_config_path(id);
+
+        assert!(path.starts_with(std::env::temp_dir()));
+        assert!(!path.starts_with("/etc/btrfs-harbor"));
+        assert!(!path.starts_with("/var/lib/btrfs-harbor"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(&id.to_string())
+        );
+    }
+
+    #[test]
+    fn portable_helper_uses_sibling_engine_only_when_payload_is_complete() {
+        let root = std::env::temp_dir().join(format!("btrfs-harbor-portable-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let helper = root.join("btrfs-harborctl");
+        let wrapper = root.join("btrfs-backup-ng");
+        let payload = root.join("btrfs-backup-ng.pyz");
+        fs::write(&helper, b"helper").unwrap();
+        fs::write(&wrapper, b"engine").unwrap();
+
+        assert_eq!(portable_engine_near_helper(&helper), None);
+
+        fs::write(&payload, b"payload").unwrap();
+        assert_eq!(portable_engine_near_helper(&helper), Some(wrapper));
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -3,13 +3,18 @@
 	import Check from 'lucide-svelte/icons/check';
 	import ChevronDown from 'lucide-svelte/icons/chevron-down';
 	import FolderOpen from 'lucide-svelte/icons/folder-open';
+	import Play from 'lucide-svelte/icons/play';
 	import Save from 'lucide-svelte/icons/save';
 	import Server from 'lucide-svelte/icons/server';
 	import {
 		applyHarborConfiguration,
 		chooseDestinationDirectory,
 		discoverBtrfsSources,
-		inspectDestinationMount
+		inspectDestinationMount,
+		installFullHarbor,
+		loadInstallationState,
+		runDraftBackup,
+		type InstallationState
 	} from './agent';
 	import {
 		backupSourceFromDiscovery,
@@ -39,6 +44,8 @@
 	export let onApplied: () => Promise<void> | void = () => {};
 
 	let applying = false;
+	let backingUp = false;
+	let installation: InstallationState | null = null;
 	let message = '';
 	let error = '';
 	let discoveryError = '';
@@ -57,6 +64,11 @@
 
 	onMount(async () => {
 		if (destination.kind === 'ssh') sshFields = parseSshDestination(destination.path);
+		try {
+			installation = await loadInstallationState();
+		} catch {
+			installation = null;
+		}
 		try {
 			discoveredSources = await discoverBtrfsSources();
 			if (profile.sources.length === 0 && discoveredSources.length > 0) {
@@ -267,22 +279,54 @@
 		}
 	}
 
+	async function validatedDraft(): Promise<{
+		config: HarborConfig;
+		profile: BackupProfile;
+	} | null> {
+		const next = await normalizedConfiguration();
+		const nextProfile = resolveProfile(next, profile.id);
+		const nextIssues = draftIssues(next, nextProfile);
+		if (nextIssues.length > 0) {
+			const issue = describeDraftIssue(nextIssues[0]);
+			error = t(issue.messageKey);
+			focusSection(issue.section);
+			return null;
+		}
+		config = next;
+		return { config: next, profile: nextProfile };
+	}
+
+	async function backupNow() {
+		error = '';
+		message = '';
+		backingUp = true;
+		try {
+			const draft = await validatedDraft();
+			if (!draft) return;
+			await runDraftBackup(draft.config, draft.profile.id, (event) => {
+				if (event.event !== 'output') message = event.message;
+			});
+			await onApplied();
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			backingUp = false;
+		}
+	}
+
 	async function apply() {
 		error = '';
 		message = '';
 		applying = true;
 		try {
-			const next = await normalizedConfiguration();
-			const nextProfile = resolveProfile(next, profile.id);
-			const nextIssues = draftIssues(next, nextProfile);
-			if (nextIssues.length > 0) {
-				const issue = describeDraftIssue(nextIssues[0]);
-				error = t(issue.messageKey);
-				focusSection(issue.section);
-				return;
+			const draft = await validatedDraft();
+			if (!draft) return;
+			if (!installation?.helper_installed) {
+				await installFullHarbor();
+				installation = await loadInstallationState();
+				if (!installation.helper_installed) throw new Error(t('installationFailed'));
 			}
-			config = next;
-			await applyHarborConfiguration(next, nextProfile.id);
+			await applyHarborConfiguration(draft.config, draft.profile.id);
 			message = t('configurationActivated');
 			await onApplied();
 		} catch (cause) {
@@ -640,10 +684,23 @@
 		<div class="editor-feedback">
 			{#if error}<span class="error-text">{error}</span>{/if}
 			{#if message}<span class="good-status">{message}</span>{/if}
+			{#if !error && !message && !installation?.helper_installed}
+				<span class="field-help">{t('portableManualHelp')}</span>
+			{/if}
 		</div>
-		<button class="primary" type="button" onclick={apply} disabled={applying}>
-			<Save size={17} />
-			{applying ? t('savingConfiguration') : t('saveActivate')}
-		</button>
+		<div class="editor-action-buttons">
+			<button class="secondary" type="button" onclick={backupNow} disabled={backingUp || applying}>
+				<Play size={16} />
+				{backingUp ? t('sending') : t('backupNow')}
+			</button>
+			<button class="primary" type="button" onclick={apply} disabled={applying || backingUp}>
+				<Save size={17} />
+				{applying
+					? t('savingConfiguration')
+					: installation?.helper_installed
+						? t('saveActivate')
+						: t('installAutomation')}
+			</button>
+		</div>
 	</div>
 </div>

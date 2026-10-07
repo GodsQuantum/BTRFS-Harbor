@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tauri::ipc::Channel;
+use tauri::{Manager, ipc::Channel};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
@@ -14,6 +14,10 @@ const OBJECT_PATH: &str = "/io/github/GodsQuantum/BtrfsHarbor1";
 const INTERFACE: &str = "io.github.GodsQuantum.BtrfsHarbor1";
 
 #[cfg_attr(not(test), allow(dead_code))]
+fn bundled_helper_path(resource_dir: &Path) -> PathBuf {
+    resource_dir.join("portable").join("btrfs-harborctl")
+}
+
 fn choose_helper_candidate(
     installed: Option<PathBuf>,
     bundled: Option<PathBuf>,
@@ -21,6 +25,19 @@ fn choose_helper_candidate(
     installed
         .or(bundled)
         .ok_or_else(|| "No Harbor helper is available for this operation.".to_string())
+}
+
+fn helper_executable(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let installed = PathBuf::from("/usr/bin/btrfs-harborctl");
+    let installed = installed.is_file().then_some(installed);
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|root| bundled_helper_path(&root))
+        .filter(|path| path.is_file());
+
+    choose_helper_candidate(installed, bundled)
 }
 
 async fn call_agent<R>(
@@ -82,10 +99,10 @@ async fn download_file(url: &str, destination: &Path) -> Result<(), String> {
         .output()
         .await;
 
-    if let Ok(output) = curl {
-        if output.status.success() {
-            return Ok(());
-        }
+    if let Ok(output) = curl
+        && output.status.success()
+    {
+        return Ok(());
     }
 
     let wget = Command::new("wget")
@@ -303,13 +320,18 @@ async fn backup_status(profile_id: String) -> Result<String, String> {
     call_agent("BackupStatus", &profile_id).await
 }
 
-async fn run_privileged_profile_command(command: &str, profile_id: &str) -> Result<String, String> {
+async fn run_privileged_profile_command(
+    app: &tauri::AppHandle,
+    command: &str,
+    profile_id: &str,
+) -> Result<String, String> {
     let profile_id = Uuid::parse_str(profile_id)
         .map_err(|err| format!("Invalid profile UUID: {err}"))?
         .to_string();
+    let helper = helper_executable(app)?;
 
     let output = Command::new("/usr/bin/pkexec")
-        .arg("/usr/bin/btrfs-harborctl")
+        .arg(helper)
         .arg(command)
         .arg(profile_id)
         .output()
@@ -329,6 +351,7 @@ async fn run_privileged_profile_command(command: &str, profile_id: &str) -> Resu
 }
 
 async fn run_privileged_profile_command_with_stdin(
+    app: &tauri::AppHandle,
     command: &str,
     profile_id: &str,
     input: &[u8],
@@ -336,9 +359,10 @@ async fn run_privileged_profile_command_with_stdin(
     let profile_id = Uuid::parse_str(profile_id)
         .map_err(|err| format!("Invalid profile UUID: {err}"))?
         .to_string();
+    let helper = helper_executable(app)?;
 
     let mut child = Command::new("/usr/bin/pkexec")
-        .arg("/usr/bin/btrfs-harborctl")
+        .arg(helper)
         .arg(command)
         .arg(profile_id)
         .stdin(Stdio::piped())
@@ -378,17 +402,27 @@ async fn run_privileged_profile_command_with_stdin(
 }
 
 #[tauri::command]
-async fn apply_configuration(configuration: String, profile_id: String) -> Result<String, String> {
-    run_privileged_profile_command_with_stdin("apply-config", &profile_id, configuration.as_bytes())
-        .await
+async fn apply_configuration(
+    app: tauri::AppHandle,
+    configuration: String,
+    profile_id: String,
+) -> Result<String, String> {
+    run_privileged_profile_command_with_stdin(
+        &app,
+        "apply-config",
+        &profile_id,
+        configuration.as_bytes(),
+    )
+    .await
 }
 
 #[tauri::command]
-async fn send_snapshot_now(profile_id: String) -> Result<String, String> {
-    run_privileged_profile_command("run-profile", &profile_id).await
+async fn send_snapshot_now(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
+    run_privileged_profile_command(&app, "run-profile", &profile_id).await
 }
 
 async fn run_privileged_profile_stream(
+    app: &tauri::AppHandle,
     command: &str,
     profile_id: &str,
     input: Option<&[u8]>,
@@ -397,9 +431,10 @@ async fn run_privileged_profile_stream(
     let profile_id = Uuid::parse_str(profile_id)
         .map_err(|err| format!("Invalid profile UUID: {err}"))?
         .to_string();
+    let helper = helper_executable(app)?;
 
     let mut child = Command::new("/usr/bin/pkexec")
-        .arg("/usr/bin/btrfs-harborctl")
+        .arg(helper)
         .arg(command)
         .arg(profile_id)
         .stdin(Stdio::piped())
@@ -503,19 +538,39 @@ async fn run_privileged_profile_stream(
 
 #[tauri::command]
 async fn send_snapshot_now_stream(
+    app: tauri::AppHandle,
     profile_id: String,
     on_event: Channel<Value>,
 ) -> Result<(), String> {
-    run_privileged_profile_stream("run-profile-jsonl", &profile_id, None, on_event).await
+    run_privileged_profile_stream(&app, "run-profile-jsonl", &profile_id, None, on_event).await
+}
+
+#[tauri::command]
+async fn send_draft_now_stream(
+    app: tauri::AppHandle,
+    configuration: String,
+    profile_id: String,
+    on_event: Channel<Value>,
+) -> Result<(), String> {
+    run_privileged_profile_stream(
+        &app,
+        "run-config-jsonl",
+        &profile_id,
+        Some(configuration.as_bytes()),
+        on_event,
+    )
+    .await
 }
 
 #[tauri::command]
 async fn stage_restore(
+    app: tauri::AppHandle,
     profile_id: String,
     request: String,
     on_event: Channel<Value>,
 ) -> Result<(), String> {
     run_privileged_profile_stream(
+        &app,
         "stage-restore-jsonl",
         &profile_id,
         Some(request.as_bytes()),
@@ -525,12 +580,14 @@ async fn stage_restore(
 }
 
 async fn run_privileged_unscoped_stream(
+    app: &tauri::AppHandle,
     command: &str,
     input: &[u8],
     on_event: Channel<Value>,
 ) -> Result<(), String> {
+    let helper = helper_executable(app)?;
     let mut child = Command::new("/usr/bin/pkexec")
-        .arg("/usr/bin/btrfs-harborctl")
+        .arg(helper)
         .arg(command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -629,18 +686,22 @@ async fn run_privileged_unscoped_stream(
 }
 
 #[tauri::command]
-async fn replicate_lxc(request: String, on_event: Channel<Value>) -> Result<(), String> {
-    run_privileged_unscoped_stream("replicate-lxc-jsonl", request.as_bytes(), on_event).await
+async fn replicate_lxc(
+    app: tauri::AppHandle,
+    request: String,
+    on_event: Channel<Value>,
+) -> Result<(), String> {
+    run_privileged_unscoped_stream(&app, "replicate-lxc-jsonl", request.as_bytes(), on_event).await
 }
 
 #[tauri::command]
-async fn install_profile(profile_id: String) -> Result<String, String> {
-    run_privileged_profile_command("install-profile", &profile_id).await
+async fn install_profile(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
+    run_privileged_profile_command(&app, "install-profile", &profile_id).await
 }
 
 #[tauri::command]
-async fn uninstall_profile(profile_id: String) -> Result<String, String> {
-    run_privileged_profile_command("uninstall-profile", &profile_id).await
+async fn uninstall_profile(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
+    run_privileged_profile_command(&app, "uninstall-profile", &profile_id).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -672,6 +733,7 @@ pub fn run() {
             apply_configuration,
             send_snapshot_now,
             send_snapshot_now_stream,
+            send_draft_now_stream,
             stage_restore,
             replicate_lxc,
             install_profile,
@@ -684,6 +746,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_helper_lives_under_portable_resource_directory() {
+        let root = PathBuf::from("/app/resources");
+        assert_eq!(
+            bundled_helper_path(&root),
+            PathBuf::from("/app/resources/portable/btrfs-harborctl")
+        );
+    }
 
     #[test]
     fn installed_helper_is_preferred_over_bundled_helper() {

@@ -76,13 +76,11 @@ export async function applyHarborConfiguration(
 		return 'demo';
 	}
 
-	let installation = await loadInstallationState();
+	const installation = await loadInstallationState();
 	if (!installation.helper_installed) {
-		await installFullHarbor();
-		installation = await loadInstallationState();
-		if (!installation.helper_installed) {
-			throw new Error('Harbor system installation did not complete.');
-		}
+		throw new Error(
+			'Install Harbor first to enable automatic backups. Portable mode can back up manually without installation.'
+		);
 	}
 
 	return invoke<string>('apply_configuration', {
@@ -271,6 +269,33 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 				: message
 		};
 	}
+}
+
+export async function runDraftBackup(
+	config: HarborConfig,
+	profileId: string,
+	onProgress?: (event: BackupProgressEvent) => void
+): Promise<void> {
+	if (!isTauri()) {
+		for (const event of [
+			{ event: 'phase', phase: 'prepare', message: 'Loaded portable backup settings' },
+			{ event: 'phase', phase: 'mount_guard', message: 'Demo destination is ready' },
+			{ event: 'phase', phase: 'backup', message: 'Running portable backup' },
+			{ event: 'finished', phase: 'complete', message: 'Portable backup complete' }
+		] satisfies BackupProgressEvent[]) {
+			onProgress?.(event);
+			await new Promise((resolve) => setTimeout(resolve, 120));
+		}
+		return;
+	}
+
+	const channel = new Channel<BackupProgressEvent>();
+	channel.onmessage = (event) => onProgress?.(event);
+	await invoke<void>('send_draft_now_stream', {
+		configuration: JSON.stringify(config),
+		profileId,
+		onEvent: channel
+	});
 }
 
 export async function sendProfileNow(

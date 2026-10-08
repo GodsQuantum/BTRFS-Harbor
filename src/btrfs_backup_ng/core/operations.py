@@ -1391,16 +1391,16 @@ def _do_rich_progress_transfer(
     # this path reports a clean failure with the failed-transaction audit log,
     # exactly like the non-rich transfer path.
     try:
-        receive_kwargs = {
-            "parent_name": parent_name,
-            "source_uuid": source_uuid,
-        }
-        if progress_context is not None:
-            receive_kwargs["progress_context"] = progress_context
+        set_progress_context = getattr(
+            destination_endpoint, "set_progress_context", None
+        )
+        if callable(set_progress_context):
+            set_progress_context(progress_context)
         receive_process = destination_endpoint.receive(
             subprocess.PIPE,
             snapshot_name,
-            **receive_kwargs,
+            parent_name=parent_name,
+            source_uuid=source_uuid,
         )
     except Exception as e:
         logger.error("Failed to start receive process: %s", e)

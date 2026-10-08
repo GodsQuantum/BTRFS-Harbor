@@ -1,3 +1,5 @@
+use harbor_core::EnginePolicy;
+use harbor_engine::{EngineOrigin, EngineSelectionStatus};
 use harbor_storage::MountTable;
 use serde::Serialize;
 use serde_json::Value;
@@ -336,6 +338,404 @@ fn helper_executable(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .filter(|path| path.is_file());
 
     choose_helper_candidate(installed, bundled)
+}
+
+fn bundled_engine_candidate(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .resource_dir()
+        .ok()
+        .map(|root| root.join("portable").join("btrfs-backup-ng"))
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            let installed = PathBuf::from("/usr/lib/btrfs-harbor/btrfs-backup-ng");
+            installed.is_file().then_some(installed)
+        })
+}
+
+fn parse_engine_policy_value(value: &str) -> Result<EnginePolicy, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(EnginePolicy::Auto),
+        "system" => Ok(EnginePolicy::System),
+        "bundled" => Ok(EnginePolicy::Bundled),
+        other => Err(format!("Unknown backup engine policy: {other}")),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EngineProvenance {
+    Pacman { package: String },
+    Dpkg { package: String },
+    Rpm { package: String },
+    UvTool,
+    Pipx,
+    ManualUnknown,
+    BundledHarbor,
+}
+
+impl EngineProvenance {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Pacman { .. } => "pacman",
+            Self::Dpkg { .. } => "dpkg",
+            Self::Rpm { .. } => "rpm",
+            Self::UvTool => "uv_tool",
+            Self::Pipx => "pipx",
+            Self::ManualUnknown => "manual_unknown",
+            Self::BundledHarbor => "bundled_harbor",
+        }
+    }
+
+    fn package(&self) -> Option<&str> {
+        match self {
+            Self::Pacman { package } | Self::Dpkg { package } | Self::Rpm { package } => {
+                Some(package)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum EngineUpdateStrategy {
+    HarborApplication,
+    PackageManager,
+    UserTool,
+    GuidanceOnly,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EngineUpdateOptions {
+    strategy: EngineUpdateStrategy,
+    can_update: bool,
+    package: Option<String>,
+    provenance: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UpdateCommandSpec {
+    program: String,
+    args: Vec<String>,
+    privileged: bool,
+}
+
+fn safe_package_name(package: &str) -> bool {
+    !package.is_empty()
+        && !package.starts_with('-')
+        && package
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '+' | '@' | ':'))
+}
+
+fn update_command_for_provenance(
+    provenance: &EngineProvenance,
+    dnf_available: bool,
+    zypper_available: bool,
+) -> Option<UpdateCommandSpec> {
+    let package_spec = |package: &str, program: &str, mut args: Vec<String>| {
+        if !safe_package_name(package) {
+            return None;
+        }
+        args.push(package.to_owned());
+        Some(UpdateCommandSpec {
+            program: program.to_owned(),
+            args,
+            privileged: true,
+        })
+    };
+
+    match provenance {
+        EngineProvenance::Pacman { package } => package_spec(
+            package,
+            "/usr/bin/pacman",
+            vec!["-S".into(), "--needed".into(), "--noconfirm".into()],
+        ),
+        EngineProvenance::Dpkg { package } => package_spec(
+            package,
+            "/usr/bin/apt-get",
+            vec!["install".into(), "--only-upgrade".into(), "-y".into()],
+        ),
+        EngineProvenance::Rpm { package } if dnf_available => {
+            package_spec(package, "/usr/bin/dnf", vec!["upgrade".into(), "-y".into()])
+        }
+        EngineProvenance::Rpm { package } if zypper_available => package_spec(
+            package,
+            "/usr/bin/zypper",
+            vec!["--non-interactive".into(), "update".into()],
+        ),
+        EngineProvenance::UvTool => Some(UpdateCommandSpec {
+            program: "uv".into(),
+            args: vec!["tool".into(), "upgrade".into(), "btrfs-backup-ng".into()],
+            privileged: false,
+        }),
+        EngineProvenance::Pipx => Some(UpdateCommandSpec {
+            program: "pipx".into(),
+            args: vec!["upgrade".into(), "btrfs-backup-ng".into()],
+            privileged: false,
+        }),
+        _ => None,
+    }
+}
+
+fn parse_pacman_owner(output: &str) -> Option<String> {
+    let owner = output
+        .split_once(" is owned by ")
+        .map(|(_, owner)| owner)
+        .unwrap_or(output)
+        .trim();
+    owner
+        .split_whitespace()
+        .next()
+        .filter(|package| !package.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_dpkg_owner(output: &str) -> Option<String> {
+    output
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .map(|(package, _)| package.trim().to_owned())
+        })
+        .filter(|package| !package.is_empty())
+}
+
+fn parse_rpm_owner(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("file "))
+        .map(ToOwned::to_owned)
+}
+
+fn classify_engine_provenance(
+    path: &Path,
+    pacman_output: Option<&str>,
+    dpkg_output: Option<&str>,
+    rpm_output: Option<&str>,
+) -> EngineProvenance {
+    if let Some(package) = pacman_output.and_then(parse_pacman_owner) {
+        return EngineProvenance::Pacman { package };
+    }
+    if let Some(package) = dpkg_output.and_then(parse_dpkg_owner) {
+        return EngineProvenance::Dpkg { package };
+    }
+    if let Some(package) = rpm_output.and_then(parse_rpm_owner) {
+        return EngineProvenance::Rpm { package };
+    }
+
+    let normalized = path.to_string_lossy();
+    if normalized.contains("/.local/share/uv/tools/") || normalized.contains("/uv/tools/") {
+        EngineProvenance::UvTool
+    } else if normalized.contains("/pipx/venvs/") || normalized.contains("/.local/pipx/") {
+        EngineProvenance::Pipx
+    } else {
+        EngineProvenance::ManualUnknown
+    }
+}
+
+fn update_strategy_for_origin(
+    origin: EngineOrigin,
+    provenance: EngineProvenance,
+) -> EngineUpdateStrategy {
+    match origin {
+        EngineOrigin::Bundled => EngineUpdateStrategy::HarborApplication,
+        EngineOrigin::System => match provenance {
+            EngineProvenance::Pacman { .. }
+            | EngineProvenance::Dpkg { .. }
+            | EngineProvenance::Rpm { .. } => EngineUpdateStrategy::PackageManager,
+            EngineProvenance::UvTool | EngineProvenance::Pipx => EngineUpdateStrategy::UserTool,
+            EngineProvenance::ManualUnknown | EngineProvenance::BundledHarbor => {
+                EngineUpdateStrategy::GuidanceOnly
+            }
+        },
+    }
+}
+
+async fn bounded_command_output(program: &str, args: &[&str]) -> Option<String> {
+    let mut command = Command::new(program);
+    command.args(args);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), command.output()).await;
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            (!stdout.is_empty()).then_some(stdout)
+        }
+        _ => None,
+    }
+}
+
+async fn detect_engine_provenance(path: &Path) -> EngineProvenance {
+    if path == Path::new("/usr/lib/btrfs-harbor/btrfs-backup-ng")
+        || path.to_string_lossy().contains("/portable/btrfs-backup-ng")
+    {
+        return EngineProvenance::BundledHarbor;
+    }
+
+    let path_text = path.to_string_lossy().into_owned();
+    let pacman = bounded_command_output("pacman", &["-Qo", "--", &path_text]).await;
+    let dpkg = bounded_command_output("dpkg-query", &["-S", &path_text]).await;
+    let rpm = bounded_command_output("rpm", &["-qf", "--qf", "%{NAME}\n", &path_text]).await;
+    classify_engine_provenance(path, pacman.as_deref(), dpkg.as_deref(), rpm.as_deref())
+}
+
+fn engine_update_options_from(
+    selection: &EngineSelectionStatus,
+    provenance: EngineProvenance,
+) -> EngineUpdateOptions {
+    let strategy = update_strategy_for_origin(selection.active.origin, provenance.clone());
+    let package = provenance.package().map(ToOwned::to_owned);
+    let (can_update, reason) = match (&selection.active.origin, &provenance, strategy) {
+        (EngineOrigin::Bundled, _, EngineUpdateStrategy::HarborApplication) => (
+            true,
+            "The bundled engine is updated by updating Btrfs Harbor itself.".to_owned(),
+        ),
+        (EngineOrigin::System, EngineProvenance::Pacman { .. }, _) => (
+            true,
+            "This system engine is owned by pacman; Harbor can request a package upgrade and then re-check compatibility.".to_owned(),
+        ),
+        (EngineOrigin::System, EngineProvenance::Dpkg { .. }, _) => (
+            true,
+            "This system engine is owned by dpkg; Harbor can request an apt package upgrade and then re-check compatibility.".to_owned(),
+        ),
+        (EngineOrigin::System, EngineProvenance::Rpm { .. }, _) => (
+            true,
+            "This system engine is owned by RPM; Harbor can use the available RPM-family package manager and then re-check compatibility.".to_owned(),
+        ),
+        (EngineOrigin::System, EngineProvenance::UvTool, _) => (
+            true,
+            "This system engine is managed by uv tool and can be upgraded without overwriting distribution files.".to_owned(),
+        ),
+        (EngineOrigin::System, EngineProvenance::Pipx, _) => (
+            true,
+            "This system engine is managed by pipx and can be upgraded without overwriting distribution files.".to_owned(),
+        ),
+        _ => (
+            false,
+            "Harbor cannot prove who owns this engine, so it will not overwrite it. Use the bundled engine or update the manual installation yourself.".to_owned(),
+        ),
+    };
+
+    EngineUpdateOptions {
+        strategy,
+        can_update,
+        package,
+        provenance: provenance.kind().to_owned(),
+        reason,
+    }
+}
+
+async fn engine_selection_for_app(
+    app: &tauri::AppHandle,
+    policy: &str,
+) -> Result<EngineSelectionStatus, String> {
+    let policy = parse_engine_policy_value(policy)?;
+    harbor_engine::discover_engine_with_policy(policy, bundled_engine_candidate(app))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn engine_status(app: tauri::AppHandle, policy: String) -> Result<String, String> {
+    let status = engine_selection_for_app(&app, &policy).await?;
+    serde_json::to_string(&status).map_err(|err| format!("Cannot encode engine status: {err}"))
+}
+
+#[tauri::command]
+async fn engine_update_options(app: tauri::AppHandle, policy: String) -> Result<String, String> {
+    let status = engine_selection_for_app(&app, &policy).await?;
+    let provenance = if status.active.origin == EngineOrigin::Bundled {
+        EngineProvenance::BundledHarbor
+    } else {
+        detect_engine_provenance(&status.active.executable).await
+    };
+    let options = engine_update_options_from(&status, provenance);
+    serde_json::to_string(&options)
+        .map_err(|err| format!("Cannot encode engine update options: {err}"))
+}
+
+#[tauri::command]
+async fn set_engine_policy(app: tauri::AppHandle, policy: String) -> Result<String, String> {
+    let parsed = parse_engine_policy_value(&policy)?;
+    if !Path::new("/etc/btrfs-harbor/harbor.toml").is_file() {
+        return serde_json::to_string(&parsed)
+            .map_err(|err| format!("Cannot encode engine policy: {err}"));
+    }
+
+    let helper = helper_executable(&app)?;
+    let output = Command::new("/usr/bin/pkexec")
+        .arg(helper)
+        .arg("set-engine-policy")
+        .arg(policy)
+        .output()
+        .await
+        .map_err(|err| format!("Cannot persist the backup engine policy: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("Harbor helper failed with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+#[tauri::command]
+async fn update_system_engine(app: tauri::AppHandle, policy: String) -> Result<String, String> {
+    let selection = engine_selection_for_app(&app, &policy).await?;
+    if selection.active.origin != EngineOrigin::System {
+        return Err(
+            "The active engine is bundled with Harbor. Update Btrfs Harbor to update it.".into(),
+        );
+    }
+
+    let provenance = detect_engine_provenance(&selection.active.executable).await;
+    let spec = update_command_for_provenance(
+        &provenance,
+        Path::new("/usr/bin/dnf").is_file(),
+        Path::new("/usr/bin/zypper").is_file(),
+    )
+    .ok_or_else(|| {
+        "Harbor cannot safely update this engine because its local package owner is unknown."
+            .to_string()
+    })?;
+
+    let output = if spec.privileged {
+        let mut command = Command::new("/usr/bin/pkexec");
+        command.arg(&spec.program).args(&spec.args);
+        command.output().await
+    } else {
+        Command::new(&spec.program).args(&spec.args).output().await
+    }
+    .map_err(|err| format!("Cannot start the engine update: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("Engine update failed with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    let refreshed = engine_selection_for_app(&app, &policy).await?;
+    serde_json::to_string(&refreshed)
+        .map_err(|err| format!("Cannot encode refreshed engine status: {err}"))
+}
+
+#[tauri::command]
+async fn open_harbor_release_page() -> Result<String, String> {
+    let status = Command::new("xdg-open")
+        .arg("https://github.com/GodsQuantum/BTRFS-Harbor/releases/latest")
+        .status()
+        .await
+        .map_err(|err| format!("Cannot open Harbor releases: {err}"))?;
+    if status.success() {
+        Ok("opened".to_owned())
+    } else {
+        Err(format!("Cannot open Harbor releases: {status}"))
+    }
 }
 
 async fn call_agent<R>(
@@ -1189,6 +1589,11 @@ pub fn run() {
             system_summary,
             installation_state,
             system_identity,
+            engine_status,
+            engine_update_options,
+            set_engine_policy,
+            update_system_engine,
+            open_harbor_release_page,
             install_full_package,
             profiles,
             configuration,
@@ -1213,6 +1618,141 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_provenance_prefers_local_package_ownership_over_path_hints() {
+        assert_eq!(
+            classify_engine_provenance(
+                Path::new("/usr/bin/btrfs-backup-ng"),
+                Some("btrfs-backup-ng 0.9.12-1"),
+                None,
+                None,
+            ),
+            EngineProvenance::Pacman {
+                package: "btrfs-backup-ng".into()
+            }
+        );
+        assert_eq!(
+            classify_engine_provenance(
+                Path::new("/usr/bin/btrfs-backup-ng"),
+                None,
+                Some("btrfs-backup-ng: /usr/bin/btrfs-backup-ng"),
+                None,
+            ),
+            EngineProvenance::Dpkg {
+                package: "btrfs-backup-ng".into()
+            }
+        );
+        assert_eq!(
+            classify_engine_provenance(
+                Path::new("/usr/bin/btrfs-backup-ng"),
+                None,
+                None,
+                Some("btrfs-backup-ng"),
+            ),
+            EngineProvenance::Rpm {
+                package: "btrfs-backup-ng".into()
+            }
+        );
+    }
+
+    #[test]
+    fn engine_provenance_detects_user_tool_and_unknown_manual_install() {
+        assert_eq!(
+            classify_engine_provenance(
+                Path::new("/home/user/.local/share/uv/tools/btrfs-backup-ng/bin/btrfs-backup-ng"),
+                None,
+                None,
+                None,
+            ),
+            EngineProvenance::UvTool
+        );
+        assert_eq!(
+            classify_engine_provenance(
+                Path::new("/opt/custom/bin/btrfs-backup-ng"),
+                None,
+                None,
+                None,
+            ),
+            EngineProvenance::ManualUnknown
+        );
+    }
+
+    #[test]
+    fn update_strategy_never_overwrites_unknown_manual_engine() {
+        assert_eq!(
+            update_strategy_for_origin(
+                harbor_engine::EngineOrigin::System,
+                EngineProvenance::ManualUnknown
+            ),
+            EngineUpdateStrategy::GuidanceOnly
+        );
+        assert_eq!(
+            update_strategy_for_origin(
+                harbor_engine::EngineOrigin::Bundled,
+                EngineProvenance::BundledHarbor
+            ),
+            EngineUpdateStrategy::HarborApplication
+        );
+    }
+
+    #[test]
+    fn package_update_commands_are_fixed_by_local_provenance() {
+        assert_eq!(
+            update_command_for_provenance(
+                &EngineProvenance::Pacman {
+                    package: "btrfs-backup-ng".into()
+                },
+                true,
+                false,
+            ),
+            Some(UpdateCommandSpec {
+                program: "/usr/bin/pacman".into(),
+                args: vec![
+                    "-S".into(),
+                    "--needed".into(),
+                    "--noconfirm".into(),
+                    "btrfs-backup-ng".into()
+                ],
+                privileged: true
+            })
+        );
+        assert_eq!(
+            update_command_for_provenance(
+                &EngineProvenance::Rpm {
+                    package: "btrfs-backup-ng".into()
+                },
+                false,
+                true,
+            ),
+            Some(UpdateCommandSpec {
+                program: "/usr/bin/zypper".into(),
+                args: vec![
+                    "--non-interactive".into(),
+                    "update".into(),
+                    "btrfs-backup-ng".into()
+                ],
+                privileged: true
+            })
+        );
+        assert_eq!(
+            update_command_for_provenance(&EngineProvenance::ManualUnknown, true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn user_tool_update_commands_never_require_root() {
+        let uv = update_command_for_provenance(&EngineProvenance::UvTool, false, false).unwrap();
+        assert_eq!(uv.program, "uv");
+        assert_eq!(uv.args, vec!["tool", "upgrade", "btrfs-backup-ng"]);
+        assert!(!uv.privileged);
+
+        let pipx = update_command_for_provenance(&EngineProvenance::Pipx, false, false).unwrap();
+        assert_eq!(pipx.program, "pipx");
+        assert_eq!(pipx.args, vec!["upgrade", "btrfs-backup-ng"]);
+        assert!(!pipx.privileged);
+    }
 
     #[test]
     fn appimage_reexec_is_required_before_privileged_helpers_touch_fuse_payload() {

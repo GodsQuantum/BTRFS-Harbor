@@ -36,11 +36,16 @@
 	import {
 		applyHarborConfiguration,
 		loadDashboardStatus,
+		loadEngineSelectionStatus,
+		loadEngineUpdateOptions,
 		loadHarborConfiguration,
 		loadInstallationState,
 		loadProfileRuntime,
 		loadSystemIdentity,
+		openHarborReleasePage,
+		persistEnginePolicy,
 		sendProfileNow,
+		updateActiveSystemEngine,
 		type InstallationState,
 		type SystemIdentity
 	} from '#lib/agent.ts';
@@ -61,9 +66,12 @@
 		type TranslationKey
 	} from '#lib/i18n.ts';
 	import BackupProgress from '#lib/BackupProgress.svelte';
+	import EngineManager from '#lib/EngineManager.svelte';
+	import EngineStatusRow from '#lib/EngineStatusRow.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
 	import RecoveryEditor from '#lib/RecoveryEditor.svelte';
 	import ReplicaEditor from '#lib/ReplicaEditor.svelte';
+	import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from '#lib/engine.ts';
 	import {
 		demoStatus,
 		protectionState,
@@ -96,6 +104,10 @@
 	let configWarning = '';
 	let installationState: InstallationState | null = null;
 	let systemIdentity: SystemIdentity | null = null;
+	let engineStatus: EngineSelectionStatus | null = null;
+	let engineUpdateOptions: EngineUpdateOptions | null = null;
+	let engineBusy = false;
+	let engineError = '';
 	let scheduleSaving = false;
 	let scheduleFeedback = '';
 	let scheduleError = '';
@@ -120,6 +132,9 @@
 		dark = savedTheme
 			? savedTheme === 'dark'
 			: window.matchMedia('(prefers-color-scheme: dark)').matches;
+		const savedEnginePolicy = localStorage.getItem(
+			'btrfs-harbor-engine-policy'
+		) as EnginePolicy | null;
 
 		const [dashboardResult, installState, identity] = await Promise.all([
 			loadDashboardStatus(),
@@ -131,9 +146,20 @@
 		systemIdentity = identity;
 		try {
 			harborConfig = await loadHarborConfiguration();
-			await refreshJobRuntimes(harborConfig, installState);
+			if (
+				!installState?.helper_installed &&
+				savedEnginePolicy &&
+				['auto', 'system', 'bundled'].includes(savedEnginePolicy)
+			) {
+				harborConfig.engine_policy = savedEnginePolicy;
+			}
+			await Promise.all([
+				refreshJobRuntimes(harborConfig, installState),
+				refreshEngineState(harborConfig.engine_policy)
+			]);
 		} catch (error) {
 			configWarning = error instanceof Error ? error.message : String(error);
+			await refreshEngineState(savedEnginePolicy ?? 'auto').catch(() => undefined);
 		}
 		loading = false;
 	});
@@ -146,6 +172,76 @@
 	function toggleTheme() {
 		dark = !dark;
 		localStorage.setItem('btrfs-harbor-theme', dark ? 'dark' : 'light');
+	}
+
+	async function refreshEngineState(policy: EnginePolicy = harborConfig?.engine_policy ?? 'auto') {
+		engineError = '';
+		try {
+			const status = await loadEngineSelectionStatus(policy);
+			engineStatus = status;
+			engineUpdateOptions = await loadEngineUpdateOptions(policy);
+		} catch (error) {
+			engineStatus = null;
+			engineUpdateOptions = null;
+			engineError = error instanceof Error ? error.message : String(error);
+			throw error;
+		}
+	}
+
+	async function changeEnginePolicy(policy: EnginePolicy) {
+		if (!harborConfig || engineBusy) return;
+		engineBusy = true;
+		engineError = '';
+		const previous = harborConfig.engine_policy;
+		const next = cloneConfiguration(harborConfig);
+		next.engine_policy = policy;
+		harborConfig = next;
+		localStorage.setItem('btrfs-harbor-engine-policy', policy);
+		try {
+			if (installationState?.helper_installed) {
+				await persistEnginePolicy(policy);
+			}
+			await refreshEngineState(policy);
+		} catch (error) {
+			engineError = error instanceof Error ? error.message : String(error);
+			const rollback = cloneConfiguration(harborConfig);
+			rollback.engine_policy = previous;
+			harborConfig = rollback;
+			localStorage.setItem('btrfs-harbor-engine-policy', previous);
+		} finally {
+			engineBusy = false;
+		}
+	}
+
+	async function updateEngine() {
+		if (!engineStatus || !engineUpdateOptions || engineBusy) return;
+		engineBusy = true;
+		engineError = '';
+		try {
+			if (engineUpdateOptions.strategy === 'harbor_application') {
+				await openHarborReleasePage();
+				return;
+			}
+			if (!engineUpdateOptions.can_update) return;
+			engineStatus = await updateActiveSystemEngine(harborConfig?.engine_policy ?? 'auto');
+			engineUpdateOptions = await loadEngineUpdateOptions(harborConfig?.engine_policy ?? 'auto');
+		} catch (error) {
+			engineError = error instanceof Error ? error.message : String(error);
+		} finally {
+			engineBusy = false;
+		}
+	}
+
+	async function refreshEngineFromUi() {
+		if (engineBusy) return;
+		engineBusy = true;
+		try {
+			await refreshEngineState();
+		} catch {
+			// refreshEngineState already exposes the actionable error in the UI.
+		} finally {
+			engineBusy = false;
+		}
 	}
 
 	const overviewSchedules = [
@@ -402,6 +498,12 @@
 						{/if}
 					</div>
 				</div>
+				<EngineStatusRow
+					status={engineStatus}
+					{locale}
+					loading={engineBusy}
+					onManage={() => (active = 'settings')}
+				/>
 				{#if installationState?.portable_appimage && !installationState.helper_installed}
 					<article class="callout install-callout">
 						<CircleAlert size={20} />
@@ -438,6 +540,12 @@
 			</section>
 		{:else if active === 'overview'}
 			<section class="overview-grid">
+				<EngineStatusRow
+					status={engineStatus}
+					{locale}
+					loading={engineBusy}
+					onManage={() => (active = 'settings')}
+				/>
 				<article class="protection-hero {protection}">
 					<div class="hero-copy">
 						<div class="status-icon">
@@ -952,6 +1060,17 @@
 							<TerminalSquare size={19} />
 						</div>
 						<p class="body-copy">{t('inheritedEngine')}</p>
+						<EngineManager
+							status={engineStatus}
+							updateOptions={engineUpdateOptions}
+							policy={harborConfig?.engine_policy ?? 'auto'}
+							{locale}
+							busy={engineBusy}
+							error={engineError}
+							onPolicyChange={changeEnginePolicy}
+							onUpdate={updateEngine}
+							onRefresh={refreshEngineFromUi}
+						/>
 						<div class="setting-row">
 							<span>{t('installationMode')}</span>
 							<strong>

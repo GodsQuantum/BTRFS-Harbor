@@ -355,7 +355,8 @@ main {
 	grid-template-columns: minmax(0, 1fr) 270px;
 }
 .overview-grid > .protection-hero,
-.overview-grid > .metric-grid {
+.overview-grid > .metric-grid,
+.overview-grid > .engine-row {
 	grid-column: 1 / -1;
 }
 .protection-hero {

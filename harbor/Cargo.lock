@@ -344,6 +344,8 @@ name = "btrfs-harbor-desktop"
 version = "0.2.4"
 dependencies = [
  "harbor-agent",
+ "harbor-core",
+ "harbor-engine",
  "harbor-storage",
  "log",
  "serde",

@@ -52,6 +52,10 @@ fn main() -> Result<()> {
             let id = parse_profile_id(args.next())?;
             apply_config_from_stdin(id)
         }
+        "set-engine-policy" => {
+            let value = args.next().context("missing engine policy")?;
+            set_engine_policy(parse_engine_policy(&value)?)
+        }
         "install-profile" => {
             let id = parse_profile_id(args.next())?;
             install_profile(id)
@@ -102,8 +106,34 @@ fn main() -> Result<()> {
 
 fn usage() {
     eprintln!(
-        "Usage: btrfs-harborctl <list|render-profile|apply-config|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID]"
+        "Usage: btrfs-harborctl <list|render-profile|apply-config|set-engine-policy|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID|POLICY]"
     );
+}
+
+fn parse_engine_policy(value: &str) -> Result<EnginePolicy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(EnginePolicy::Auto),
+        "system" => Ok(EnginePolicy::System),
+        "bundled" => Ok(EnginePolicy::Bundled),
+        other => bail!("invalid engine policy: {other}; expected auto, system, or bundled"),
+    }
+}
+
+fn set_engine_policy_in_config(config: &mut HarborConfig, policy: EnginePolicy) {
+    config.engine_policy = policy;
+}
+
+fn set_engine_policy(policy: EnginePolicy) -> Result<()> {
+    ensure_root()?;
+    let mut config = read_config()?;
+    set_engine_policy_in_config(&mut config, policy);
+    config
+        .validate()
+        .map_err(|err| anyhow::anyhow!("invalid Harbor configuration: {err}"))?;
+    let encoded = config.to_toml().context("cannot serialize Harbor config")?;
+    atomic_write_mode(&config_path(), encoded.as_bytes(), 0o644)?;
+    println!("{}", serde_json::to_string(&policy)?);
+    Ok(())
 }
 
 fn parse_profile_id(value: Option<String>) -> Result<Uuid> {
@@ -1649,6 +1679,30 @@ mod tests {
 
         assert!(!timer.contains("safe name\n"));
         assert!(timer.contains(&p.id.to_string()));
+    }
+
+    #[test]
+    fn engine_policy_parser_accepts_public_values_and_rejects_unknown() {
+        assert_eq!(parse_engine_policy("auto").unwrap(), EnginePolicy::Auto);
+        assert_eq!(parse_engine_policy("system").unwrap(), EnginePolicy::System);
+        assert_eq!(
+            parse_engine_policy("bundled").unwrap(),
+            EnginePolicy::Bundled
+        );
+        assert!(parse_engine_policy("magic").is_err());
+    }
+
+    #[test]
+    fn changing_engine_policy_preserves_jobs_and_destinations() {
+        let mut config = configuration();
+        let original_profiles = config.profiles.clone();
+        let original_destinations = config.destinations.clone();
+
+        set_engine_policy_in_config(&mut config, EnginePolicy::Bundled);
+
+        assert_eq!(config.engine_policy, EnginePolicy::Bundled);
+        assert_eq!(config.profiles, original_profiles);
+        assert_eq!(config.destinations, original_destinations);
     }
 
     #[test]

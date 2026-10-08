@@ -1,6 +1,7 @@
 import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { createDefaultConfiguration, type DiscoveredSource, type HarborConfig } from './config';
+import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from './engine';
 import {
 	demoStatus,
 	type BackupProgressEvent,
@@ -43,6 +44,66 @@ export async function loadInstallationState(): Promise<InstallationState> {
 	}
 	const raw = await invoke<string>('installation_state');
 	return JSON.parse(raw) as InstallationState;
+}
+
+export async function loadEngineSelectionStatus(
+	policy: EnginePolicy = 'auto'
+): Promise<EngineSelectionStatus> {
+	if (!isTauri()) {
+		return {
+			policy,
+			active: {
+				executable: '/app/portable/btrfs-backup-ng',
+				origin: 'bundled',
+				version: '0.9.12'
+			},
+			system: null,
+			bundled: {
+				executable: '/app/portable/btrfs-backup-ng',
+				origin: 'bundled',
+				version: '0.9.12',
+				compatible: true
+			},
+			minimum_version: '0.9.12',
+			fallback_reason: 'system engine not found; using Harbor bundled engine'
+		};
+	}
+	const raw = await invoke<string>('engine_status', { policy });
+	return JSON.parse(raw) as EngineSelectionStatus;
+}
+
+export async function loadEngineUpdateOptions(
+	policy: EnginePolicy = 'auto'
+): Promise<EngineUpdateOptions> {
+	if (!isTauri()) {
+		return {
+			strategy: 'harbor_application',
+			can_update: true,
+			package: null,
+			provenance: 'bundled_harbor',
+			reason: 'The bundled engine is updated by updating Btrfs Harbor itself.'
+		};
+	}
+	const raw = await invoke<string>('engine_update_options', { policy });
+	return JSON.parse(raw) as EngineUpdateOptions;
+}
+
+export async function persistEnginePolicy(policy: EnginePolicy): Promise<void> {
+	if (!isTauri()) return;
+	await invoke<string>('set_engine_policy', { policy });
+}
+
+export async function updateActiveSystemEngine(
+	policy: EnginePolicy
+): Promise<EngineSelectionStatus> {
+	if (!isTauri()) return loadEngineSelectionStatus(policy);
+	const raw = await invoke<string>('update_system_engine', { policy });
+	return JSON.parse(raw) as EngineSelectionStatus;
+}
+
+export async function openHarborReleasePage(): Promise<void> {
+	if (!isTauri()) return;
+	await invoke<string>('open_harbor_release_page');
 }
 
 export async function loadHarborConfiguration(): Promise<HarborConfig> {

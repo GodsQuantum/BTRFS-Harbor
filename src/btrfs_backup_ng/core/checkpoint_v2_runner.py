@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -159,6 +160,30 @@ def execute_checkpoint_job(
                 result.new_raw_bytes,
                 result.new_checkpoints,
             )
+        except BaseException:
+            # A compression/destination/replay exception must never leave an
+            # independent btrfs send consuming CPU or blocked on its pipe.
+            # Reap the child even when no checkpoint was ever committed.
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+            try:
+                proc.terminate()
+            except (OSError, ProcessLookupError):
+                pass
+            try:
+                if isinstance(proc, subprocess.Popen):
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                else:
+                    proc.wait()
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            raise
         finally:
             proc.stdout.close()
             stderr_log = getattr(proc, "_harbor_stderr_log", None)

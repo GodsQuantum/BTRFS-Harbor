@@ -172,6 +172,24 @@ class TestRunner(unittest.TestCase):
             "ok",
         )
 
+    def test_stream_read_error_terminates_and_reaps_btrfs_send(self):
+        class FailingStream(io.BytesIO):
+            def read(self, size=-1):
+                raise OSError("simulated source read failure")
+
+        def spawn():
+            process = FakeProcess(self.bytes_data)
+            process.stdout = FailingStream(self.bytes_data)
+            self.parts.append(process)
+            return process
+
+        with self.assertRaisesRegex(OSError, "source read failure"):
+            self.call(spawn)
+        self.assertEqual(len(self.parts), 1)
+        self.assertTrue(self.parts[0].terminated)
+        self.assertTrue(self.parts[0].waited)
+        self.assertFalse((self.path / "snap.btrfs.zst").exists())
+
     def test_failed_send_exit_keeps_partial_not_complete(self):
         with self.assertRaises(RuntimeError):
             self.call(self.factory(exit_code=3))

@@ -806,6 +806,22 @@ fn progress_line(event: &str, phase: &str, message: &str, stream: Option<&str>) 
     Ok(serde_json::to_string(&value)?)
 }
 
+fn write_jsonl_line<W: Write>(writer: &mut W, line: &str) -> Result<()> {
+    if let Err(err) = writeln!(writer, "{line}") {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(err.into());
+    }
+    if let Err(err) = writer.flush() {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        return Err(err.into());
+    }
+    Ok(())
+}
+
 pub(crate) fn emit_progress(
     event: &str,
     phase: &str,
@@ -813,9 +829,8 @@ pub(crate) fn emit_progress(
     stream: Option<&str>,
 ) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "{}", progress_line(event, phase, message, stream)?)?;
-    stdout.flush()?;
-    Ok(())
+    let line = progress_line(event, phase, message, stream)?;
+    write_jsonl_line(&mut stdout, &line)
 }
 
 fn engine_stream_line(stream: &str, phase: &str, line: &str) -> Result<String> {
@@ -831,9 +846,8 @@ fn engine_stream_line(stream: &str, phase: &str, line: &str) -> Result<String> {
 
 fn emit_engine_stream_line(stream: &str, phase: &str, line: &str) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "{}", engine_stream_line(stream, phase, line)?)?;
-    stdout.flush()?;
-    Ok(())
+    let line = engine_stream_line(stream, phase, line)?;
+    write_jsonl_line(&mut stdout, &line)
 }
 
 fn enable_engine_progress(command: &mut Command) {
@@ -1917,6 +1931,42 @@ line two"
             value["message"],
             "line one
 line two"
+        );
+    }
+
+    struct FailingWriter {
+        kind: std::io::ErrorKind,
+    }
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(self.kind))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::from(self.kind))
+        }
+    }
+
+    #[test]
+    fn ui_broken_pipe_never_aborts_backup_event_forwarding() {
+        let mut writer = FailingWriter {
+            kind: std::io::ErrorKind::BrokenPipe,
+        };
+        assert!(write_jsonl_line(&mut writer, "{}").is_ok());
+    }
+
+    #[test]
+    fn non_pipe_output_errors_still_fail_loudly() {
+        let mut writer = FailingWriter {
+            kind: std::io::ErrorKind::PermissionDenied,
+        };
+        let error = write_jsonl_line(&mut writer, "{}").unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::PermissionDenied)
         );
     }
 

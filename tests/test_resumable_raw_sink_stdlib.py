@@ -2,6 +2,8 @@
 
 import hashlib
 import importlib
+import io
+import subprocess
 import json
 import os
 import sys
@@ -244,6 +246,26 @@ class TestResumableRawSink(unittest.TestCase):
                     expected_manifest=self.manifest,
                 ):
                     self.fail("second writer must never share an active .part")
+
+    def test_checkpointed_stream_final_decompresses_with_standard_zstd(self):
+        from dataclasses import replace
+
+        stream = importlib.import_module("btrfs_backup_ng.core.checkpoint_stream")
+        self.manifest = replace(self.manifest, checkpoint_size=16)
+        raw = bytes(range(60)) * 3 + b"terminal"
+        with self.open_new() as sink:
+            completed = stream.feed_checkpointed_stream(
+                io.BytesIO(raw), sink, chunk_size=16, level=3, threads=1
+            )
+            self.assertEqual(completed.raw_bytes, len(raw))
+            sink.publish(meta_bytes("snap", completed.compressed_bytes))
+        decoded = subprocess.run(
+            ["zstd", "-q", "-dc"],
+            input=(self.root / "snap.btrfs.zst").read_bytes(),
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        self.assertEqual(decoded, raw)
 
     def test_symlink_partial_refuses_resume(self):
         with self.open_new() as sink:

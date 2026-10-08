@@ -56,9 +56,7 @@ describe('backup progress presentation', () => {
 			phase: 'backup',
 			message: 'Running btrfs-backup-ng'
 		};
-		expect(
-			backupProgressPresentation(progress, 'Transfer completed successfully')
-		).toEqual({
+		expect(backupProgressPresentation(progress, 'Transfer completed successfully')).toEqual({
 			primary: 'Running btrfs-backup-ng',
 			technical: 'Transfer completed successfully',
 			complete: false,
@@ -72,9 +70,7 @@ describe('backup progress presentation', () => {
 			phase: 'complete',
 			message: 'Profile Pegasus completed successfully'
 		};
-		expect(
-			backupProgressPresentation(progress, 'Transfer completed successfully')
-		).toEqual({
+		expect(backupProgressPresentation(progress, 'Transfer completed successfully')).toEqual({
 			primary: 'Profile Pegasus completed successfully',
 			technical: '',
 			complete: true,
@@ -84,9 +80,7 @@ describe('backup progress presentation', () => {
 
 	it('treats the transfer stage as indeterminate until real byte telemetry exists', () => {
 		expect(backupProgressPresentation(event('backup'), '').indeterminate).toBe(true);
-		expect(
-			backupProgressPresentation(event('complete', 'finished'), '').indeterminate
-		).toBe(false);
+		expect(backupProgressPresentation(event('complete', 'finished'), '').indeterminate).toBe(false);
 	});
 });
 

@@ -2,7 +2,7 @@
 
 use harbor_core::{RecoveryPlan, RecoveryScope};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -145,6 +145,290 @@ pub struct RecoveryRequest {
     pub sources: Vec<PathBuf>,
     pub staging_root: PathBuf,
     pub running_root_included: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryIntent {
+    ReplaceMachine,
+    MigrateMachine,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryCompatibility {
+    FullSystem,
+    DataMigrationOnly,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryActionGroup {
+    Restored,
+    Adapted,
+    Regenerated,
+    Attention,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecoveryIdentityAction {
+    pub id: String,
+    pub group: RecoveryActionGroup,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MachineRecoveryRequest {
+    pub intent: RecoveryIntent,
+    pub source_hostname: String,
+    pub requested_hostname: Option<String>,
+    pub source_os_release: String,
+    pub target_os_release: String,
+    pub includes_system: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MachineRecoveryPlan {
+    pub intent: RecoveryIntent,
+    pub hostname: String,
+    pub compatibility: RecoveryCompatibility,
+    pub requires_rescue_environment: bool,
+    pub actions: Vec<RecoveryIdentityAction>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OsReleaseFamily {
+    ids: BTreeSet<String>,
+}
+
+impl OsReleaseFamily {
+    pub fn compatible_with(&self, other: &Self) -> bool {
+        !self.ids.is_empty()
+            && !other.ids.is_empty()
+            && self.ids.iter().any(|id| other.ids.contains(id))
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.ids.iter().map(String::as_str)
+    }
+}
+
+fn unquote_os_release_value(value: &str) -> &str {
+    let value = value.trim();
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
+pub fn parse_os_release_family(raw: &str) -> OsReleaseFamily {
+    let mut ids = BTreeSet::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "ID" => {
+                let id = unquote_os_release_value(value).trim().to_ascii_lowercase();
+                if !id.is_empty() {
+                    ids.insert(id);
+                }
+            }
+            "ID_LIKE" => {
+                for id in unquote_os_release_value(value).split_whitespace() {
+                    let id = id.trim().to_ascii_lowercase();
+                    if !id.is_empty() {
+                        ids.insert(id);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    OsReleaseFamily { ids }
+}
+
+fn validate_hostname(hostname: &str) -> Result<String, String> {
+    let hostname = hostname.trim();
+    if hostname.is_empty() || hostname.len() > 63 {
+        return Err("hostname must contain between 1 and 63 characters".into());
+    }
+    if hostname.starts_with('-') || hostname.ends_with('-') {
+        return Err("hostname cannot start or end with '-'".into());
+    }
+    if !hostname
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        return Err("hostname may contain only letters, digits and '-'".into());
+    }
+    Ok(hostname.to_string())
+}
+
+fn action(id: &str, group: RecoveryActionGroup, description: &str) -> RecoveryIdentityAction {
+    RecoveryIdentityAction {
+        id: id.to_string(),
+        group,
+        description: description.to_string(),
+    }
+}
+
+pub fn plan_machine_recovery(
+    request: &MachineRecoveryRequest,
+) -> Result<MachineRecoveryPlan, String> {
+    let source_hostname = validate_hostname(&request.source_hostname)?;
+    let hostname = match request.intent {
+        RecoveryIntent::ReplaceMachine => request
+            .requested_hostname
+            .as_deref()
+            .map(validate_hostname)
+            .transpose()?
+            .unwrap_or_else(|| source_hostname.clone()),
+        RecoveryIntent::MigrateMachine => {
+            let requested = request
+                .requested_hostname
+                .as_deref()
+                .ok_or_else(|| "migration requires a new hostname".to_string())
+                .and_then(validate_hostname)?;
+            if requested.eq_ignore_ascii_case(&source_hostname) {
+                return Err(
+                    "migration hostname must differ from the source machine hostname".into(),
+                );
+            }
+            requested
+        }
+    };
+
+    let source_family = parse_os_release_family(&request.source_os_release);
+    let target_family = parse_os_release_family(&request.target_os_release);
+    let compatibility = if !request.includes_system {
+        RecoveryCompatibility::FullSystem
+    } else if source_family.ids.is_empty() || target_family.ids.is_empty() {
+        RecoveryCompatibility::Blocked
+    } else if source_family.compatible_with(&target_family) {
+        RecoveryCompatibility::FullSystem
+    } else {
+        RecoveryCompatibility::DataMigrationOnly
+    };
+
+    let mut actions = vec![action(
+        "user_data",
+        RecoveryActionGroup::Restored,
+        "Restore user files and application configuration from the selected backup.",
+    )];
+
+    match request.intent {
+        RecoveryIntent::ReplaceMachine => {
+            actions.extend([
+                action(
+                    "hostname",
+                    RecoveryActionGroup::Restored,
+                    "Preserve the source hostname for this replacement machine.",
+                ),
+                action(
+                    "machine_id",
+                    RecoveryActionGroup::Restored,
+                    "Preserve the machine identity because this plan replaces the same machine.",
+                ),
+                action(
+                    "ssh_host_keys",
+                    RecoveryActionGroup::Restored,
+                    "Preserve SSH host identity for the same-machine replacement.",
+                ),
+            ]);
+        }
+        RecoveryIntent::MigrateMachine => {
+            actions.extend([
+                action(
+                    "hostname",
+                    RecoveryActionGroup::Adapted,
+                    "Apply the new hostname so source and migrated machines can coexist.",
+                ),
+                action(
+                    "machine_id",
+                    RecoveryActionGroup::Regenerated,
+                    "Generate a fresh systemd machine-id on the migrated machine.",
+                ),
+                action(
+                    "ssh_host_keys",
+                    RecoveryActionGroup::Regenerated,
+                    "Generate fresh OpenSSH host keys for the migrated machine.",
+                ),
+                action(
+                    "network_profiles",
+                    RecoveryActionGroup::Attention,
+                    "Review hardware-bound NetworkManager profiles for the new interfaces.",
+                ),
+                action(
+                    "third_party_device_identities",
+                    RecoveryActionGroup::Attention,
+                    "Re-enrol third-party device identities such as sync/VPN clients when required.",
+                ),
+            ]);
+        }
+    }
+
+    if request.includes_system {
+        actions.push(action(
+            "fstab_crypttab",
+            RecoveryActionGroup::Adapted,
+            "Rebuild fstab/crypttab references from target storage UUIDs instead of copying source UUIDs blindly.",
+        ));
+
+        match compatibility {
+            RecoveryCompatibility::FullSystem => {
+                actions.extend([
+                    action(
+                        "system_root",
+                        RecoveryActionGroup::Restored,
+                        "Restore the compatible system root into staging before activation.",
+                    ),
+                    action(
+                        "initramfs",
+                        RecoveryActionGroup::Regenerated,
+                        "Regenerate initramfs with the tool available on the target system.",
+                    ),
+                    action(
+                        "bootloader",
+                        RecoveryActionGroup::Regenerated,
+                        "Recreate bootloader/EFI entries for the target disk layout.",
+                    ),
+                ]);
+            }
+            RecoveryCompatibility::DataMigrationOnly => {
+                actions.push(action(
+                    "system_root",
+                    RecoveryActionGroup::Attention,
+                    "Source and target distribution families differ; do not transplant the system root. Restore data and user configuration only.",
+                ));
+            }
+            RecoveryCompatibility::Blocked => {
+                actions.push(action(
+                    "system_root",
+                    RecoveryActionGroup::Attention,
+                    "Distribution compatibility cannot be established from os-release; system root activation is blocked until reviewed.",
+                ));
+            }
+        }
+    }
+
+    Ok(MachineRecoveryPlan {
+        intent: request.intent,
+        hostname,
+        compatibility,
+        requires_rescue_environment: request.includes_system
+            && compatibility == RecoveryCompatibility::FullSystem,
+        actions,
+    })
 }
 
 pub fn plan_recovery(request: &RecoveryRequest) -> RecoveryPlan {
@@ -345,6 +629,107 @@ mod tests {
 
         assert!(can_execute_on_running_system(&plan));
         assert!(plan.steps.contains(&"copy_selected_content".to_string()));
+    }
+
+    #[test]
+    fn replacement_recovery_preserves_machine_identity_but_rebuilds_storage_boot() {
+        let plan = plan_machine_recovery(&MachineRecoveryRequest {
+            intent: RecoveryIntent::ReplaceMachine,
+            source_hostname: "pegasus".into(),
+            requested_hostname: None,
+            source_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            target_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            includes_system: true,
+        })
+        .unwrap();
+
+        assert_eq!(plan.hostname, "pegasus");
+        assert_eq!(plan.compatibility, RecoveryCompatibility::FullSystem);
+        assert!(plan.requires_rescue_environment);
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "machine_id" && action.group == RecoveryActionGroup::Restored
+        }));
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "fstab_crypttab" && action.group == RecoveryActionGroup::Adapted
+        }));
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "bootloader" && action.group == RecoveryActionGroup::Regenerated
+        }));
+    }
+
+    #[test]
+    fn migration_requires_distinct_hostname_and_regenerates_identity() {
+        let request = MachineRecoveryRequest {
+            intent: RecoveryIntent::MigrateMachine,
+            source_hostname: "pegasus".into(),
+            requested_hostname: Some("asus-n55sf".into()),
+            source_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            target_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            includes_system: true,
+        };
+        let plan = plan_machine_recovery(&request).unwrap();
+
+        assert_eq!(plan.hostname, "asus-n55sf");
+        assert_eq!(plan.compatibility, RecoveryCompatibility::FullSystem);
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "machine_id" && action.group == RecoveryActionGroup::Regenerated
+        }));
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "ssh_host_keys" && action.group == RecoveryActionGroup::Regenerated
+        }));
+
+        let same_name = plan_machine_recovery(&MachineRecoveryRequest {
+            requested_hostname: Some("pegasus".into()),
+            ..request
+        });
+        assert!(same_name.is_err());
+    }
+
+    #[test]
+    fn cross_family_system_restore_is_downgraded_to_data_migration() {
+        let plan = plan_machine_recovery(&MachineRecoveryRequest {
+            intent: RecoveryIntent::MigrateMachine,
+            source_hostname: "pegasus".into(),
+            requested_hostname: Some("fedora-box".into()),
+            source_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            target_os_release: "ID=fedora\nID_LIKE=\"rhel centos\"\n".into(),
+            includes_system: true,
+        })
+        .unwrap();
+
+        assert_eq!(plan.compatibility, RecoveryCompatibility::DataMigrationOnly);
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "system_root" && action.group == RecoveryActionGroup::Attention
+        }));
+        assert!(plan.actions.iter().any(|action| {
+            action.id == "user_data" && action.group == RecoveryActionGroup::Restored
+        }));
+    }
+
+    #[test]
+    fn os_release_family_uses_id_like_instead_of_cachyos_special_cases() {
+        let cachy = parse_os_release_family("ID=cachyos\nID_LIKE=\"arch\"\n");
+        let arch = parse_os_release_family("ID=arch\n");
+        let fedora = parse_os_release_family("ID=fedora\nID_LIKE=\"rhel centos\"\n");
+
+        assert!(cachy.compatible_with(&arch));
+        assert!(!cachy.compatible_with(&fedora));
+    }
+
+    #[test]
+    fn data_only_migration_remains_available_across_distro_families() {
+        let plan = plan_machine_recovery(&MachineRecoveryRequest {
+            intent: RecoveryIntent::MigrateMachine,
+            source_hostname: "pegasus".into(),
+            requested_hostname: Some("debian-box".into()),
+            source_os_release: "ID=cachyos\nID_LIKE=arch\n".into(),
+            target_os_release: "ID=debian\n".into(),
+            includes_system: false,
+        })
+        .unwrap();
+
+        assert_eq!(plan.compatibility, RecoveryCompatibility::FullSystem);
+        assert!(!plan.requires_rescue_environment);
     }
 
     #[test]

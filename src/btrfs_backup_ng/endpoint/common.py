@@ -517,13 +517,16 @@ class Endpoint:
         )
         return proc
 
+    def set_progress_context(self, context: dict[str, Any] | None) -> None:
+        """Set optional per-transfer telemetry context without changing receive()."""
+        self._transfer_progress_context = context
+
     def receive(
         self,
         stdin: Any,
         snapshot_name: str = "",
         parent_name: str | None = None,
         source_uuid: str = "",
-        progress_context: dict[str, Any] | None = None,
     ) -> Any:
         """Call 'btrfs receive', setting the given pipe as its stdin.
 

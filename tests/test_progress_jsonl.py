@@ -166,16 +166,15 @@ def test_raw_receive_starts_out_of_band_target_file_monitor(
 
     monkeypatch.setattr(raw_module, "FileSizeProgressMonitor", FakeMonitor)
 
-    result = endpoint.receive(
-        object(),
-        "home-20261008",
-        progress_context={
+    endpoint.set_progress_context(
+        {
             "volume": "/home",
             "destination": str(tmp_path),
             "total_estimate": 4096,
             "estimate_kind": "snapshot-logical",
-        },
+        }
     )
+    result = endpoint.receive(object(), "home-20261008")
 
     assert result is fake_process
     assert captured["started"] is True

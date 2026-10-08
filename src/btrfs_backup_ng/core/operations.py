@@ -1264,8 +1264,11 @@ def _do_process_transfer(
             "parent_name": parent_name,
             "source_uuid": source_uuid,
         }
-        if progress_context is not None:
-            receive_kwargs["progress_context"] = progress_context
+        set_progress_context = getattr(
+            destination_endpoint, "set_progress_context", None
+        )
+        if callable(set_progress_context):
+            set_progress_context(progress_context)
         receive_process = destination_endpoint.receive(
             current_stdout,
             snapshot_name,

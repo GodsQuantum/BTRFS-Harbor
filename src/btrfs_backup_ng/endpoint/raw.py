@@ -825,7 +825,6 @@ class RawEndpoint(Endpoint):
         snapshot_name: str = "",
         parent_name: str | None = None,
         source_uuid: str = "",
-        progress_context: dict[str, Any] | None = None,
     ) -> Any:
         """Write a btrfs send stream to a file.
 
@@ -908,7 +907,7 @@ class RawEndpoint(Endpoint):
         # counter instead of fabricating local numbers.
         self._progress_monitor = None
         if progress_jsonl_enabled() and not getattr(self, "_is_remote", False):
-            context = progress_context or {}
+            context = getattr(self, "_transfer_progress_context", None) or {}
             comparable_total = (
                 context.get("total_estimate")
                 if not self.compress and not self.encrypt

@@ -74,6 +74,35 @@ export function backupProgressPercent(event: BackupProgressEvent | null | undefi
 	}
 }
 
+export interface BackupProgressPresentation {
+	primary: string;
+	technical: string;
+	complete: boolean;
+	indeterminate: boolean;
+}
+
+export function backupProgressPresentation(
+	progress: BackupProgressEvent | null | undefined,
+	engineDetail: string
+): BackupProgressPresentation {
+	if (!progress) {
+		return {
+			primary: '',
+			technical: engineDetail,
+			complete: false,
+			indeterminate: false
+		};
+	}
+
+	const complete = progress.event === 'finished';
+	return {
+		primary: progress.message,
+		technical: complete ? '' : engineDetail,
+		complete,
+		indeterminate: progress.phase === 'backup' && !complete
+	};
+}
+
 export function runtimeRepresentsScheduledJob(runtime: ProfileRuntime | null | undefined): boolean {
 	return Boolean(runtime?.timer_installed);
 }

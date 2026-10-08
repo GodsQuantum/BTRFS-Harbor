@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	backupProgressPercent,
+	backupProgressPresentation,
 	runtimeRepresentsScheduledJob,
 	type BackupProgressEvent,
 	type ProfileRuntime
@@ -47,6 +48,45 @@ describe('backup progress presentation', () => {
 
 	it('marks a finished backup complete even when the final phase name changes', () => {
 		expect(backupProgressPercent(event('anything', 'finished'))).toBe(100);
+	});
+
+	it('keeps per-volume engine completion output technical while the global backup is still running', () => {
+		const progress: BackupProgressEvent = {
+			event: 'phase',
+			phase: 'backup',
+			message: 'Running btrfs-backup-ng'
+		};
+		expect(
+			backupProgressPresentation(progress, 'Transfer completed successfully')
+		).toEqual({
+			primary: 'Running btrfs-backup-ng',
+			technical: 'Transfer completed successfully',
+			complete: false,
+			indeterminate: true
+		});
+	});
+
+	it('only marks the global backup complete on a finished event', () => {
+		const progress: BackupProgressEvent = {
+			event: 'finished',
+			phase: 'complete',
+			message: 'Profile Pegasus completed successfully'
+		};
+		expect(
+			backupProgressPresentation(progress, 'Transfer completed successfully')
+		).toEqual({
+			primary: 'Profile Pegasus completed successfully',
+			technical: '',
+			complete: true,
+			indeterminate: false
+		});
+	});
+
+	it('treats the transfer stage as indeterminate until real byte telemetry exists', () => {
+		expect(backupProgressPresentation(event('backup'), '').indeterminate).toBe(true);
+		expect(
+			backupProgressPresentation(event('complete', 'finished'), '').indeterminate
+		).toBe(false);
 	});
 });
 

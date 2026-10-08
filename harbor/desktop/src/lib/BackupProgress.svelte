@@ -1,6 +1,10 @@
 <script lang="ts">
 	import TerminalSquare from 'lucide-svelte/icons/terminal-square';
-	import { backupProgressPercent, type BackupProgressEvent } from './status';
+	import {
+		backupProgressPercent,
+		backupProgressPresentation,
+		type BackupProgressEvent
+	} from './status';
 	import { translate, type Locale, type TranslationKey } from './i18n';
 
 	export let progress: BackupProgressEvent | null = null;
@@ -9,7 +13,8 @@
 	export let locale: Locale = 'en';
 
 	$: percent = backupProgressPercent(progress);
-	$: streaming = progress?.phase === 'backup' && progress?.event !== 'finished';
+	$: presentation = backupProgressPresentation(progress, detail);
+	$: streaming = presentation.indeterminate;
 	const t = (key: TranslationKey) => translate(locale, key);
 
 	function phaseLabel(phase: string): string {
@@ -48,7 +53,7 @@
 				<span>{t('workflowProgress')}</span>
 				<strong>{phaseLabel(progress.phase)}</strong>
 			</div>
-			<b>{percent}%</b>
+			<b>{streaming ? t('progressInProgress') : `${percent}%`}</b>
 		</div>
 		<div
 			class="workflow-track"
@@ -56,16 +61,23 @@
 			role="progressbar"
 			aria-valuemin="0"
 			aria-valuemax="100"
-			aria-valuenow={percent}
+			aria-valuenow={streaming ? undefined : percent}
+			aria-valuetext={streaming ? t('progressInProgress') : undefined}
 		>
-			<span style={`width: ${percent}%`}></span>
+			<span style={streaming ? undefined : `width: ${percent}%`}></span>
 		</div>
 		<div class="workflow-detail">
 			{#if engineLabel}
 				<small class="engine-used"><TerminalSquare size={13} /> {engineLabel}</small>
 			{/if}
-			<small>{detail || progress.message}</small>
-			<small class="stage-note">{t('progressStageEstimate')}</small>
+			<small>{presentation.primary}</small>
+			{#if presentation.technical}
+				<details class="engine-activity">
+					<summary>{t('progressEngineActivity')}</summary>
+					<small>{presentation.technical}</small>
+				</details>
+			{/if}
+			{#if !streaming}<small class="stage-note">{t('progressStageEstimate')}</small>{/if}
 		</div>
 	</div>
 {/if}
@@ -121,6 +133,10 @@
 		background: var(--accent);
 		transition: width 220ms ease;
 	}
+	.workflow-track.streaming > span {
+		width: 34%;
+		animation: indeterminate 1.35s ease-in-out infinite;
+	}
 	.workflow-track.streaming > span::after {
 		position: absolute;
 		inset: 0;
@@ -131,7 +147,18 @@
 			transparent 100%
 		);
 		content: '';
-		animation: sweep 1.25s linear infinite;
+	}
+	.engine-activity {
+		color: var(--subtle);
+		font-size: 8px;
+	}
+	.engine-activity summary {
+		cursor: pointer;
+	}
+	.engine-activity small {
+		display: block;
+		margin-top: 3px;
+		word-break: break-word;
 	}
 	.complete .workflow-track > span {
 		background: var(--good);
@@ -149,12 +176,15 @@
 	.stage-note {
 		color: var(--subtle) !important;
 	}
-	@keyframes sweep {
-		from {
-			transform: translateX(-100%);
+	@keyframes indeterminate {
+		0% {
+			transform: translateX(-105%);
 		}
-		to {
-			transform: translateX(100%);
+		50% {
+			transform: translateX(195%);
+		}
+		100% {
+			transform: translateX(-105%);
 		}
 	}
 </style>

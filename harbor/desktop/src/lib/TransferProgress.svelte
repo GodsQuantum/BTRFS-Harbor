@@ -25,7 +25,7 @@
 				<strong>{formatBytesBinary(summary.bytesTarget)} {t('transferCopied')}</strong>
 			</div>
 			{#if hasComparableTotal}
-				<b>���{summary.percent?.toFixed(1)}%</b>
+				<b>~{summary.percent?.toFixed(1)}%</b>
 			{:else}
 				<b>{t('progressInProgress')}</b>
 			{/if}
@@ -47,7 +47,7 @@
 			<span><Activity size={13} /> {formatRateBinary(summary.bytesPerSecond)}</span>
 			<span>{t('transferElapsed')} {formatDuration(summary.elapsedSeconds)}</span>
 			{#if summary.etaSeconds !== null}
-				<span>{t('transferRemaining')} ���{formatDuration(summary.etaSeconds)}</span>
+				<span>{t('transferRemaining')} ~{formatDuration(summary.etaSeconds)}</span>
 			{:else}
 				<span>{t('transferEtaUnavailable')}</span>
 			{/if}

@@ -89,7 +89,7 @@
 		const date = point.created ? new Date(point.created).toLocaleString(locale) : point.name;
 		const size =
 			point.size && point.size > 0
-				? ` �� ${new Intl.NumberFormat(locale, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(point.size / 1_000_000)}`
+				? ` - ${new Intl.NumberFormat(locale, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(point.size / 1_000_000)}`
 				: '';
 		return `${date}${size}`;
 	}
@@ -255,9 +255,9 @@
 		</div>
 
 		<nav class="wizard-steps" aria-label={t('recoveryReview')}>
-			<span class:active={step === 1}>1 �� {t('recoveryIntentQuestion')}</span>
-			<span class:active={step === 2}>2 �� {t('restorePoint')}</span>
-			<span class:active={step === 3}>3 �� {t('recoveryReview')}</span>
+			<span class:active={step === 1}>1 - {t('recoveryIntentQuestion')}</span>
+			<span class:active={step === 2}>2 - {t('restorePoint')}</span>
+			<span class:active={step === 3}>3 - {t('recoveryReview')}</span>
 		</nav>
 
 		{#if step === 1}
@@ -289,7 +289,7 @@
 						onchange={sourceChanged}
 						>{#each profile.sources as source (source.path)}<option value={source.path}
 								>{source.path}{source.snapper_config
-									? ` �� Snapper ${source.snapper_config}`
+									? ` - Snapper ${source.snapper_config}`
 									: ''}</option
 							>{/each}</select
 					></label
@@ -381,7 +381,7 @@
 					>{t('recoveryBack')}</button
 				>
 				<div class="restore-target">
-					<HardDrive size={16} /><span>{selectedSnapshot || '���'} ��� {stagingRoot || '���'}</span>
+					<HardDrive size={16} /><span>{selectedSnapshot || '-'} - {stagingRoot || '-'}</span>
 				</div>
 				<button
 					type="button"

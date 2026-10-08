@@ -19,7 +19,7 @@
 		<span>1</span>
 		<div>
 			<strong>{t('recoveryIntentQuestion')}</strong>
-			<small>{sourceHostname || '���'}</small>
+			<small>{sourceHostname || '-'}</small>
 		</div>
 	</div>
 	<div class="intent-options">

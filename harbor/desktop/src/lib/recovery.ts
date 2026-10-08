@@ -47,7 +47,7 @@ export function validateMigrationHostname(source: string, requested: string): st
 		return 'The migration hostname must differ from the source machine hostname.';
 	}
 	if (hostname.length > 63 || hostname.startsWith('-') || hostname.endsWith('-')) {
-		return 'Hostname must be 1���63 characters and cannot start or end with a hyphen.';
+		return 'Hostname must be 1-63 characters and cannot start or end with a hyphen.';
 	}
 	if (!/^[A-Za-z0-9-]+$/.test(hostname)) {
 		return 'Hostname may contain only letters, digits and hyphens.';

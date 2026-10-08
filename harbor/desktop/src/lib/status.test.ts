@@ -68,10 +68,10 @@ describe('backup progress presentation', () => {
 		const progress: BackupProgressEvent = {
 			event: 'finished',
 			phase: 'complete',
-			message: 'Profile Pegasus completed successfully'
+			message: 'Profile Workstation-A completed successfully'
 		};
 		expect(backupProgressPresentation(progress, 'Transfer completed successfully')).toEqual({
-			primary: 'Profile Pegasus completed successfully',
+			primary: 'Profile Workstation-A completed successfully',
 			technical: '',
 			complete: true,
 			indeterminate: false

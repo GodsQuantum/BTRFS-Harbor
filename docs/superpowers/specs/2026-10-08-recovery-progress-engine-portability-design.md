@@ -32,7 +32,7 @@ The inherited engine already contains `core/progress.py`, snapshot-size estimati
 
 Therefore Harbor will not create an independent byte-copy engine.
 
-A live read-only check on Pegasus with the official v0.2.4 AppImage also validates the cheapest raw-target measurement: during a compressed NFS backup, the two `.part` files grew by 567,975,936 bytes over 12 seconds (about 45.1 MiB/s aggregate) while `btrfs send` and `zstd` remained active. No system `btrfs-backup-ng` binary was installed, so this run used Harbor's bundled engine. This is direct evidence that raw/NFS target-file size can drive exact target-byte and throughput telemetry without touching the data path.
+A live read-only check on the reference workstation with the official v0.2.4 AppImage also validates the cheapest raw-target measurement: during a compressed NFS backup, the two `.part` files grew by 567,975,936 bytes over 12 seconds (about 45.1 MiB/s aggregate) while `btrfs send` and `zstd` remained active. No system `btrfs-backup-ng` binary was installed, so this run used Harbor's bundled engine. This is direct evidence that raw/NFS target-file size can drive exact target-byte and throughput telemetry without touching the data path.
 
 ### 3.2 AppImage is portable, not magically universal
 
@@ -258,7 +258,7 @@ The review page explicitly shows which identity values are preserved.
 
 ### 7.2 Migrate to another machine
 
-Use case: restore Pegasus environment onto another PC that may coexist with Pegasus.
+Use case: restore one workstation environment onto another PC that may coexist with the source workstation.
 
 Require a **new hostname** by default.
 
@@ -484,7 +484,7 @@ Each state names an action the user can take.
 The v0.2.5 work is complete only when all of the following are proven:
 
 1. Overview shows active engine origin/version/path before any backup starts.
-2. Pegasus-like raw compressed backup telemetry reports real growing target bytes, rate and elapsed time.
+2. real-workstation raw compressed backup telemetry reports real growing target bytes, rate and elapsed time.
 3. No exact-looking percentage/ETA is shown without a defensible total.
 4. Parallel source telemetry is preserved and aggregate telemetry is honest.
 5. Engine Manager supports Auto/System/Bundled selection.
@@ -512,6 +512,6 @@ The v0.2.5 work is complete only when all of the following are proven:
 
 ## 16. Implementation approach
 
-Use the existing engine and control-plane architecture. Extend structured telemetry and recovery planning first, then expose them through small frontend components. Every change is test-first. No live Pegasus backup is launched by development automation; the currently running user backup is observed read-only and may be used only as a telemetry reality check.
+Use the existing engine and control-plane architecture. Extend structured telemetry and recovery planning first, then expose them through small frontend components. Every change is test-first. No live reference-workstation backup is launched by development automation; the currently running user backup is observed read-only and may be used only as a telemetry reality check.
 
 The implementation plan will be written only after this specification is explicitly reviewed, per the requested Superpowers workflow.

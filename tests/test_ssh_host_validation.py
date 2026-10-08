@@ -25,7 +25,7 @@ from btrfs_backup_ng.__util__ import validated_ssh_host
         "nas",
         "nas.local",
         "backup-01.example.com",
-        "192.168.0.70",
+        "192.0.2.70",
         "[2001:db8::1]",
         "h",
         "x9",

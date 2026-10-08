@@ -25,7 +25,7 @@ def test_transfer_progress_event_serializes_versioned_plain_json() -> None:
     event = TransferProgressEvent(
         volume="/home",
         snapshot="home-20261008",
-        destination="/backup/Pegasus/home",
+        destination="/backup/workstation/home",
         bytes_target=1024,
         bytes_source=None,
         total_estimate=None,

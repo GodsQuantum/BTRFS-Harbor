@@ -13,8 +13,8 @@ describe('machine-aware recovery presentation', () => {
 		expect(recoveryIntentNeedsNewHostname('migrate_machine')).toBe(true);
 	});
 	it('rejects a migration hostname identical to the source', () => {
-		expect(validateMigrationHostname('Pegasus', 'Pegasus')).toMatch(/differ/i);
-		expect(validateMigrationHostname('Pegasus', 'ASUS-N55SF')).toBe('');
+		expect(validateMigrationHostname('Workstation-A', 'Workstation-A')).toMatch(/differ/i);
+		expect(validateMigrationHostname('Workstation-A', 'Workstation-B')).toBe('');
 	});
 	it('uses user-facing recovery intent titles', () => {
 		expect(recoveryIntentTitle('replace_machine')).toContain('Replace');

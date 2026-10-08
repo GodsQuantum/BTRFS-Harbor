@@ -22,7 +22,7 @@
 - Harbor bundled engine updates must not overwrite `/usr/bin/btrfs-backup-ng`.
 - Existing v0.2.4 tray/background backup behavior and SIGINT stop semantics must remain green.
 - Public UI/docs must be distro-neutral; CachyOS/Arch may appear only as one tested family or compatibility shim.
-- No live backup may be started on Pegasus by this implementation work; the user's existing backup is read-only evidence only.
+- No live backup may be started on the reference workstation by this implementation work; the user's existing backup is read-only evidence only.
 
 ## Review Focus
 

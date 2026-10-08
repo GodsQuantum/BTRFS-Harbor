@@ -1490,6 +1490,7 @@ name = "harbor-engine"
 version = "0.2.4"
 dependencies = [
  "harbor-core",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",

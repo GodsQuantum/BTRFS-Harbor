@@ -49,7 +49,10 @@ export interface BackupProfile {
 	verify_after_backup: boolean;
 }
 
+export type EnginePolicy = 'auto' | 'system' | 'bundled';
+
 export interface HarborConfig {
+	engine_policy: EnginePolicy;
 	destinations: DestinationSpec[];
 	profiles: BackupProfile[];
 }
@@ -205,6 +208,7 @@ export function createDefaultConfiguration(
 	const destinationId = uuidFactory();
 
 	return {
+		engine_policy: 'auto',
 		destinations: [
 			{
 				id: destinationId,

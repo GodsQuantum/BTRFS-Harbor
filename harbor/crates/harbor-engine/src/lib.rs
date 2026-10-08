@@ -1,6 +1,7 @@
 //! Structured adapter between Harbor and the inherited btrfs-backup-ng engine.
 
-use harbor_core::{ENGINE_STATUS_SCHEMA_VERSION, EngineStatusReport};
+use harbor_core::{ENGINE_STATUS_SCHEMA_VERSION, EnginePolicy, EngineStatusReport};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, ExitStatus};
 use thiserror::Error;
@@ -18,21 +19,44 @@ pub enum EngineError {
     MissingStatus { code: Option<i32>, stderr: String },
     #[error("no compatible btrfs-backup-ng engine is available")]
     NoCompatibleEngine,
+    #[error("system btrfs-backup-ng is required by policy but was not found")]
+    SystemEngineMissing,
+    #[error("system btrfs-backup-ng {version} is below the required version {minimum}")]
+    SystemEngineIncompatible { version: String, minimum: String },
 }
 
 pub const MIN_ENGINE_VERSION: (u64, u64, u64) = (0, 9, 12);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum EngineOrigin {
     System,
     Bundled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EngineResolution {
     pub executable: PathBuf,
     pub origin: EngineOrigin,
     pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EngineCandidateStatus {
+    pub executable: PathBuf,
+    pub origin: EngineOrigin,
+    pub version: Option<String>,
+    pub compatible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EngineSelectionStatus {
+    pub policy: EnginePolicy,
+    pub active: EngineResolution,
+    pub system: Option<EngineCandidateStatus>,
+    pub bundled: Option<EngineCandidateStatus>,
+    pub minimum_version: String,
+    pub fallback_reason: Option<String>,
 }
 
 pub fn parse_engine_version(banner: &str) -> Option<(u64, u64, u64)> {
@@ -52,33 +76,105 @@ pub fn engine_version_is_compatible(banner: &str) -> bool {
     parse_engine_version(banner).is_some_and(|version| version >= MIN_ENGINE_VERSION)
 }
 
+fn minimum_version_string() -> String {
+    format!(
+        "{}.{}.{}",
+        MIN_ENGINE_VERSION.0, MIN_ENGINE_VERSION.1, MIN_ENGINE_VERSION.2
+    )
+}
+
+fn version_from_banner(banner: &str) -> Option<String> {
+    banner
+        .split_whitespace()
+        .find(|part| parse_engine_version(part).is_some())
+        .map(ToOwned::to_owned)
+}
+
+fn system_candidate(system: Option<(PathBuf, &str)>) -> Option<EngineCandidateStatus> {
+    system.map(|(executable, banner)| EngineCandidateStatus {
+        executable,
+        origin: EngineOrigin::System,
+        version: version_from_banner(banner),
+        compatible: engine_version_is_compatible(banner),
+    })
+}
+
+fn bundled_candidate(bundled: Option<PathBuf>) -> Option<EngineCandidateStatus> {
+    bundled.map(|executable| EngineCandidateStatus {
+        executable,
+        origin: EngineOrigin::Bundled,
+        version: Some(minimum_version_string()),
+        compatible: true,
+    })
+}
+
+fn candidate_resolution(candidate: &EngineCandidateStatus) -> EngineResolution {
+    EngineResolution {
+        executable: candidate.executable.clone(),
+        origin: candidate.origin,
+        version: candidate.version.clone(),
+    }
+}
+
+pub fn resolve_engine_with_policy(
+    policy: EnginePolicy,
+    system: Option<(PathBuf, &str)>,
+    bundled: Option<PathBuf>,
+) -> Result<EngineSelectionStatus, EngineError> {
+    let system = system_candidate(system);
+    let bundled = bundled_candidate(bundled);
+    let minimum_version = minimum_version_string();
+
+    let (active, fallback_reason) = match policy {
+        EnginePolicy::Auto => {
+            if let Some(candidate) = system.as_ref().filter(|candidate| candidate.compatible) {
+                (candidate_resolution(candidate), None)
+            } else if let Some(candidate) = bundled.as_ref() {
+                let reason = system.as_ref().map_or_else(
+                    || "system engine not found; using Harbor bundled engine".to_owned(),
+                    |system| {
+                        format!(
+                            "system engine {} is incompatible; using Harbor bundled engine",
+                            system.version.as_deref().unwrap_or("unknown")
+                        )
+                    },
+                );
+                (candidate_resolution(candidate), Some(reason))
+            } else {
+                return Err(EngineError::NoCompatibleEngine);
+            }
+        }
+        EnginePolicy::System => {
+            let candidate = system.as_ref().ok_or(EngineError::SystemEngineMissing)?;
+            if !candidate.compatible {
+                return Err(EngineError::SystemEngineIncompatible {
+                    version: candidate.version.as_deref().unwrap_or("unknown").to_owned(),
+                    minimum: minimum_version,
+                });
+            }
+            (candidate_resolution(candidate), None)
+        }
+        EnginePolicy::Bundled => {
+            let candidate = bundled.as_ref().ok_or(EngineError::NoCompatibleEngine)?;
+            (candidate_resolution(candidate), None)
+        }
+    };
+
+    Ok(EngineSelectionStatus {
+        policy,
+        active,
+        system,
+        bundled,
+        minimum_version,
+        fallback_reason,
+    })
+}
+
 pub fn select_engine_candidate(
     system: Option<(PathBuf, &str)>,
     bundled: Option<PathBuf>,
 ) -> Result<EngineResolution, EngineError> {
-    if let Some((executable, banner)) = system
-        && engine_version_is_compatible(banner)
-    {
-        return Ok(EngineResolution {
-            executable,
-            origin: EngineOrigin::System,
-            version: banner
-                .split_whitespace()
-                .find(|part| parse_engine_version(part).is_some())
-                .map(ToOwned::to_owned),
-        });
-    }
-
-    bundled
-        .map(|executable| EngineResolution {
-            executable,
-            origin: EngineOrigin::Bundled,
-            version: Some(format!(
-                "{}.{}.{}",
-                MIN_ENGINE_VERSION.0, MIN_ENGINE_VERSION.1, MIN_ENGINE_VERSION.2
-            )),
-        })
-        .ok_or(EngineError::NoCompatibleEngine)
+    resolve_engine_with_policy(EnginePolicy::Auto, system, bundled).map(|status| status.active)
 }
 
 fn executable_on_path(name: &str) -> Option<PathBuf> {
@@ -88,7 +184,10 @@ fn executable_on_path(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-pub fn discover_engine(bundled: Option<PathBuf>) -> Result<EngineResolution, EngineError> {
+pub fn discover_engine_with_policy(
+    policy: EnginePolicy,
+    bundled: Option<PathBuf>,
+) -> Result<EngineSelectionStatus, EngineError> {
     let system = executable_on_path("btrfs-backup-ng").and_then(|path| {
         let output = StdCommand::new(&path).arg("--version").output().ok()?;
         if !output.status.success() {
@@ -98,12 +197,17 @@ pub fn discover_engine(bundled: Option<PathBuf>) -> Result<EngineResolution, Eng
         Some((path, banner))
     });
     let bundled = bundled.filter(|path| path.is_file());
-    select_engine_candidate(
+    resolve_engine_with_policy(
+        policy,
         system
             .as_ref()
             .map(|(path, banner)| (path.clone(), banner.as_str())),
         bundled,
     )
+}
+
+pub fn discover_engine(bundled: Option<PathBuf>) -> Result<EngineResolution, EngineError> {
+    discover_engine_with_policy(EnginePolicy::Auto, bundled).map(|status| status.active)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +367,78 @@ mod tests {
         assert_eq!(
             selected.executable,
             PathBuf::from("/app/resources/portable/btrfs-backup-ng")
+        );
+    }
+
+    #[test]
+    fn engine_policy_auto_prefers_compatible_system_and_reports_both_candidates() {
+        let status = resolve_engine_with_policy(
+            harbor_core::EnginePolicy::Auto,
+            Some((
+                PathBuf::from("/usr/bin/btrfs-backup-ng"),
+                "btrfs-backup-ng 0.9.12",
+            )),
+            Some(PathBuf::from("/app/portable/btrfs-backup-ng")),
+        )
+        .unwrap();
+
+        assert_eq!(status.policy, harbor_core::EnginePolicy::Auto);
+        assert_eq!(status.active.origin, EngineOrigin::System);
+        assert_eq!(status.active.version.as_deref(), Some("0.9.12"));
+        assert!(
+            status
+                .system
+                .as_ref()
+                .is_some_and(|candidate| candidate.compatible)
+        );
+        assert!(
+            status
+                .bundled
+                .as_ref()
+                .is_some_and(|candidate| candidate.compatible)
+        );
+        assert_eq!(status.minimum_version, "0.9.12");
+        assert_eq!(status.fallback_reason, None);
+    }
+
+    #[test]
+    fn engine_policy_system_rejects_incompatible_system_instead_of_falling_back() {
+        let err = resolve_engine_with_policy(
+            harbor_core::EnginePolicy::System,
+            Some((
+                PathBuf::from("/usr/bin/btrfs-backup-ng"),
+                "btrfs-backup-ng 0.9.11",
+            )),
+            Some(PathBuf::from("/app/portable/btrfs-backup-ng")),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, EngineError::SystemEngineIncompatible { .. }));
+    }
+
+    #[test]
+    fn engine_policy_bundled_ignores_newer_system_engine() {
+        let status = resolve_engine_with_policy(
+            harbor_core::EnginePolicy::Bundled,
+            Some((
+                PathBuf::from("/usr/bin/btrfs-backup-ng"),
+                "btrfs-backup-ng 0.10.1",
+            )),
+            Some(PathBuf::from("/app/portable/btrfs-backup-ng")),
+        )
+        .unwrap();
+
+        assert_eq!(status.active.origin, EngineOrigin::Bundled);
+        assert_eq!(
+            status.active.executable,
+            PathBuf::from("/app/portable/btrfs-backup-ng")
+        );
+        assert_eq!(
+            status
+                .system
+                .as_ref()
+                .and_then(|candidate| candidate.version.as_deref()),
+            Some("0.10.1")
         );
     }
 

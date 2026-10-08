@@ -97,6 +97,15 @@ pub enum ProtectionState {
     Unprotected,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EnginePolicy {
+    #[default]
+    Auto,
+    System,
+    Bundled,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DestinationKind {

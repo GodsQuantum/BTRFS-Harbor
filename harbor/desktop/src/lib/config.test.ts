@@ -40,6 +40,11 @@ describe('Harbor profile editor model', () => {
 		});
 	});
 
+	it('defaults engine selection to auto', () => {
+		const config = createDefaultConfiguration(uuidFactory);
+		expect(config.engine_policy).toBe('auto');
+	});
+
 	it('creates a conservative recovery draft without inventing a network target', () => {
 		const config = createDefaultConfiguration(uuidFactory);
 		const profile = resolveProfile(config);

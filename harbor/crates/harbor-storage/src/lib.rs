@@ -1,6 +1,8 @@
 //! Configuration, mount guards, engine config rendering and reconstructible state.
 
-use harbor_core::{BackupProfile, BackupSource, DestinationKind, DestinationSpec, RetentionPolicy};
+use harbor_core::{
+    BackupProfile, BackupSource, DestinationKind, DestinationSpec, EnginePolicy, RetentionPolicy,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -9,6 +11,8 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct HarborConfig {
+    #[serde(default)]
+    pub engine_policy: EnginePolicy,
     #[serde(default)]
     pub destinations: Vec<DestinationSpec>,
     #[serde(default)]
@@ -654,6 +658,7 @@ mod tests {
     #[test]
     fn config_roundtrip_preserves_unicode_paths() {
         let config = HarborConfig {
+            engine_policy: EnginePolicy::Auto,
             destinations: vec![destination(
                 DestinationKind::Raw,
                 "/mnt/Sauvegardes/Vidéos",
@@ -685,6 +690,7 @@ mod tests {
     fn valid_harbor_config() -> HarborConfig {
         let destination_id = Uuid::new_v4();
         HarborConfig {
+            engine_policy: EnginePolicy::Auto,
             destinations: vec![DestinationSpec {
                 id: destination_id,
                 name: "Backup NAS".into(),
@@ -716,6 +722,24 @@ mod tests {
                 verify_after_backup: true,
             }],
         }
+    }
+
+    #[test]
+    fn old_configuration_without_engine_policy_defaults_to_auto() {
+        let decoded = HarborConfig::from_toml("destinations = []\nprofiles = []\n").unwrap();
+        assert_eq!(decoded.engine_policy, harbor_core::EnginePolicy::Auto);
+    }
+
+    #[test]
+    fn engine_policy_roundtrip_preserves_bundled_choice() {
+        let config = HarborConfig {
+            engine_policy: harbor_core::EnginePolicy::Bundled,
+            destinations: vec![],
+            profiles: vec![],
+        };
+        let encoded = config.to_toml().unwrap();
+        assert!(encoded.contains("engine_policy = \"bundled\""));
+        assert_eq!(HarborConfig::from_toml(&encoded).unwrap(), config);
     }
 
     #[test]

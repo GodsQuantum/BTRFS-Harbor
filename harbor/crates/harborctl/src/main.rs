@@ -3,7 +3,7 @@ mod recovery_kit;
 
 use anyhow::{Context, Result, bail};
 use harbor_core::{
-    BackupProfile, BackupSource, DestinationKind, DestinationSpec, profile_unit_stem,
+    BackupProfile, BackupSource, DestinationKind, DestinationSpec, EnginePolicy, profile_unit_stem,
 };
 use harbor_recovery::{
     StagedRestorePlan, StagedRestoreRequest, staged_restore_path,
@@ -140,35 +140,33 @@ fn portable_engine_near_helper(helper: &Path) -> Option<PathBuf> {
     (wrapper.is_file() && payload.is_file()).then_some(wrapper)
 }
 
-fn engine_resolution() -> harbor_engine::EngineResolution {
-    #[cfg(debug_assertions)]
-    if let Some(value) = env::var_os("BTRFS_HARBOR_ENGINE") {
-        return harbor_engine::EngineResolution {
-            executable: PathBuf::from(value),
-            origin: harbor_engine::EngineOrigin::System,
-            version: None,
-        };
-    }
-
+fn bundled_engine_candidate() -> Option<PathBuf> {
     let portable = env::current_exe()
         .ok()
         .and_then(|helper| portable_engine_near_helper(&helper));
-    let bundled = portable.or_else(|| {
+    portable.or_else(|| {
         let installed = PathBuf::from(DEFAULT_BUNDLED_ENGINE);
         installed.is_file().then_some(installed)
-    });
-
-    harbor_engine::discover_engine(bundled.clone()).unwrap_or_else(|_| {
-        harbor_engine::EngineResolution {
-            executable: bundled.unwrap_or_else(|| PathBuf::from(DEFAULT_BUNDLED_ENGINE)),
-            origin: harbor_engine::EngineOrigin::Bundled,
-            version: None,
-        }
     })
 }
 
-fn engine_executable() -> PathBuf {
-    engine_resolution().executable
+fn engine_resolution_for_policy(policy: EnginePolicy) -> Result<harbor_engine::EngineResolution> {
+    #[cfg(debug_assertions)]
+    if let Some(value) = env::var_os("BTRFS_HARBOR_ENGINE") {
+        return Ok(harbor_engine::EngineResolution {
+            executable: PathBuf::from(value),
+            origin: harbor_engine::EngineOrigin::System,
+            version: None,
+        });
+    }
+
+    harbor_engine::discover_engine_with_policy(policy, bundled_engine_candidate())
+        .map(|status| status.active)
+        .map_err(anyhow::Error::from)
+}
+
+fn engine_executable_for_policy(policy: EnginePolicy) -> Result<PathBuf> {
+    Ok(engine_resolution_for_policy(policy)?.executable)
 }
 
 fn engine_progress_message(resolution: &harbor_engine::EngineResolution) -> String {
@@ -360,7 +358,8 @@ fn list_restore_points_json(id: Uuid) -> Result<()> {
     }
 
     let uri = engine_target_uri(source, destination)?;
-    let output = Command::new(engine_executable())
+    let engine = engine_executable_for_policy(query.configuration.engine_policy)?;
+    let output = Command::new(engine)
         .args(["raw", "list", &uri, "--json"])
         .output()
         .context("failed to list backup snapshots")?;
@@ -641,7 +640,8 @@ fn run_profile(id: Uuid) -> Result<()> {
     let generated_path = generated_config_path(id);
     atomic_write(&generated_path, generated.as_bytes())?;
 
-    let status = Command::new(engine_executable())
+    let engine = engine_executable_for_policy(config.engine_policy)?;
+    let status = Command::new(&engine)
         .arg("-c")
         .arg(&generated_path)
         .arg("run")
@@ -653,7 +653,7 @@ fn run_profile(id: Uuid) -> Result<()> {
     }
 
     if profile.verify_after_backup {
-        verify_profile_targets(&profile, &selected)?;
+        verify_profile_targets(&profile, &selected, &engine)?;
     }
 
     if let Err(err) = refresh_recovery_kit(&config, &profile, &selected) {
@@ -749,7 +749,7 @@ fn execute_profile_jsonl(
     let generated = render_engine_config(profile, &config.destinations)?;
     atomic_write_mode(generated_path, generated.as_bytes(), 0o600)?;
 
-    let engine_resolution = engine_resolution();
+    let engine_resolution = engine_resolution_for_policy(config.engine_policy)?;
     emit_progress(
         "phase",
         "engine",
@@ -1013,11 +1013,12 @@ fn staged_restore_plan(
 }
 
 fn build_restore_command(
+    engine_executable: &Path,
     generated_path: &Path,
     plan: &StagedRestorePlan,
     dry_run: bool,
 ) -> Command {
-    let mut command = Command::new(engine_executable());
+    let mut command = Command::new(engine_executable);
     command
         .arg("-c")
         .arg(generated_path)
@@ -1075,6 +1076,7 @@ fn execute_stage_restore_jsonl(
 
     let generated = render_engine_config(profile, &config.destinations)?;
     atomic_write_mode(generated_path, generated.as_bytes(), 0o600)?;
+    let engine = engine_executable_for_policy(config.engine_policy)?;
     if let Some(parent) = plan.staging_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("cannot create staging parent {}", parent.display()))?;
@@ -1087,7 +1089,7 @@ fn execute_stage_restore_jsonl(
         None,
     )?;
     let status = run_streaming_command(
-        build_restore_command(generated_path, &plan, true),
+        build_restore_command(&engine, generated_path, &plan, true),
         "restore_plan",
     )?;
     if !status.success() {
@@ -1101,7 +1103,7 @@ fn execute_stage_restore_jsonl(
         None,
     )?;
     let status = run_streaming_command(
-        build_restore_command(generated_path, &plan, false),
+        build_restore_command(&engine, generated_path, &plan, false),
         "restore",
     )?;
     if !status.success() {
@@ -1194,8 +1196,10 @@ fn status_profile(id: Uuid) -> Result<()> {
     if !generated_path.is_file() {
         bail!("profile {id} is not installed");
     }
+    let config = read_config()?;
+    let engine = engine_executable_for_policy(config.engine_policy)?;
 
-    let output = Command::new(engine_executable())
+    let output = Command::new(engine)
         .arg("-c")
         .arg(&generated_path)
         .args(["status", "--format", "json"])
@@ -1250,11 +1254,12 @@ fn prepare_local_target_dirs(profile: &BackupProfile, destination: &DestinationS
 fn verify_profile_targets(
     profile: &BackupProfile,
     destinations: &[&DestinationSpec],
+    engine: &Path,
 ) -> Result<()> {
     for destination in destinations {
         for source in &profile.sources {
             let uri = engine_target_uri(source, destination)?;
-            let status = Command::new(engine_executable())
+            let status = Command::new(engine)
                 .args(["raw", "verify", &uri, "--json"])
                 .status()
                 .with_context(|| format!("failed to verify {uri}"))?;
@@ -1462,6 +1467,7 @@ mod tests {
     fn configuration() -> HarborConfig {
         let destination_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
         HarborConfig {
+            engine_policy: harbor_core::EnginePolicy::Auto,
             destinations: vec![DestinationSpec {
                 id: destination_id,
                 name: "Backup NAS".into(),
@@ -1713,7 +1719,12 @@ line two"
             before: None,
             requires_rescue_environment: false,
         };
-        let command = build_restore_command(Path::new("/tmp/generated.toml"), &plan, true);
+        let command = build_restore_command(
+            Path::new("/usr/bin/btrfs-backup-ng"),
+            Path::new("/tmp/generated.toml"),
+            &plan,
+            true,
+        );
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -1748,7 +1759,12 @@ line two"
             before: None,
             requires_rescue_environment: false,
         };
-        let command = build_restore_command(Path::new("/tmp/generated.toml"), &plan, false);
+        let command = build_restore_command(
+            Path::new("/usr/bin/btrfs-backup-ng"),
+            Path::new("/tmp/generated.toml"),
+            &plan,
+            false,
+        );
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -1798,7 +1814,12 @@ line two"
             before: Some("2026-10-05 02:00:00".into()),
             requires_rescue_environment: false,
         };
-        let command = build_restore_command(Path::new("/tmp/generated.toml"), &plan, false);
+        let command = build_restore_command(
+            Path::new("/usr/bin/btrfs-backup-ng"),
+            Path::new("/tmp/generated.toml"),
+            &plan,
+            false,
+        );
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())

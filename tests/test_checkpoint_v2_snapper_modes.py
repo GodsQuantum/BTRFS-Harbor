@@ -138,3 +138,43 @@ def test_without_source_or_snapper_rejected_before_backup(tmp_path):
     )
     with pytest.raises(ValueError, match="source"):
         cli._resolve_source_choice(args, tmp_path)
+
+
+def test_latest_snapper_does_not_backfill_an_older_snapshot(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    older = SimpleNamespace(
+        config_name="root",
+        number=11,
+        snapshot_type="single",
+        date=now - timedelta(hours=3),
+        pre_num=None,
+        subvolume_path=tmp_path / "11" / "snapshot",
+    )
+    latest = SimpleNamespace(
+        config_name="root",
+        number=12,
+        snapshot_type="single",
+        date=now - timedelta(minutes=2),
+        pre_num=None,
+        subvolume_path=tmp_path / "12" / "snapshot",
+    )
+    older.subvolume_path.mkdir(parents=True)
+    latest.subvolume_path.mkdir(parents=True)
+    monkeypatch.setattr(
+        cli,
+        "SnapperScanner",
+        lambda: SimpleNamespace(get_snapshots=lambda config: [older, latest]),
+    )
+    monkeypatch.setattr(
+        cli,
+        "resolve_source_identity",
+        lambda candidate: ResolvedSource(f"uuid-{candidate.number}", True, True),
+    )
+    monkeypatch.setattr(
+        cli,
+        "discover_raw_snapshots",
+        lambda root: [SimpleNamespace(source_uuid="uuid-12")],
+    )
+    args = parsed("--source-mode", "latest-snapper")
+    with pytest.raises(ValueError, match="already|eligible"):
+        cli._resolve_source_choice(args, tmp_path)

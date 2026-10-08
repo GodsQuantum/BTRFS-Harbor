@@ -222,13 +222,18 @@ def _resolve_source_choice(args: argparse.Namespace, target_root: Path) -> None:
         all_snapshots,
         mode="selected" if mode != "latest-snapper" else "latest",
         resolve=resolve_source_identity,
-        remote_uuids=remote,
+        remote_uuids=set() if mode == "latest-snapper" else remote,
         selected_number=args.snapper_number,
         selected_config=config,
     )
     if selected is None or selected.snapshot is None:
         raise ValueError(
             "no eligible new Snapper snapshot: latest may already be backed up"
+        )
+    if mode == "latest-snapper" and selected.source_uuid in remote:
+        raise ValueError(
+            "latest stable Snapper snapshot already backed up; "
+            "do not send older snapshots for a daily-latest policy"
         )
     source_path = getattr(selected.snapshot, "subvolume_path", None)
     if not isinstance(source_path, Path) or not source_path.is_absolute():

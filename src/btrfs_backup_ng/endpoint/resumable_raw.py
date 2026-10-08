@@ -11,6 +11,7 @@ import ctypes
 import errno
 import fcntl
 import hashlib
+import hmac
 import json
 import os
 import stat
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from ..core.replay_v2 import ReplayProof
 from ..core.checkpoint_v2 import (
     MAX_MANIFEST_BYTES,
     Checkpoint,
@@ -338,6 +340,33 @@ class ResumableRawSink:
             raise
         self.manifest = updated
         return checkpoint
+
+    def authorize_replayed_prefix(self, proof: ReplayProof) -> None:
+        """Enable remote append only for a fully hash-matched committed prefix.
+
+        A reopened sink starts write-locked. The replay stage must consume and
+        verify every checkpoint in the same immutable btrfs send before this
+        method can unlock the first missing checkpoint.
+        """
+        self._check()
+        if self.append_allowed:
+            raise RuntimeError("fresh sink does not require a replay proof")
+        expected = json.loads(serialize_manifest(self.manifest))
+        if (
+            not isinstance(proof, ReplayProof)
+            or proof.transfer_id != self.manifest.transfer_id
+            or proof.matched_checkpoints != len(self.manifest.checkpoints)
+            or proof.matched_raw_bytes != expected["committed_raw_bytes"]
+            or not hmac.compare_digest(
+                proof.checkpoint_index_sha256,
+                expected["checkpoint_index_sha256"],
+            )
+        ):
+            raise ValueError("resume proof does not match committed checkpoints")
+        if os.fstat(self._part_fd).st_size != expected["committed_compressed_bytes"]:
+            raise ValueError("resumable part has unexpected bytes")
+        self.guard.validate_fd(self._dir_fd)
+        self.append_allowed = True
 
     def publish(self, meta: bytes) -> Path:
         """Sidecar-first, no-replace publication; never publish a partial alone."""

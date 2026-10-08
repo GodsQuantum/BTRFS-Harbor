@@ -267,6 +267,87 @@ class TestResumableRawSink(unittest.TestCase):
         ).stdout
         self.assertEqual(decoded, raw)
 
+    def test_replayed_prefix_unlocks_only_the_missing_tail(self):
+        from dataclasses import replace
+
+        stream = importlib.import_module("btrfs_backup_ng.core.checkpoint_stream")
+        replay = importlib.import_module("btrfs_backup_ng.core.replay_v2")
+        self.manifest = replace(self.manifest, checkpoint_size=16)
+        prefix = b"A" * 16 + b"B" * 16
+        raw = prefix + b"new tail"
+        with self.open_new() as sink:
+            for block in (b"A" * 16, b"B" * 16):
+                sink.append_frame(
+                    raw_sha256=hashlib.sha256(block).hexdigest(),
+                    raw_length=len(block),
+                    frame=stream.compress_frame(block, level=3, threads=1),
+                )
+        with self.api.load_existing(
+            self.root,
+            "snap",
+            TRANSFER_ID,
+            Guard(self.root),
+            expected_manifest=self.manifest,
+        ) as resumed:
+            reader = io.BytesIO(raw)
+            with self.assertRaises(RuntimeError):
+                resumed.append_frame(raw_sha256="b" * 64, raw_length=1, frame=b"frame")
+            proof = replay.replay_committed(
+                reader,
+                resumed.manifest,
+                source=replay.SourceFingerprint(
+                    uuid=SOURCE_UUID,
+                    parent_uuid=None,
+                    path="/snapshots/12/snapshot",
+                    send_fingerprint="protocol=2",
+                    readonly=True,
+                ),
+                destination=replay.DestinationFingerprint(
+                    type="raw", fingerprint="verified:storage"
+                ),
+            )
+            self.assertEqual(reader.read(0), b"")
+            resumed.authorize_replayed_prefix(proof)
+            summary = stream.feed_checkpointed_stream(
+                reader, resumed, chunk_size=16, level=3, threads=1
+            )
+            self.assertEqual(summary.raw_bytes, len(raw) - len(prefix))
+            size = sum(c.compressed_length for c in resumed.manifest.checkpoints)
+            resumed.publish(meta_bytes("snap", size))
+        decoded = subprocess.run(
+            ["zstd", "-q", "-dc"],
+            input=(self.root / "snap.btrfs.zst").read_bytes(),
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        self.assertEqual(decoded, raw)
+
+    def test_invalid_replay_proof_does_not_enable_append(self):
+        replay = importlib.import_module("btrfs_backup_ng.core.replay_v2")
+        with self.open_new() as sink:
+            block = b"AAAA"
+            sink.append_frame(
+                raw_sha256=hashlib.sha256(block).hexdigest(),
+                raw_length=4,
+                frame=b"frame",
+            )
+        with self.api.load_existing(
+            self.root,
+            "snap",
+            TRANSFER_ID,
+            Guard(self.root),
+            expected_manifest=self.manifest,
+        ) as resumed:
+            invalid = replay.ReplayProof(
+                transfer_id=TRANSFER_ID,
+                matched_checkpoints=1,
+                matched_raw_bytes=4,
+                checkpoint_index_sha256="f" * 64,
+            )
+            with self.assertRaises(ValueError):
+                resumed.authorize_replayed_prefix(invalid)
+            self.assertFalse(resumed.append_allowed)
+
     def test_symlink_partial_refuses_resume(self):
         with self.open_new() as sink:
             name = sink.part_name

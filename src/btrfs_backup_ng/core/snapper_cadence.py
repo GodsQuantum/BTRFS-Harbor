@@ -81,6 +81,7 @@ def plan_remote_send(
         "paused",
         "pause_requested",
         "failed_resumable",
+        "finalizing",
     }
     unfinished = next((job for job in pending if job.status in resumable), None)
     if unfinished:

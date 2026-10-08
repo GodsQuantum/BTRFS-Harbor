@@ -20,7 +20,13 @@ from typing import cast
 
 from .. import __version__
 from ..core.checkpoint_control_v2 import ControlJournal
-from ..core.checkpoint_v2 import ResumeManifest, read_manifest, serialize_manifest
+from ..core.checkpoint_v2 import (
+    ResumeManifest,
+    commit_manifest,
+    read_manifest,
+    serialize_manifest,
+)
+from ..core.verify_v2 import verify_checkpoint_index
 from ..core.checkpoint_v2_runner import SendProcess, execute_checkpoint_job
 from ..core.native_send_v2 import (
     destination_fingerprint,
@@ -51,6 +57,7 @@ STATES_RESUMABLE = frozenset(
         "paused",
         "replaying",
         "failed_resumable",
+        "finalizing",
     }
 )
 
@@ -501,6 +508,52 @@ def _execute(args: argparse.Namespace) -> int:
             raise
     else:
         manifest = read_manifest(_manifest_path(root, args.transfer_id))
+        # A crash may occur after the final stream and .meta are durable but
+        # before the journal could be switched to completed. Never regenerate
+        # a huge btrfs send merely to acknowledge a finished archive.
+        final = root / f"{args.name}.btrfs.zst"
+        metadata = root / f"{args.name}.btrfs.zst.meta"
+        if final.exists():
+            guard, _ = _open_guard(
+                root,
+                allow_local=args.allow_local,
+                expected=str(manifest.identity["destination_fingerprint"]),
+            )
+            with guard:
+                proof = verify_checkpoint_index(metadata, final, full=True)
+                if proof.status != "ok":
+                    raise ValueError(
+                        "a final stream already exists but did not pass full v2 verification: "
+                        + proof.detail
+                    )
+                completed = replace(manifest, state="completed")
+                commit_manifest(
+                    _manifest_path(root, manifest.transfer_id),
+                    completed,
+                    validate_destination=lambda: guard.validate_fd(guard.directory_fd),
+                )
+                config = manifest.identity.get("snapper_config")
+                number = manifest.identity.get("snapper_number")
+                if isinstance(config, str) and type(number) is int:
+                    _pin_manager(state).release(
+                        config,
+                        number,
+                        str(manifest.identity["source_uuid"]),
+                        manifest.transfer_id,
+                    )
+            print(
+                json.dumps(
+                    {
+                        "transfer_id": manifest.transfer_id,
+                        "status": "completed",
+                        "recovered_final_publish": True,
+                        "new_raw_bytes": 0,
+                        "new_checkpoints": 0,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
         if manifest.state not in STATES_RESUMABLE:
             raise ValueError("this checkpoint transaction is not resumable")
         source = _source_check(str(manifest.identity["source_path"]))

@@ -433,6 +433,24 @@ def _execute(args: argparse.Namespace) -> int:
         m = read_manifest(_manifest_path(root, args.transfer_id))
         payload = json.loads(serialize_manifest(m))
         payload["resumable"] = m.state in STATES_RESUMABLE
+        # The estimated full raw size is NOT known from a Btrfs send until
+        # its source exits. Do not present a fake percent complete or ETA.
+        payload["progress"] = {
+            "phase": m.state,
+            "checkpoint_count": len(m.checkpoints),
+            "committed_raw_bytes": payload["committed_raw_bytes"],
+            "committed_compressed_bytes": payload["committed_compressed_bytes"],
+            "last_committed_at": m.checkpoints[-1].committed_at
+            if m.checkpoints
+            else None,
+            "total_raw_bytes": None,
+            "percent": None,
+            "eta_seconds": None,
+            "can_resume": m.state in STATES_RESUMABLE,
+            "can_pause": m.state in ("preparing", "uploading", "replaying"),
+            "can_stop": m.state in ("preparing", "uploading", "replaying"),
+            "can_discard": m.state != "completed",
+        }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if action in ("pause", "stop"):

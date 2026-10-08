@@ -302,3 +302,63 @@ def test_v2_stop_requests_and_signals_only_registered_send(
     assert rc == 0
     assert called == ["stop"]
     assert '"signal_sent": true' in capsys.readouterr().out.lower()
+
+
+def test_status_progress_is_checkpoint_based_without_invented_eta(
+    tmp_path, monkeypatch, capsys
+):
+    import json
+    from btrfs_backup_ng.core.checkpoint_v2 import ResumeManifest, Checkpoint
+
+    transfer_id = "3b88e8c1-5cb8-4f67-aa10-f9544b6228f0"
+    identity = {
+        "profile_id": "p1",
+        "source_volume": "/",
+        "source_uuid": "b0cbeb30-9917-44d8-9f27-1ed967f91a2d",
+        "source_path": "/snapshots/12/snapshot",
+        "parent_uuid": None,
+        "send_fingerprint": "protocol=2",
+        "compression": "zstd",
+        "compression_level": 3,
+        "encryption": "none",
+        "destination_type": "raw",
+        "destination_fingerprint": "test",
+        "kernel_release": "7",
+        "btrfs_progs_version": "7",
+        "harbor_version": "0.2.6",
+        "engine_version": "0.9.12",
+    }
+    check = Checkpoint(
+        sequence=0,
+        raw_offset=0,
+        raw_length=16,
+        compressed_offset=0,
+        compressed_length=23,
+        raw_sha256="a" * 64,
+        compressed_sha256="b" * 64,
+        committed_at="2026-10-09T00:20:00+00:00",
+    )
+    record = ResumeManifest(2, transfer_id, identity, 16, "paused", (check,))
+    import btrfs_backup_ng.cli.checkpoint_v2_cmd as cli
+
+    monkeypatch.setattr(cli, "read_manifest", lambda path: record)
+    rc = main(
+        [
+            "raw",
+            "checkpoint-v2",
+            "status",
+            "--target",
+            str(tmp_path),
+            "--transfer-id",
+            transfer_id,
+        ]
+    )
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["resumable"] is True
+    assert data["progress"]["checkpoint_count"] == 1
+    assert data["progress"]["committed_raw_bytes"] == 16
+    assert data["progress"]["committed_compressed_bytes"] == 23
+    assert data["progress"]["eta_seconds"] is None
+    assert data["progress"]["total_raw_bytes"] is None
+    assert data["progress"]["phase"] == "paused"

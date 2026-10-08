@@ -59,7 +59,13 @@ REQUIRED_IDENTITY = frozenset(
     }
 )
 OPTIONAL_IDENTITY = frozenset(
-    {"snapper_config", "snapper_number", "snapper_type", "snapper_pre_number"}
+    {
+        "snapper_config",
+        "snapper_number",
+        "snapper_type",
+        "snapper_pre_number",
+        "parent_path",
+    }
 )
 CHECKPOINT_FIELDS = frozenset(
     {
@@ -130,6 +136,11 @@ def _validate_identity(identity: dict[str, str | int | None]) -> None:
     parent = identity["parent_uuid"]
     if parent is not None and not _valid_uuid(parent):
         raise ValueError("incremental parent UUID is invalid")
+    parent_path = identity.get("parent_path")
+    if parent is not None and not _valid_path(parent_path):
+        raise ValueError("incremental parent path is required and must be absolute")
+    if parent is None and parent_path is not None:
+        raise ValueError("incremental parent path without UUID is not allowed")
     for name in ("source_volume", "source_path"):
         if not _valid_path(identity[name]):
             raise ValueError(f"invalid source path in identity: {name}")

@@ -1,7 +1,7 @@
 # Btrfs Harbor v0.2.6 — Checkpointed Resume, Persistent Pause and Snapper Orchestration
 
 **Date:** 2026-10-08
-**Status:** Chat design approved; written specification awaiting explicit review before implementation
+**Status:** Written specification approved 2026-10-08. Implementation plan authorized.
 **Base:** `e6be1e0cd9a567d4cd6faa53036805862b24edf4` (BTRFS Harbor v0.2.5)
 **Scope:** resumable raw backup transport, persistent pause/resume, Snapper/Btrfs Assistant snapshot sourcing and cadence separation, source pinning, target identity guards, timeline/recovery integration, workstation-friendly performance controls.
 
@@ -502,6 +502,10 @@ Where possible, it sends that latest snapshot incrementally from a compatible sn
 Existing Harbor systemd.path-style Snapper trigger behavior remains valid.
 
 The trigger must apply the same eligibility rules and must not race a pre/post pair by sending a lone `pre` automatically.
+
+### 10.5 Pending Resume versus newer Snapper snapshots
+
+A transfer already in resumable state is bound to its original immutable snapshot UUID and parent fingerprint. Resume always targets this originally pinned source, even if Snapper has created newer snapshots. Daily Latest and after-snapshot schedulers cannot silently replace a paused or failed-resumable transfer with a newer snapshot in the same job. If they conflict, Harbor offers an explicit choice to finish the previous transfer or discard it separately before a new backup. Pending partial state is never silently deleted or retargeted.
 
 ---
 

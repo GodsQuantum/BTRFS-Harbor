@@ -10,14 +10,15 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for name, folder in (
-    ("btrfs_backup_ng", "src/btrfs_backup_ng"),
-    ("btrfs_backup_ng.core", "src/btrfs_backup_ng/core"),
-    ("btrfs_backup_ng.endpoint", "src/btrfs_backup_ng/endpoint"),
-):
-    m = types.ModuleType(name)
-    m.__path__ = [str(ROOT / folder)]
-    sys.modules[name] = m
+if __name__ == "__main__":
+    for name, folder in (
+        ("btrfs_backup_ng", "src/btrfs_backup_ng"),
+        ("btrfs_backup_ng.core", "src/btrfs_backup_ng/core"),
+        ("btrfs_backup_ng.endpoint", "src/btrfs_backup_ng/endpoint"),
+    ):
+        m = types.ModuleType(name)
+        m.__path__ = [str(ROOT / folder)]
+        sys.modules[name] = m
 v2 = importlib.import_module("btrfs_backup_ng.core.checkpoint_v2")
 sinkapi = importlib.import_module("btrfs_backup_ng.endpoint.resumable_raw")
 replay = importlib.import_module("btrfs_backup_ng.core.replay_v2")

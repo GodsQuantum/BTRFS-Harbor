@@ -9,13 +9,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-for name, folder in (
-    ("btrfs_backup_ng", "src/btrfs_backup_ng"),
-    ("btrfs_backup_ng.snapper", "src/btrfs_backup_ng/snapper"),
-):
-    obj = types.ModuleType(name)
-    obj.__path__ = [str(ROOT / folder)]
-    sys.modules[name] = obj
+if __name__ == "__main__":
+    for name, folder in (
+        ("btrfs_backup_ng", "src/btrfs_backup_ng"),
+        ("btrfs_backup_ng.snapper", "src/btrfs_backup_ng/snapper"),
+    ):
+        obj = types.ModuleType(name)
+        obj.__path__ = [str(ROOT / folder)]
+        sys.modules[name] = obj
 p = importlib.import_module("btrfs_backup_ng.snapper.source_policy")
 NOW = datetime(2026, 10, 8, 21, 0, tzinfo=timezone.utc)
 

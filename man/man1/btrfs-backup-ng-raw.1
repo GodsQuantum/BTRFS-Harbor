@@ -306,3 +306,8 @@ requires \fB\-\-target\fR, \fB\-\-name\fR,
 \fB\-\-transfer-id\fR, and explicit \fB\-\-confirm\fR.
 This removes only the resumable partial, never a completed archive;
 Snapper native cleanup pinning is released after deletion and UUID check.
+.PP
+.B raw checkpoint-v2 list --target
+with an existing destination path enumerates read-only checkpoint summaries,
+including transaction IDs, archive names and committed bytes. Private manifests
+remain mode 0600 and can be inspected via the native polkit-authorized engine.

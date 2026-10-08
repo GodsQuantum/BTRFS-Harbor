@@ -144,6 +144,8 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw chec
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l snapper-number -x
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l name -x
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
@@ -166,6 +168,7 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw chec
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a discard -d 'discard'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a list -d 'list'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a pause -d 'pause'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a resume -d 'resume'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a start -d 'start'

@@ -68,6 +68,7 @@
 	import BackupProgress from '#lib/BackupProgress.svelte';
 	import TransferProgress from '#lib/TransferProgress.svelte';
 	import CheckpointTimeline from '#lib/CheckpointTimeline.svelte';
+	import CheckpointControls from '#lib/CheckpointControls.svelte';
 	import EngineManager from '#lib/EngineManager.svelte';
 	import EngineStatusRow from '#lib/EngineStatusRow.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
@@ -608,6 +609,16 @@
 						<TransferProgress events={transferProgress} {locale} />
 					</div>
 				</article>
+
+				{#if dashboard.source === 'live' && harborConfig && activeProfile}
+					<div style="grid-column: 1 / -1; min-width: 0">
+						<CheckpointControls
+							profile={activeProfile}
+							destination={resolveDestination(harborConfig, activeProfile)}
+							{locale}
+						/>
+					</div>
+				{/if}
 
 				{#if dashboard.source === 'live' && harborConfig && activeProfile}
 					<article class="panel overview-schedule">

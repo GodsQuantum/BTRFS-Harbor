@@ -1,0 +1,191 @@
+//! Strict native checkpoint CLI argument adapter.
+//! No shell, no arbitrary executable, no user-provided state path.
+//! Experimental source transfers cannot accidentally replace legacy raw runs.
+use serde::Deserialize;
+use std::path::Path;
+use uuid::Uuid;
+
+pub const CONTROL_STATE_DIR: &str = "/var/lib/btrfs-harbor/checkpoint-v2";
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CheckpointRequest {
+    pub action: String,
+    pub target: String,
+    pub name: Option<String>,
+    pub profile_id: Option<String>,
+    pub transfer_id: Option<String>,
+    pub source_mode: Option<String>,
+    pub snapper_config: Option<String>,
+    pub snapper_number: Option<u64>,
+    pub allow_local: bool,
+    pub performance: Option<String>,
+}
+
+pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> {
+    let action = req.action.as_str();
+    if !matches!(action, "start" | "resume" | "pause" | "stop" | "discard") {
+        return Err("Unsupported checkpoint control action".into());
+    }
+    let target = Path::new(&req.target);
+    if matches!(action, "start" | "resume" | "discard")
+        && (!target.is_absolute()
+            || req.target.contains('\0')
+            || target
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            || target.is_symlink()
+            || !target.is_dir())
+    {
+        return Err("Existing absolute checkpoint destination required".into());
+    }
+    let mut args: Vec<String> = ["raw", "checkpoint-v2", action]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    if matches!(action, "start" | "resume" | "discard") {
+        args.extend(["--target".to_owned(), req.target.clone()]);
+    }
+    args.extend(["--state-dir".to_owned(), CONTROL_STATE_DIR.to_owned()]);
+
+    if action == "start" {
+        let id = req.profile_id.as_ref().ok_or("Missing profile identity")?;
+        Uuid::parse_str(id).map_err(|_| "Invalid profile identity")?;
+        let mode = req.source_mode.as_deref().ok_or("Missing source mode")?;
+        if !matches!(
+            mode,
+            "latest-snapper" | "selected-snapper" | "create-snapper"
+        ) {
+            return Err(
+                "GUI checkpoint starts require an explicitly managed Snapper source".into(),
+            );
+        }
+        let config = req
+            .snapper_config
+            .as_deref()
+            .ok_or("Missing Snapper configuration")?;
+        if config.is_empty()
+            || config.len() > 80
+            || !config
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err("Invalid Snapper configuration name".into());
+        }
+        if mode == "selected-snapper" && req.snapper_number.unwrap_or(0) == 0 {
+            return Err("Selected Snapper snapshot number required".into());
+        }
+        let name = req.name.as_deref().ok_or("Missing archive name")?;
+        validate_name(name)?;
+        args.extend([
+            "--name".into(),
+            name.to_owned(),
+            "--profile-id".into(),
+            id.to_owned(),
+        ]);
+        args.extend([
+            "--source-mode".into(),
+            mode.into(),
+            "--snapper-config".into(),
+            config.into(),
+        ]);
+        if mode == "selected-snapper" {
+            args.extend([
+                "--snapper-number".into(),
+                req.snapper_number.unwrap().to_string(),
+            ]);
+        }
+        let perf = req.performance.as_deref().unwrap_or("balanced");
+        if !matches!(perf, "balanced" | "fast") {
+            return Err("Unsupported performance mode".into());
+        }
+        args.extend(["--performance".into(), perf.into(), "--experimental".into()]);
+    } else {
+        let id = req
+            .transfer_id
+            .as_ref()
+            .ok_or("Missing transfer identity")?;
+        if Uuid::parse_str(id).is_err() || Uuid::parse_str(id).unwrap().to_string() != *id {
+            return Err("Invalid transfer identity".into());
+        }
+        args.extend(["--transfer-id".into(), id.clone()]);
+        if matches!(action, "resume" | "discard") {
+            let name = req.name.as_deref().ok_or("Missing archive name")?;
+            validate_name(name)?;
+            args.extend(["--name".into(), name.into()]);
+        }
+        if action == "resume" {
+            args.push("--experimental".into());
+        }
+        if action == "discard" {
+            args.push("--confirm".into());
+        }
+    }
+    if req.allow_local && matches!(action, "start" | "resume" | "discard") {
+        args.push("--allow-local".into());
+    }
+    Ok(args)
+}
+
+fn validate_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.len() > 120
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        Err("Archive name must contain only ASCII letters, digits, - or _".into())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn base(action: &str) -> CheckpointRequest {
+        CheckpointRequest {
+            action: action.into(),
+            target: "/tmp".into(),
+            name: Some("root_20261009".into()),
+            profile_id: Some("b0cbeb30-9917-44d8-9f27-1ed967f91a2d".into()),
+            transfer_id: Some("3b88e8c1-5cb8-4f67-aa10-f9544b6228f0".into()),
+            source_mode: Some("latest-snapper".into()),
+            snapper_config: Some("root".into()),
+            snapper_number: None,
+            allow_local: true,
+            performance: None,
+        }
+    }
+    #[test]
+    fn latest_snapper_requires_experimental_flag_and_fixed_state_dir() {
+        let args = action_arguments(&base("start")).unwrap();
+        assert!(args.contains(&"--experimental".into()));
+        assert!(args.contains(&CONTROL_STATE_DIR.into()));
+        assert!(args.contains(&"--snapper-config".into()));
+    }
+    #[test]
+    fn code_injection_through_name_or_snapper_config_is_refused() {
+        let mut a = base("start");
+        a.name = Some("snap;rm".into());
+        assert!(action_arguments(&a).is_err());
+        a = base("start");
+        a.snapper_config = Some("../../etc".into());
+        assert!(action_arguments(&a).is_err());
+    }
+    #[test]
+    fn stop_requests_are_scoped_to_canonical_uuid() {
+        let mut a = base("stop");
+        a.transfer_id = Some("hi--kill".into());
+        assert!(action_arguments(&a).is_err());
+        a.transfer_id = base("stop").transfer_id;
+        let args = action_arguments(&a).unwrap();
+        assert!(!args.iter().any(|s| s == "--experimental"));
+    }
+    #[test]
+    fn resume_and_discard_maintain_explicit_gates() {
+        let resume = action_arguments(&base("resume")).unwrap();
+        assert!(resume.contains(&"--experimental".into()));
+        let discard = action_arguments(&base("discard")).unwrap();
+        assert!(discard.contains(&"--confirm".into()));
+    }
+}

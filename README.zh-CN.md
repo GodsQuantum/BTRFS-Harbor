@@ -32,11 +32,13 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 同一块磁盘上的本地快照很有用，但它**不是**异机备份。Harbor 会始终明确区分这两种状态。
 
-## v0.2.6 开发预览 — 尚未发布
+## v0.2.6-rc.1 — 检查点续传预发布版
 
-**按检查点续传的原始 Btrfs 备份仍处于实验阶段。传输控制目前仅在命令行中提供；原生桌面的时间线页面只读展示检查点状态。** 显式启用的 `raw checkpoint-v2` 支持持久化检查点清单、中断后在本地重新读取并核对 SHA-256、独立 zstd 帧、Snapper 快照选择和自动清理保护、暂停/停止请求，以及经确认后丢弃未完成的传输。非网络本地目标必须显式指定 `--allow-local`；开始或继续备份还须指定 `--experimental`。
+**实验性桌面操作：**发送最新稳定 Snapper 快照、选择编号、创建快照，以及暂停、停止、继续和明确丢弃部分传输。历史页读取真实清单，私有清单需要 polkit 授权。Snapper 清理保护确保传输中的源快照不会被自动清理。传统“立即备份”按钮和现有 systemd 定时器仍使用旧引擎，**不是** v2 传输。
 
-**请勿将此功能作为唯一的灾难恢复备份。** 真实 Btrfs 完整/增量发送与接收、网络挂载中断后的恢复、桌面界面集成以及发行包验收尚未完成。已发布的 raw/SSH 备份流程保持不变。详见[设计规范](docs/superpowers/specs/2026-10-08-checkpointed-resume-snapper-design.md)和[实施计划](docs/superpowers/plans/2026-10-08-checkpointed-resume-snapper-v026.md)。
+**实验性命令行：**raw checkpoint-v2 start/resume/list/status/pause/stop/discard。开始和继续需要 --experimental；非网络本地目标需要 --allow-local；丢弃需要确认。恢复会从头在本地重新生成并核验 Btrfs 流前缀，但不会向目标重传已提交的数据。无清单的 v0.2.5 旧 .part 文件不能续传。
+
+**预发布限制：**真实 Btrfs 完整/增量中断与恢复、实际 NFS 断线、独立 v2 systemd 调度及跨发行版验收仍待完成。只能在监督下测试，不能作为唯一灾备。原有 raw/SSH 功能保留。
 
 ## ✨ 为什么选择 Harbor？
 
@@ -51,6 +53,8 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 - **最小权限桌面架构** — 只读 D-Bus agent + 固定 privileged helper，不提供通用 root shell。
 - **English / Français / 简体中文** — UI 与文档均支持三种语言。
 - **不需要 Docker runtime** — Harbor 是原生 Linux 桌面应用。
+
+实验性预发布版 **v0.2.6-rc.1** 在[预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1)。其检查点面板与稳定版“立即备份”功能相互独立。
 
 ## 📦 下载与安装
 

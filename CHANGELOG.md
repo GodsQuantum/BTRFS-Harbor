@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Harbor v0.2.6 development branch
+## [0.2.6-rc.1] — supervised experimental preview
 
 - Added an **explicitly experimental** `raw checkpoint-v2` CLI path for
   durable raw checkpoints, local verified replay, restart-persistent pause/stop,
   Snapper source selection and native cleanup protection.
 - Added read-only EN/FR/ZH native Desktop Timeline checkpoint status preview; it never claims unverified restore success.
+- Added opt-in native desktop controls for latest/selected/create Snapper source, Pause/Stop/Resume/Discard, and read-only polkit enumeration.
+- Redrew the canonical vector brand as a lighthouse over snapshot layers and regenerated all native icons.
 - Added atomic final-stream recovery, fail-closed mount identity checks,
   raw/compressed checkpoint verification, and a guarded incremental parent
   archive identity.

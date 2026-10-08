@@ -1,12 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" role="img" aria-labelledby="title desc">
   <title id="title">Btrfs Harbor</title>
-  <desc id="desc">Btrfs Harbor logo and Snapshots in. Systems back. tagline</desc>
-  <g transform="translate(16 18) scale(1.12)">
-    <path fill="#0B1622" d="M20 18c0-5.5 4.5-10 10-10h68c5.5 0 10 4.5 10 10v16c0 5.5-4.5 10-10 10H30c-5.5 0-10-4.5-10-10V18Z"/>
-    <path fill="#14283A" d="M27 48h74a9 9 0 0 1 9 9v13a9 9 0 0 1-9 9H27a9 9 0 0 1-9-9V57a9 9 0 0 1 9-9Z"/>
-    <path fill="#58D6C5" d="M35 83h20V62a9 9 0 0 1 18 0v21h20c3.8 0 6.1 4.2 4 7.4-6.5 10-14.8 16.4-24.1 19.3V116h9a6 6 0 1 1 0 12H46a6 6 0 1 1 0-12h9v-6.3c-9.3-2.9-17.6-9.3-24.1-19.3-2.1-3.2.2-7.4 4.1-7.4Zm9.8 12c5.4 4.9 11.8 7.4 19.2 7.4S77.8 99.9 83.2 95H73v5a9 9 0 0 1-18 0v-5H44.8Z"/>
-    <circle cx="64" cy="62" r="4.5" fill="#EAF8F5"/>
+  <desc id="desc">Lighthouse logo and Snapshots in. Systems back. tagline</desc>
+  <g transform="translate(14 12) scale(1.20)">
+    <circle cx="64" cy="64" r="59" fill="#0B1622"/>
+    <circle cx="64" cy="64" r="53" fill="#14283A"/>
+    <path d="M21 42 47 29h34l26 13-3 9-26-13H50L24 51Z" fill="#286B95"/>
+    <path d="M26 32 48 23h32l22 9v8L78 31H50L26 40Z" fill="#73B8FF"/>
+    <path d="M49 43h30l8 58H41Z" fill="#EAF8F5"/>
+    <path d="M52 55h24l2 12H50Z" fill="#286B95"/>
+    <path d="M47 79h34l2 12H45Z" fill="#286B95"/>
+    <path d="M47 41h34v8H47Z" fill="#0B1622"/>
+    <path d="M49 25h30v18H49Z" fill="#EAF8F5"/>
+    <path d="M56 28h16v11H56Z" fill="#58D6C5"/>
+    <path d="M44 24 64 12l20 12v6H44Z" fill="#0B1622"/>
+    <path d="M60 10h8v7h-8Z" fill="#58D6C5"/>
+    <path d="M32 95q16-11 32 0t32 0v11q-16 11-32 0t-32 0Z" fill="#58D6C5"/>
+    <path d="M18 105q15-10 30-1 16 10 32 0 15-10 30 1v9q-15-8-30 1-16 9-32 0-15-9-30-1Z" fill="#73B8FF"/>
+    <circle cx="64" cy="34" r="3.5" fill="#EAF8F5"/>
   </g>
-  <text x="180" y="78" fill="#0B1622" font-family="system-ui, sans-serif" font-size="54" font-weight="720" letter-spacing="-1.5">Btrfs Harbor</text>
-  <text x="182" y="116" fill="#526A73" font-family="system-ui, sans-serif" font-size="22" font-weight="500">Snapshots in. Systems back.</text>
+  <text x="178" y="80" fill="#0B1622" font-family="system-ui, sans-serif" font-size="54" font-weight="720" letter-spacing="-1.5">Btrfs Harbor</text>
+  <text x="180" y="119" fill="#526A73" font-family="system-ui, sans-serif" font-size="22" font-weight="500">Snapshots in. Systems back.</text>
 </svg>

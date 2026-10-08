@@ -38,6 +38,7 @@
 	} from './config';
 	import BackupProgress from './BackupProgress.svelte';
 	import TransferProgress from './TransferProgress.svelte';
+	import CheckpointControls from './CheckpointControls.svelte';
 	import { translate, type Locale, type TranslationKey } from './i18n';
 	import {
 		upsertTransferProgress,
@@ -720,6 +721,7 @@
 		{locale}
 	/>
 	<TransferProgress events={transferProgress} {locale} />
+	<CheckpointControls {profile} {destination} {locale} />
 
 	<div class="editor-actions">
 		<div class="editor-feedback">

@@ -287,6 +287,9 @@ _btrfs_backup_ng() {
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
                                     '--name[]:name:' \
                                     '--transfer-id[]:transfer_id:' \
                                     '--allow-local[]' \

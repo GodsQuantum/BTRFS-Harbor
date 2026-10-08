@@ -32,11 +32,13 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
-## Aperçu de développement v0.2.6 — non publié
+## v0.2.6-rc.1 — préversion avec reprise par checkpoints
 
-**La reprise des sauvegardes raw par checkpoints est expérimentale sur cette branche de développement. Les commandes de transfert sont réservées à la CLI ; l'Historique du desktop natif dispose seulement d'une consultation des états en lecture seule.** La commande `raw checkpoint-v2`, activée volontairement, propose un manifest persistant, la relecture locale avec vérification SHA-256 des checkpoints, des frames zstd indépendantes, la sélection et la protection des snapshots Snapper, les demandes Pause/Stop et l'abandon explicite d'un transfert partiel. Les destinations locales non réseau nécessitent `--allow-local` ; démarrer ou reprendre exige également `--experimental`.
+**Commandes desktop expérimentales :** envoyer le dernier snapshot Snapper stable, choisir un numéro, créer un snapshot, mettre en pause, arrêter, reprendre ou abandonner explicitement un partiel. Historique lit les vrais manifests, y compris privés via polkit. Les protections Snapper préservent les sources inachevées. Le bouton classique Sauvegarder maintenant et les timers systemd existants utilisent toujours le moteur historique ; ils ne déclenchent PAS un envoi v2.
 
-**Ne pas utiliser comme unique sauvegarde de secours.** Les essais réels Btrfs complets/incrémentaux, la perte d'un montage réseau, l'intégration dans l'interface desktop et la qualification des paquets restent à réaliser. Les sauvegardes raw/SSH déjà publiées ne changent pas. Voir la [spécification](docs/superpowers/specs/2026-10-08-checkpointed-resume-snapper-design.md) et le [plan d'implémentation](docs/superpowers/plans/2026-10-08-checkpointed-resume-snapper-v026.md).
+**CLI expérimentale :** raw checkpoint-v2 start/resume/list/status/pause/stop/discard. Start et Resume exigent --experimental, les destinations locales non réseau --allow-local, et Discard une confirmation. Resume recalcule et vérifie le flux Btrfs depuis zéro localement, mais ne renvoie PAS les frames déjà validées sur la destination. Un ancien fichier .part v0.2.5 sans manifest reste non reprenable.
+
+**Limites de cette préversion :** essais réels Btrfs send/receive interrompu, coupure NFS, timers systemd v2 indépendants et qualification multi-distribution encore à réaliser. Pour essai sous surveillance uniquement, jamais comme unique sauvegarde. Les fonctions raw/SSH stables restent inchangées.
 
 ## ✨ Pourquoi Harbor ?
 
@@ -51,6 +53,8 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 - **Desktop à privilèges minimaux** — D-Bus en lecture + helper privilégié fixe, aucun shell root générique.
 - **English / Français / 简体中文** — UI et documentation complètes.
 - **Aucun runtime Docker** — Harbor s’installe comme une application Linux native.
+
+La préversion expérimentale **v0.2.6-rc.1** se trouve dans les [préreleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1). Son panneau à checkpoints est indépendant du bouton de sauvegarde classique.
 
 ## 📦 Télécharger et installer
 

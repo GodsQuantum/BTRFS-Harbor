@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import uuid
@@ -21,8 +22,10 @@ from typing import cast
 from .. import __version__
 from ..core.checkpoint_control_v2 import ControlJournal
 from ..core.checkpoint_v2 import (
+    MAX_MANIFEST_BYTES,
     ResumeManifest,
     commit_manifest,
+    parse_manifest,
     read_manifest,
     serialize_manifest,
 )
@@ -426,8 +429,111 @@ def execute_checkpoint_v2(args: argparse.Namespace) -> int:
         return 2
 
 
+def _list_v2(root: Path) -> list[dict[str, object]]:
+    """Read-only, bounded, nofollow preview, safe to run through native polkit."""
+    entries: list[dict[str, object]] = []
+    directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        names = sorted(os.listdir(directory_fd))[:8192]
+        for filename in names:
+            if len(entries) >= 100:
+                break
+            if not (
+                filename.startswith(".harbor-resume-") and filename.endswith(".json")
+            ):
+                continue
+            transfer_id = filename[len(".harbor-resume-") : -len(".json")]
+            try:
+                if _safe_id(transfer_id) != transfer_id:
+                    continue
+                fd = os.open(
+                    filename,
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=directory_fd,
+                )
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        continue
+                    if os.fstat(fd).st_size > MAX_MANIFEST_BYTES:
+                        continue
+                    with os.fdopen(fd, "rb", closefd=False) as reader:
+                        manifest = parse_manifest(reader.read(MAX_MANIFEST_BYTES + 1))
+                finally:
+                    os.close(fd)
+            except (OSError, ValueError, TypeError):
+                continue
+            if manifest.transfer_id != transfer_id:
+                continue
+            match_suffix = f".btrfs.zst.{transfer_id}.part"
+            names_found = [
+                name[: -len(match_suffix)]
+                for name in names
+                if name.endswith(match_suffix)
+                and not name.startswith(".")
+                and 0 < len(name[: -len(match_suffix)]) <= 200
+                and "/" not in name
+            ]
+            archive_name = names_found[0] if len(names_found) == 1 else None
+            # A completed stream no longer has a partial: check its sidecar
+            # transaction ID read-only and with a nofollow handle.
+            if archive_name is None and manifest.state == "completed":
+                for metadata_name in names:
+                    if not metadata_name.endswith(".btrfs.zst.meta"):
+                        continue
+                    try:
+                        meta_fd = os.open(
+                            metadata_name,
+                            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                            dir_fd=directory_fd,
+                        )
+                        try:
+                            if not stat.S_ISREG(os.fstat(meta_fd).st_mode):
+                                continue
+                            if os.fstat(meta_fd).st_size > MAX_MANIFEST_BYTES:
+                                continue
+                            with os.fdopen(meta_fd, "rb", closefd=False) as stream:
+                                data = json.loads(stream.read(MAX_MANIFEST_BYTES + 1))
+                        finally:
+                            os.close(meta_fd)
+                        if (
+                            data.get("harbor_checkpoint_v2", {}).get("transfer_id")
+                            == transfer_id
+                        ):
+                            archive_name = metadata_name[: -len(".btrfs.zst.meta")]
+                            break
+                    except (OSError, ValueError, TypeError, AttributeError):
+                        continue
+            payload = json.loads(serialize_manifest(manifest))
+            entries.append(
+                {
+                    "transfer_id": transfer_id,
+                    "name": archive_name,
+                    "state": manifest.state,
+                    "source": manifest.identity["source_path"],
+                    "checkpoint_count": len(manifest.checkpoints),
+                    "committed_raw_bytes": payload["committed_raw_bytes"],
+                    "committed_compressed_bytes": payload["committed_compressed_bytes"],
+                    "last_checkpoint_at": (
+                        manifest.checkpoints[-1].committed_at
+                        if manifest.checkpoints
+                        else None
+                    ),
+                    "resumable": manifest.state in STATES_RESUMABLE
+                    and archive_name is not None,
+                    "verified": False,
+                }
+            )
+    finally:
+        os.close(directory_fd)
+    entries.sort(key=lambda r: str(r["last_checkpoint_at"] or ""), reverse=True)
+    return entries
+
+
 def _execute(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
+    if action == "list":
+        print(json.dumps(_list_v2(_target_root(args.target)), sort_keys=True))
+        return 0
     if action == "status":
         root = _target_root(args.target)
         m = read_manifest(_manifest_path(root, args.transfer_id))

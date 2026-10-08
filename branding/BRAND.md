@@ -4,7 +4,7 @@
 Btrfs Harbor
 
 ## Mark
-⚓
+Lighthouse over immutable Btrfs snapshot layers
 
 ## Tagline
 Snapshots in. Systems back.
@@ -14,8 +14,8 @@ Calm, technical, dependable, precise.
 Harbor is an operating-system utility, not a cloud SaaS dashboard.
 
 ## Visual language
-- layered planes represent immutable Btrfs snapshots;
-- the lower geometry resolves into a harbor/anchor;
+- lighthouse signals a reliable recovery point;
+- layered planes and water represent immutable Btrfs snapshots and safe arrival;
 - generous negative space;
 - strong small-size silhouette;
 - no text inside the app icon.

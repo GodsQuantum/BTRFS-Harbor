@@ -508,6 +508,10 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
     start_v2.add_argument("--state-dir")
     start_v2.add_argument("--snapper-config")
     start_v2.add_argument("--snapper-number", type=int)
+    list_v2 = v2_actions.add_parser(
+        "list", help="List v2 transfers and their durable checkpoint state (read-only)"
+    )
+    list_v2.add_argument("--target", required=True)
     resume_v2 = v2_actions.add_parser("resume", help="Resume an existing v2 partial")
     resume_v2.add_argument("--target", required=True)
     resume_v2.add_argument("--name", required=True)

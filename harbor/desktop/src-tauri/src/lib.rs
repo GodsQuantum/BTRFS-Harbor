@@ -1,3 +1,4 @@
+mod checkpoint_actions;
 mod checkpoint_status;
 
 use harbor_core::EnginePolicy;
@@ -1021,16 +1022,100 @@ async fn backup_status(profile_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn checkpoint_transfers(target: String) -> Result<String, String> {
-    // Read-only preview. Never call backup/receive, mkdir, mount or a shell.
-    // A network directory scan may block, so keep it off the UI event loop.
-    let records = tokio::task::spawn_blocking(move || {
-        checkpoint_status::list_checkpoint_manifests(Path::new(&target))
+async fn checkpoint_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, BackupRuntimeState>,
+    request: checkpoint_actions::CheckpointRequest,
+) -> Result<String, String> {
+    let args = checkpoint_actions::action_arguments(&request)?;
+    let executable = bundled_engine_candidate(&app)
+        .ok_or("The bundled v2 engine is unavailable; install the v0.2.6 package")?;
+    let long_running = matches!(request.action.as_str(), "start" | "resume");
+    if long_running {
+        // Existing backup runtime prevents closing the only controlling UI
+        // when no tray-based, durable v2 worker supervisor is available.
+        state.begin()?;
+    }
+    let result = Command::new("/usr/bin/pkexec")
+        .arg(executable)
+        .args(args)
+        .output()
+        .await
+        .map_err(|err| format!("Cannot invoke privileged checkpoint engine: {err}"))
+        .and_then(|output| {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            } else {
+                let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+                Err(if error.is_empty() {
+                    format!("Checkpoint operation failed: {}", output.status)
+                } else {
+                    error
+                })
+            }
+        });
+    if long_running {
+        finish_background_backup(&app, result.is_ok());
+    }
+    result
+}
+
+#[tauri::command]
+async fn checkpoint_transfers(app: tauri::AppHandle, target: String) -> Result<String, String> {
+    let root = Path::new(&target);
+    // Reject missing/symlink/nonabsolute targets without creating them.
+    // Check presence of v2 manifests by filenames only; never follow symlinks.
+    let has_manifests = tokio::task::spawn_blocking({
+        let target = target.clone();
+        move || -> Result<bool, String> {
+            let root = Path::new(&target);
+            let _ = checkpoint_status::list_checkpoint_manifests(root)?;
+            let mut found = false;
+            for entry in std::fs::read_dir(root)
+                .map_err(|e| e.to_string())?
+                .take(2048)
+            {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let filename = entry.file_name();
+                let filename = filename.to_string_lossy();
+                if filename.starts_with(".harbor-resume-") && filename.ends_with(".json") {
+                    found = true;
+                    break;
+                }
+            }
+            Ok(found)
+        }
     })
     .await
-    .map_err(|err| format!("Checkpoint inspection task failed: {err}"))??;
-    serde_json::to_string(&records)
-        .map_err(|err| format!("Cannot encode checkpoint preview: {err}"))
+    .map_err(|err| format!("Checkpoint directory inspection failed: {err}"))??;
+    if !has_manifests {
+        return Ok("[]".to_owned());
+    }
+    let engine = bundled_engine_candidate(&app).ok_or("Bundled v2 engine is unavailable")?;
+    let arguments = ["raw", "checkpoint-v2", "list", "--target", target.as_str()];
+    let normal = Command::new(&engine).args(arguments).output().await;
+    if let Ok(output) = normal
+        && output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim() != "[]"
+    {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    }
+    // Private 0600 transaction journals are not made world-readable:
+    // enumerate through polkit only when such records actually exist.
+    let privileged = Command::new("/usr/bin/pkexec")
+        .arg(engine)
+        .args(arguments)
+        .output()
+        .await
+        .map_err(|err| format!("Cannot inspect private checkpoints: {err}"))?;
+    if !privileged.status.success() {
+        return Err(String::from_utf8_lossy(&privileged.stderr)
+            .trim()
+            .to_owned());
+    }
+    Ok(String::from_utf8_lossy(&privileged.stdout)
+        .trim()
+        .to_owned())
 }
 
 async fn run_privileged_profile_command(
@@ -1689,6 +1774,7 @@ pub fn run() {
             discover_sources,
             backup_status,
             checkpoint_transfers,
+            checkpoint_action,
             inspect_mount,
             apply_configuration,
             send_snapshot_now_stream,

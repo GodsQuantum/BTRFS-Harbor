@@ -36,6 +36,24 @@ function integrationUnavailable(message: string): boolean {
 	);
 }
 
+export interface CheckpointActionRequest {
+	action: 'start' | 'resume' | 'pause' | 'stop' | 'discard';
+	target: string;
+	name?: string | null;
+	profile_id?: string | null;
+	transfer_id?: string | null;
+	source_mode?: 'latest-snapper' | 'selected-snapper' | 'create-snapper' | null;
+	snapper_config?: string | null;
+	snapper_number?: number | null;
+	allow_local: boolean;
+	performance?: 'balanced' | 'fast' | null;
+}
+
+export async function runCheckpointAction(request: CheckpointActionRequest): Promise<string> {
+	if (!isTauri()) throw new Error('Checkpoint controls require the native application');
+	return invoke<string>('checkpoint_action', { request });
+}
+
 /** Read-only local manifest preview; no invented records in browser demo mode. */
 export async function loadCheckpointTransfers(target: string): Promise<CheckpointTransfer[]> {
 	if (!isTauri() || !target.startsWith('/')) return [];

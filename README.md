@@ -32,11 +32,13 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
-## v0.2.6 development preview — not released
+## v0.2.6-rc.1 — checkpointed Resume preview
 
-**Checkpointed raw Resume is experimental on this development branch. Transfer controls remain CLI-only; the native Desktop Timeline provides a read-only checkpoint status preview.** The opt-in `raw checkpoint-v2` workflow supports persistent checkpoint manifests, local hash-verified fast-forward after interruption, independent zstd frames, Snapper source selection and cleanup pins, pause/stop requests, and explicit partial discard. Local non-network targets require `--allow-local`; backup start/resume additionally require `--experimental`.
+**Experimental native desktop controls:** Send latest stable Snapper snapshot, select a specific snapshot number, create a new snapshot, and Pause / Stop / Resume / Discard partial. History now reads real manifests, including private journals with polkit when required. Snapper cleanup pins protect unfinished source snapshots. The legacy Back up now button and existing systemd timers are still on the original backup engine; they are NOT checkpointed-v2 sends.
 
-**Do not use it as your only disaster-recovery backup.** Real Btrfs full/incremental send-and-receive, network mount-loss recovery, desktop UI integration, and release packaging acceptance are still pending. Existing released raw/SSH backup workflows remain unchanged. See the [written design](docs/superpowers/specs/2026-10-08-checkpointed-resume-snapper-design.md) and [implementation plan](docs/superpowers/plans/2026-10-08-checkpointed-resume-snapper-v026.md).
+**Experimental CLI:** raw checkpoint-v2 start/resume/list/status/pause/stop/discard. Start and Resume require --experimental, non-network local targets require --allow-local, and Discard requires explicit confirmation. Resume regenerates and checks the raw Btrfs send locally from byte zero, but NEVER retransmits committed destination frames. Legacy v0.2.5 partials without manifests cannot be resumed.
+
+**Release-candidate limitations:** Real interrupted Btrfs full/incremental send/receive, a physical NFS-outage test, independent v2 systemd timers, and all package/distribution acceptance remain pending. Use only for supervised tests, not as your only disaster-recovery backup. Stable legacy raw/SSH behavior is preserved.
 
 ## ✨ Why Harbor?
 
@@ -51,6 +53,8 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 - **Least-privilege desktop** — read-only D-Bus agent plus a fixed privileged helper; no generic root shell.
 - **English / Français / 简体中文** — first-class UI and documentation.
 - **No Docker runtime** — Harbor installs as a native Linux desktop application.
+
+The latest experimental preview is **v0.2.6-rc.1**, available under [prereleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1). Its checkpoint panel is distinct from the stable Back up now workflow.
 
 ## 📦 Download & install
 

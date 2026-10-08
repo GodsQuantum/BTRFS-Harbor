@@ -4,6 +4,7 @@
  */
 export interface CheckpointTransfer {
 	transfer_id: string;
+	name?: string | null;
 	state: string;
 	source: string;
 	checkpoint_count: number;

@@ -158,3 +158,6 @@ def execute_checkpoint_job(
             )
         finally:
             proc.stdout.close()
+            stderr_log = getattr(proc, "_harbor_stderr_log", None)
+            if stderr_log is not None:
+                stderr_log.close()

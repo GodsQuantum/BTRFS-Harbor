@@ -87,6 +87,14 @@ class NativeBtrfsTest(unittest.TestCase):
         self.assertTrue(kwargs["start_new_session"])
         self.assertFalse(kwargs.get("shell", False))
 
+    def test_send_stderr_not_undrained_pipe(self):
+        source = self.path / "snap"
+        source.mkdir()
+        with patch.object(app.subprocess, "Popen") as launch:
+            app.spawn_btrfs_send(source)
+        _, kwargs = launch.call_args
+        self.assertNotEqual(kwargs["stderr"], app.subprocess.PIPE)
+
     def test_send_argv_is_refused_for_nonabsolute_source(self):
         with self.assertRaises(ValueError):
             app.spawn_btrfs_send(Path("relative"), None)

@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from ..endpoint.mount_guard_v2 import MountIdentity
@@ -83,12 +84,22 @@ def spawn_btrfs_send(
     if parent is not None:
         argv += ["-p", str(parent)]
     argv += [str(source)]
-    return subprocess.Popen(
-        argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        bufsize=0,
-        close_fds=True,
-    )
+    # A PIPE not consumed concurrently can fill and deadlock btrfs send.
+    # Anonymous temporary file lets the child write any amount of diagnostics
+    # without blocking its stdout; the owning runner closes it after wait.
+    stderr_log = tempfile.TemporaryFile(mode="w+b")
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=stderr_log,
+            start_new_session=True,
+            bufsize=0,
+            close_fds=True,
+        )
+    except BaseException:
+        stderr_log.close()
+        raise
+    setattr(process, "_harbor_stderr_log", stderr_log)
+    return process

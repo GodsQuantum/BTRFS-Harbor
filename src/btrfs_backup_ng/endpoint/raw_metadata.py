@@ -176,6 +176,9 @@ class RawSnapshot:
     parent_uuid: str | None = None
     parent_name: str | None = None
     source_uuid: str = ""
+    # The basename encoded inside a native Btrfs send can differ from the
+    # human-readable archive filename (Snapper calls every subvolume snapshot).
+    received_subvolume_name: str | None = None
     created: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     size: int = 0
     compress: str | None = None
@@ -251,7 +254,15 @@ class RawSnapshot:
         receive of this snapshot lands (the artifact verdict, a collision check)
         asks this rather than the path.
         """
-        return self.name
+        name = self.received_subvolume_name or self.name
+        if (
+            not isinstance(name, str)
+            or name in ("", ".", "..")
+            or "/" in name
+            or "\x00" in name
+        ):
+            raise ValueError("unsafe received Btrfs subvolume name")
+        return name
 
     @property
     def time_obj(self) -> time.struct_time:
@@ -325,7 +336,7 @@ class RawSnapshot:
         is ISO-8601 in UTC. ``checksum.value`` is the sha256 of the committed
         ciphertext (null for legacy sidecars or a best-effort read-back failure).
         """
-        return {
+        content = {
             "version": 2,
             "name": self.name,
             "uuid": self.uuid,
@@ -353,6 +364,9 @@ class RawSnapshot:
             # Kept for backward compatibility with v1 readers.
             "btrfs_backup_ng_version": __version__,
         }
+        if self.received_subvolume_name is not None:
+            content["received_subvolume_name"] = self.received_name
+        return content
 
     def serialize(self) -> bytes:
         """Return the canonical on-disk sidecar bytes (pretty JSON, UTF-8).
@@ -407,6 +421,7 @@ class RawSnapshot:
             # Absent from every sidecar written before this field existed, and
             # tolerated: an empty source_uuid corresponds to nothing.
             source_uuid=data.get("source_uuid") or "",
+            received_subvolume_name=data.get("received_subvolume_name"),
             created=created,
             size=data.get("size", 0),
             compress=pipeline.get("compress"),

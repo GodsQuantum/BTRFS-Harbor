@@ -34,7 +34,7 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 
 ## v0.2.6 development preview — not released
 
-**Checkpointed raw Resume is experimental and CLI-only on this development branch.** The opt-in `raw checkpoint-v2` workflow supports persistent checkpoint manifests, local hash-verified fast-forward after interruption, independent zstd frames, Snapper source selection and cleanup pins, pause/stop requests, and explicit partial discard. Local non-network targets require `--allow-local`; backup start/resume additionally require `--experimental`.
+**Checkpointed raw Resume is experimental on this development branch. Transfer controls remain CLI-only; the native Desktop Timeline provides a read-only checkpoint status preview.** The opt-in `raw checkpoint-v2` workflow supports persistent checkpoint manifests, local hash-verified fast-forward after interruption, independent zstd frames, Snapper source selection and cleanup pins, pause/stop requests, and explicit partial discard. Local non-network targets require `--allow-local`; backup start/resume additionally require `--experimental`.
 
 **Do not use it as your only disaster-recovery backup.** Real Btrfs full/incremental send-and-receive, network mount-loss recovery, desktop UI integration, and release packaging acceptance are still pending. Existing released raw/SSH backup workflows remain unchanged. See the [written design](docs/superpowers/specs/2026-10-08-checkpointed-resume-snapper-design.md) and [implementation plan](docs/superpowers/plans/2026-10-08-checkpointed-resume-snapper-v026.md).
 

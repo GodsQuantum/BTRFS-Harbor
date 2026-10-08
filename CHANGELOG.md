@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an **explicitly experimental** `raw checkpoint-v2` CLI path for
   durable raw checkpoints, local verified replay, restart-persistent pause/stop,
   Snapper source selection and native cleanup protection.
+- Added read-only EN/FR/ZH native Desktop Timeline checkpoint status preview; it never claims unverified restore success.
 - Added atomic final-stream recovery, fail-closed mount identity checks,
   raw/compressed checkpoint verification, and a guarded incremental parent
   archive identity.

@@ -67,6 +67,7 @@
 	} from '#lib/i18n.ts';
 	import BackupProgress from '#lib/BackupProgress.svelte';
 	import TransferProgress from '#lib/TransferProgress.svelte';
+	import CheckpointTimeline from '#lib/CheckpointTimeline.svelte';
 	import EngineManager from '#lib/EngineManager.svelte';
 	import EngineStatusRow from '#lib/EngineStatusRow.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
@@ -853,6 +854,12 @@
 			</section>
 		{:else if active === 'timeline'}
 			<section class="content-stack">
+				<CheckpointTimeline
+					target={harborConfig && activeProfile
+						? resolveDestination(harborConfig, activeProfile).path
+						: ''}
+					{locale}
+				/>
 				<div class="page-intro">
 					<div class="intro-icon"><History size={24} /></div>
 					<div>

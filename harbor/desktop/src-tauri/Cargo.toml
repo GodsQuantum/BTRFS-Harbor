@@ -33,3 +33,6 @@ tauri-plugin-log = "2"
 tokio = { version = "1.53", features = ["io-util", "macros", "process", "time"] }
 uuid = "1.27"
 zbus = { version = "5.19", features = ["tokio"] }
+
+[dev-dependencies]
+tempfile = "3"

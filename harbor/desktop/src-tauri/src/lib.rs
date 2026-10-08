@@ -1,3 +1,5 @@
+mod checkpoint_status;
+
 use harbor_core::EnginePolicy;
 use harbor_engine::{EngineOrigin, EngineSelectionStatus};
 use harbor_storage::MountTable;
@@ -1018,6 +1020,19 @@ async fn backup_status(profile_id: String) -> Result<String, String> {
     call_agent("BackupStatus", &profile_id).await
 }
 
+#[tauri::command]
+async fn checkpoint_transfers(target: String) -> Result<String, String> {
+    // Read-only preview. Never call backup/receive, mkdir, mount or a shell.
+    // A network directory scan may block, so keep it off the UI event loop.
+    let records = tokio::task::spawn_blocking(move || {
+        checkpoint_status::list_checkpoint_manifests(Path::new(&target))
+    })
+    .await
+    .map_err(|err| format!("Checkpoint inspection task failed: {err}"))??;
+    serde_json::to_string(&records)
+        .map_err(|err| format!("Cannot encode checkpoint preview: {err}"))
+}
+
 async fn run_privileged_profile_command(
     app: &tauri::AppHandle,
     command: &str,
@@ -1673,6 +1688,7 @@ pub fn run() {
             profile_runtime,
             discover_sources,
             backup_status,
+            checkpoint_transfers,
             inspect_mount,
             apply_configuration,
             send_snapshot_now_stream,

@@ -2,6 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { createDefaultConfiguration, type DiscoveredSource, type HarborConfig } from './config';
 import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from './engine';
+import type { CheckpointTransfer } from './checkpoint';
 import type { MachineRecoveryPlan, MachineRecoveryRequest } from './recovery';
 import {
 	demoStatus,
@@ -33,6 +34,13 @@ function integrationUnavailable(message: string): boolean {
 		message.includes('ServiceUnknown') ||
 		message.includes('NameHasNoOwner')
 	);
+}
+
+/** Read-only local manifest preview; no invented records in browser demo mode. */
+export async function loadCheckpointTransfers(target: string): Promise<CheckpointTransfer[]> {
+	if (!isTauri() || !target.startsWith('/')) return [];
+	const json = await invoke<string>('checkpoint_transfers', { target });
+	return JSON.parse(json) as CheckpointTransfer[];
 }
 
 export async function loadInstallationState(): Promise<InstallationState> {

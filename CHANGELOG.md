@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Harbor v0.2.6 development branch
+
+- Added an **explicitly experimental** \`raw checkpoint-v2\` CLI path for
+  durable raw checkpoints, local verified replay, restart-persistent pause/stop,
+  Snapper source selection and native cleanup protection.
+- Added atomic final-stream recovery, fail-closed mount identity checks,
+  raw/compressed checkpoint verification, and a guarded incremental parent
+  archive identity.
+- Preserved released legacy raw/SSH behavior. **Not yet released:** real
+  Btrfs/NFS failure injection and full/incremental restore acceptance,
+  integrated desktop controls, performance benchmarking, and package CI.
+
 ## [0.9.12] - 2026-09-27
 
 This release makes `config validate` and `doctor` answer the question they

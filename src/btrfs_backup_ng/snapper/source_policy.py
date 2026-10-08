@@ -70,11 +70,9 @@ def resolve_source_identity(snapshot: SnapshotCandidate) -> ResolvedSource:
 
 
 def _aware(when: datetime) -> datetime:
-    return (
-        when.replace(tzinfo=timezone.utc)
-        if when.tzinfo is None
-        else when.astimezone(timezone.utc)
-    )
+    # Snapper metadata parser yields naive LOCAL time; astimezone() correctly
+    # attaches the system local timezone before converting to UTC.
+    return when.astimezone(timezone.utc)
 
 
 def select_source(

@@ -45,6 +45,22 @@ def choose(items, remote=frozenset(), kind="latest", selected=None):
 
 
 class SourcePolicy(unittest.TestCase):
+    def test_naive_snapper_time_is_host_local_not_utc(self):
+        import os
+        import time
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"TZ": "Europe/Paris"}):
+            time.tzset()
+            try:
+                candidate = datetime(2026, 10, 8, 22, 0)
+                self.assertEqual(
+                    p._aware(candidate),
+                    datetime(2026, 10, 8, 20, 0, tzinfo=timezone.utc),
+                )
+            finally:
+                time.tzset()
+
     def test_single_after_short_settle(self):
         a = FakeSnapshot("root", 1, "single", NOW - timedelta(seconds=30), "u1")
         b = FakeSnapshot("root", 2, "single", NOW - timedelta(seconds=10), "u2")

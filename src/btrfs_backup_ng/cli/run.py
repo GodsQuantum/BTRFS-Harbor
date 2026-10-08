@@ -675,6 +675,7 @@ def _backup_volume(
                     config.global_config.transfer_timeout,
                     newest_only,
                     _catch_up_selector(volume, config, target_config, dest_endpoint),
+                    str(volume.path),
                 ): (dest_endpoint, target_config)
                 for dest_endpoint, target_config in destination_endpoints
             }
@@ -711,6 +712,7 @@ def _backup_volume(
                     config.global_config.transfer_timeout,
                     newest_only,
                     _catch_up_selector(volume, config, target_config, dest_endpoint),
+                    str(volume.path),
                 )
                 if outcome is not None:
                     stats["completed"] += 1
@@ -952,6 +954,7 @@ def _backup_snapper_volume(
                 "compress": compress_override or target.compress or default_compress,
                 "rate_limit": rate_limit_override or target.rate_limit,
                 "show_progress": show_progress,
+                "progress_volume": str(volume.path),
                 # Threaded rather than left to the default: the point of making it
                 # configurable is that an install with a slow link can raise it.
                 "transfer_timeout": config.global_config.transfer_timeout,
@@ -1297,6 +1300,7 @@ def _transfer_to_target(
     transfer_timeout: int = DEFAULT_TRANSFER_TIMEOUT,
     newest_only: bool = False,
     select=None,
+    progress_volume: str | None = None,
 ) -> TransferResult | None:
     """Transfer to a single target, catching up whatever it is missing.
 
@@ -1327,6 +1331,7 @@ def _transfer_to_target(
             "ssh_sudo": target_config.ssh_sudo,
             "show_progress": show_progress,
             "transfer_timeout": transfer_timeout,
+            "progress_volume": progress_volume,
             # Space-check flags (--no-check-space/--force/--safety-margin) so the
             # destination space preflight can actually be bypassed when requested.
             **(space_options or {}),

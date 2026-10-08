@@ -42,14 +42,189 @@ path and the stall detection the timeout work needs -- which is why the two are
 worth doing together rather than separately.
 """
 
+import json
 import logging
 import os
 import subprocess
 import sys
 import threading
-from typing import IO, Optional
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import IO, Callable, Optional, TextIO
 
 logger = logging.getLogger(__name__)
+
+_PROGRESS_JSONL_ENV = "BTRFS_BACKUP_NG_PROGRESS_JSONL"
+
+
+@dataclass(frozen=True)
+class TransferProgressEvent:
+    """Versioned machine-readable transfer telemetry.
+
+    Byte fields are deliberately nullable because not every transfer path can
+    measure both sides of the pipe. bytes_target means bytes written at the
+    destination representation being observed; for a raw target this is the
+    current .part file size after compression/encryption.
+    """
+
+    volume: str
+    snapshot: str
+    destination: str
+    bytes_target: int | None = None
+    bytes_source: int | None = None
+    total_estimate: int | None = None
+    estimate_kind: str | None = None
+    bytes_per_second: float | None = None
+    elapsed_seconds: float | None = None
+    eta_seconds: float | None = None
+    measurement: str = "unknown"
+    certainty: str = "unknown-total"
+    schema: int = 1
+    event: str = "transfer_progress"
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), ensure_ascii=False, separators=(",", ":"))
+
+
+def progress_jsonl_enabled() -> bool:
+    """Whether machine-readable progress events were explicitly requested."""
+
+    return os.environ.get(_PROGRESS_JSONL_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def emit_transfer_progress(
+    event: TransferProgressEvent,
+    *,
+    stream: TextIO | None = None,
+    enabled: bool | None = None,
+) -> None:
+    """Emit one JSON object per line without changing normal CLI output by default."""
+
+    if enabled is None:
+        enabled = progress_jsonl_enabled()
+    if not enabled:
+        return
+    target = stream if stream is not None else sys.stdout
+    target.write(event.to_json())
+    target.write("\n")
+    target.flush()
+
+
+class FileSizeProgressSampler:
+    """Measure a growing raw target file without entering the transfer data path."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        volume: str,
+        snapshot: str,
+        destination: str,
+        total_estimate: int | None = None,
+        estimate_kind: str | None = None,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.path = Path(path)
+        self.volume = volume
+        self.snapshot = snapshot
+        self.destination = destination
+        self.total_estimate = total_estimate
+        self.estimate_kind = estimate_kind
+        self._now = now
+        self._started = now()
+        self._last_at = self._started
+        self._last_bytes = self._safe_size()
+
+    def _safe_size(self) -> int:
+        try:
+            return self.path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    def sample(self) -> TransferProgressEvent:
+        at = self._now()
+        current = self._safe_size()
+        delta_t = at - self._last_at
+        delta_bytes = current - self._last_bytes
+        rate = (
+            float(delta_bytes) / delta_t if delta_t > 0 and delta_bytes >= 0 else None
+        )
+        elapsed = max(0.0, at - self._started)
+
+        eta: float | None = None
+        certainty = "unknown-total"
+        if self.total_estimate is not None:
+            certainty = "estimated-total"
+            if rate is not None and rate > 0:
+                remaining = max(0, self.total_estimate - current)
+                eta = float(remaining) / rate
+
+        self._last_at = at
+        self._last_bytes = current
+
+        return TransferProgressEvent(
+            volume=self.volume,
+            snapshot=self.snapshot,
+            destination=self.destination,
+            bytes_target=current,
+            total_estimate=self.total_estimate,
+            estimate_kind=self.estimate_kind,
+            bytes_per_second=rate,
+            elapsed_seconds=elapsed,
+            eta_seconds=eta,
+            measurement="raw-target-file",
+            certainty=certainty,
+        )
+
+
+class FileSizeProgressMonitor:
+    """Background sampler for a growing raw target file.
+
+    The monitor never reads or rewrites transfer bytes. It only stats the file
+    and emits telemetry while the sink process is alive.
+    """
+
+    def __init__(
+        self,
+        sampler: FileSizeProgressSampler,
+        process,
+        *,
+        interval: float = 1.0,
+        emitter: Callable[[TransferProgressEvent], None] = emit_transfer_progress,
+    ) -> None:
+        self.sampler = sampler
+        self.process = process
+        self.interval = max(0.1, float(interval))
+        self.emitter = emitter
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="btrfs-backup-ng-raw-progress",
+            daemon=True,
+        )
+
+    def start(self) -> "FileSizeProgressMonitor":
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self.emitter(self.sampler.sample())
+            if self.process.poll() is not None:
+                break
+            self._stop.wait(self.interval)
+
+    def stop(self, *, emit_final: bool = True, timeout: float = 2.0) -> None:
+        self._stop.set()
+        self._thread.join(timeout=timeout)
+        if emit_final:
+            self.emitter(self.sampler.sample())
 
 
 def is_interactive() -> bool:

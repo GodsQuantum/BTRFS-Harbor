@@ -356,6 +356,16 @@ def _send_snapshot(
             else:
                 logger.debug("Could not estimate transfer size")
 
+        progress_context = {
+            "volume": str(options.get("progress_volume") or source_path),
+            "snapshot": snapshot_name,
+            "destination": dest_path,
+            "total_estimate": estimated_size,
+            "estimate_kind": (
+                "snapshot-logical" if estimated_size is not None else None
+            ),
+        }
+
         if use_direct_pipe:
             return_codes = _do_direct_pipe_transfer(
                 snapshot,
@@ -391,6 +401,7 @@ def _send_snapshot(
                     options.get("transfer_timeout", DEFAULT_TRANSFER_TIMEOUT)
                 ),
                 processes=started,
+                progress_context=progress_context,
             )
             receive_process = started.get("receive", receive_process)
 
@@ -1166,6 +1177,7 @@ def _do_process_transfer(
     parent_name: str | None = None,
     processes: dict[str, Any] | None = None,
     source_uuid: str = "",
+    progress_context: dict[str, Any] | None = None,
 ) -> list[int]:
     """Perform transfer using traditional process piping.
 
@@ -1226,6 +1238,7 @@ def _do_process_transfer(
             parent_name=parent_name,
             processes=processes,
             source_uuid=source_uuid,
+            progress_context=progress_context,
         )
 
     pipeline_processes = []
@@ -1247,11 +1260,16 @@ def _do_process_transfer(
         # Start receive process with potentially modified input stream. parent_name and
         # source_uuid let a raw endpoint record the incremental parent and the stream
         # identity in its .meta sidecar (btrfs ignores them).
+        receive_kwargs = {
+            "parent_name": parent_name,
+            "source_uuid": source_uuid,
+        }
+        if progress_context is not None:
+            receive_kwargs["progress_context"] = progress_context
         receive_process = destination_endpoint.receive(
             current_stdout,
             snapshot_name,
-            parent_name=parent_name,
-            source_uuid=source_uuid,
+            **receive_kwargs,
         )
         if processes is not None:
             processes["receive"] = receive_process
@@ -1348,6 +1366,7 @@ def _do_rich_progress_transfer(
     parent_name: str | None = None,
     processes: dict[str, Any] | None = None,
     source_uuid: str = "",
+    progress_context: dict[str, Any] | None = None,
 ) -> list[int]:
     """Perform transfer with Rich progress bar display.
 
@@ -1369,11 +1388,16 @@ def _do_rich_progress_transfer(
     # this path reports a clean failure with the failed-transaction audit log,
     # exactly like the non-rich transfer path.
     try:
+        receive_kwargs = {
+            "parent_name": parent_name,
+            "source_uuid": source_uuid,
+        }
+        if progress_context is not None:
+            receive_kwargs["progress_context"] = progress_context
         receive_process = destination_endpoint.receive(
             subprocess.PIPE,
             snapshot_name,
-            parent_name=parent_name,
-            source_uuid=source_uuid,
+            **receive_kwargs,
         )
     except Exception as e:
         logger.error("Failed to start receive process: %s", e)

@@ -523,6 +523,7 @@ class Endpoint:
         snapshot_name: str = "",
         parent_name: str | None = None,
         source_uuid: str = "",
+        progress_context: dict[str, Any] | None = None,
     ) -> Any:
         """Call 'btrfs receive', setting the given pipe as its stdin.
 

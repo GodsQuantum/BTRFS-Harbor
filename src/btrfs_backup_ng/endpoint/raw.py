@@ -32,6 +32,11 @@ from btrfs_backup_ng import __util__
 from btrfs_backup_ng.__logger__ import logger
 from btrfs_backup_ng.lifecycle import scoped as in_process_scope
 from btrfs_backup_ng.lifecycle import track as track_child
+from btrfs_backup_ng.core.progress import (
+    FileSizeProgressMonitor,
+    FileSizeProgressSampler,
+    progress_jsonl_enabled,
+)
 from btrfs_backup_ng.core.transfer import (
     popen_pipeline_pipefail as _popen_pipeline_pipefail,
     tail_stderr,
@@ -820,6 +825,7 @@ class RawEndpoint(Endpoint):
         snapshot_name: str = "",
         parent_name: str | None = None,
         source_uuid: str = "",
+        progress_context: dict[str, Any] | None = None,
     ) -> Any:
         """Write a btrfs send stream to a file.
 
@@ -891,6 +897,27 @@ class RawEndpoint(Endpoint):
         # Build and execute the pipeline (writes to the .part file)
         pipeline = self._build_receive_pipeline(part_path)
         proc = self._execute_pipeline(pipeline, stdin)
+
+        # Local raw targets (including NFS/SMB mount paths) expose the exact
+        # compressed/encrypted bytes written by this transfer through the unique
+        # .part file. Observe its size out of band so progress reporting never
+        # becomes part of the btrfs-send -> compressor -> target data path.
+        #
+        # raw+ssh inherits this method, but its part path lives on the remote host;
+        # never stat that path locally. Remote telemetry gets its own transport
+        # counter instead of fabricating local numbers.
+        self._progress_monitor = None
+        if progress_jsonl_enabled() and not getattr(self, "_is_remote", False):
+            context = progress_context or {}
+            sampler = FileSizeProgressSampler(
+                part_path,
+                volume=str(context.get("volume") or snapshot_name),
+                snapshot=str(context.get("snapshot") or snapshot_name),
+                destination=str(context.get("destination") or self.config["path"]),
+                total_estimate=context.get("total_estimate"),
+                estimate_kind=context.get("estimate_kind"),
+            )
+            self._progress_monitor = FileSizeProgressMonitor(sampler, proc).start()
 
         return proc
 
@@ -1047,6 +1074,11 @@ class RawEndpoint(Endpoint):
         Raises on failure so the engine treats an un-published stream as a
         failed transfer rather than reporting a success that is not on disk.
         """
+        monitor = getattr(self, "_progress_monitor", None)
+        if monitor is not None:
+            monitor.stop(emit_final=True)
+            self._progress_monitor = None
+
         pending = getattr(self, "_pending_metadata", None)
         # No receive() has run on this endpoint (dummy init) -> nothing to publish.
         if not pending or not pending.get("name"):

@@ -23,6 +23,9 @@ REPLAY_STATES = frozenset(
         "paused",
         "replaying",
         "failed_resumable",
+        # A crash after writing the authoritative .meta but before renaming
+        # the durable .part must replay the original source and finish safely.
+        "finalizing",
     }
 )
 REPLAY_READ_BYTES = 1024 * 1024

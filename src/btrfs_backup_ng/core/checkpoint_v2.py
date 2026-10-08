@@ -8,14 +8,16 @@ mount identity and individual checkpoint bytes before appending anything.
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import hmac
 import json
 import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import PurePosixPath
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable
 
 SCHEMA_VERSION = 2
 DEFAULT_CHECKPOINT_SIZE = 128 * 1024 * 1024
@@ -333,3 +335,91 @@ def parse_manifest(data: bytes) -> ResumeManifest:
     ):
         raise ValueError("manifest committed byte totals mismatch")
     return manifest
+
+
+def _open_regular_nofollow(path: Path) -> int:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise ValueError("resume data must be a regular file")
+    return fd
+
+
+def read_manifest(manifest_path: Path) -> ResumeManifest:
+    """Load a bounded, non-symlink manifest; missing/invalid is never Resume."""
+    fd = _open_regular_nofollow(manifest_path)
+    try:
+        with os.fdopen(fd, "rb") as stream:
+            data = stream.read(MAX_MANIFEST_BYTES + 1)
+    except BaseException:
+        # The context manager owns fd after os.fdopen succeeded.
+        raise
+    return parse_manifest(data)
+
+
+def commit_manifest(
+    manifest_path: Path,
+    manifest: ResumeManifest,
+    *,
+    validate_destination: Callable[[], None],
+) -> None:
+    """Persist v2 metadata atomically, requiring durable directory rename.
+
+    The calling sink must have fsynced the complete compressed frame first.
+    A returned success means the rename and containing-directory fsync both
+    completed; an error must never be advertised as a committed checkpoint.
+    """
+    encoded = serialize_manifest(manifest)
+    validate_destination()
+    temporary = manifest_path.with_name(f".{manifest_path.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(encoded)
+            out.flush()
+            os.fsync(out.fileno())
+        validate_destination()
+        os.replace(temporary, manifest_path)
+        directory_fd = os.open(
+            manifest_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def reconcile_part(
+    part_path: Path,
+    manifest: ResumeManifest,
+    *,
+    validate_destination: Callable[[], None],
+) -> int:
+    """Drop only uncommitted tail; never invent a missing checkpoint.
+
+    No create/truncate-to-zero fallback is permitted when the part is absent,
+    shorter than the recorded committed prefix, or not a regular file.
+    """
+    expected = _validate(manifest)[1]
+    validate_destination()
+    fd = os.open(part_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("resume part must be a regular file")
+        actual = os.fstat(fd).st_size
+        if actual < expected:
+            raise ValueError("partial stream shorter than committed manifest")
+        if actual > expected:
+            validate_destination()
+            os.ftruncate(fd, expected)
+            os.fsync(fd)
+        validate_destination()
+        return expected
+    finally:
+        os.close(fd)

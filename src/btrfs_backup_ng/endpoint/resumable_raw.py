@@ -461,6 +461,32 @@ class ResumableRawSink:
         self.close()
 
 
+def _verify_committed_frames(
+    fd: int, manifest: ResumeManifest, directory_fd: int, guard: DirectoryGuard
+) -> None:
+    """Verify existing compressed checkpoint bytes without retransmission.
+
+    The index digest alone does not prove the disk still contains the
+    compressed payload it originally described. Hash each committed frame
+    before authorizing new appends, and never truncate/correct damaged frames.
+    """
+    for entry in manifest.checkpoints:
+        guard.validate_fd(directory_fd)
+        os.lseek(fd, entry.compressed_offset, os.SEEK_SET)
+        digest = hashlib.sha256()
+        remaining = entry.compressed_length
+        while remaining:
+            chunk = os.read(fd, min(1024 * 1024, remaining))
+            if not chunk:
+                raise ValueError("checkpoint compressed payload is unexpectedly short")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if not hmac.compare_digest(digest.hexdigest(), entry.compressed_sha256):
+            raise ValueError(
+                f"compressed checkpoint {entry.sequence} checksum mismatch"
+            )
+
+
 def load_existing(
     root: Path,
     snapshot_name: str,
@@ -498,6 +524,7 @@ def load_existing(
         current = os.fstat(part_fd).st_size
         if current < target:
             raise ValueError("partial shorter than committed checkpoints")
+        _verify_committed_frames(part_fd, manifest, directory_fd, guard)
         if current > target:
             guard.validate_fd(directory_fd)
             os.ftruncate(part_fd, target)

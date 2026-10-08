@@ -179,6 +179,21 @@ class TestResumableRawSink(unittest.TestCase):
             )
         self.assertEqual((self.root / filename).read_bytes(), b"frame")
 
+    def test_corrupt_committed_compressed_frame_refuses_resume(self):
+        with self.open_new() as sink:
+            sink.append_frame(raw_sha256="a" * 64, raw_length=1, frame=b"frame")
+            filename = sink.part_name
+        (self.root / filename).write_bytes(b"frAme")
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            self.api.load_existing(
+                self.root,
+                "snap",
+                TRANSFER_ID,
+                Guard(self.root),
+                expected_manifest=self.manifest,
+            )
+        self.assertEqual((self.root / filename).read_bytes(), b"frAme")
+
     def test_mount_replacement_refuses_append_to_underlying_directory(self):
         with self.open_new() as sink:
             detached = self.root.with_name(self.root.name + "-detached")

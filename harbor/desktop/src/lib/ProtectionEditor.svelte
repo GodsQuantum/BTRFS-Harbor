@@ -37,8 +37,14 @@
 		type SshDestinationFields
 	} from './config';
 	import BackupProgress from './BackupProgress.svelte';
+	import TransferProgress from './TransferProgress.svelte';
 	import { translate, type Locale, type TranslationKey } from './i18n';
-	import type { BackupProgressEvent, ProfileRuntime } from './status';
+	import {
+		upsertTransferProgress,
+		type BackupProgressEvent,
+		type ProfileRuntime,
+		type TransferProgressEvent
+	} from './status';
 
 	export let config: HarborConfig;
 	export let profileId: string | undefined = undefined;
@@ -56,6 +62,7 @@
 	let destinationValidated = false;
 	let validatingDestination = false;
 	let backupProgress: BackupProgressEvent | null = null;
+	let transferProgress: TransferProgressEvent[] = [];
 	let backupDetail = '';
 	let backupEngine = '';
 	let discoveredSources: DiscoveredSource[] = [];
@@ -307,6 +314,7 @@
 		error = '';
 		message = '';
 		backupProgress = null;
+		transferProgress = [];
 		backupDetail = '';
 		backupEngine = '';
 		backingUp = true;
@@ -314,6 +322,10 @@
 			const draft = await validatedDraft();
 			if (!draft) return;
 			await runDraftBackup(draft.config, draft.profile.id, (event) => {
+				if (event.event === 'transfer_progress') {
+					transferProgress = upsertTransferProgress(transferProgress, event);
+					return;
+				}
 				if (event.phase === 'engine') backupEngine = event.message;
 				if (event.event === 'output') {
 					backupDetail = event.message;
@@ -707,6 +719,7 @@
 		engineLabel={backupEngine}
 		{locale}
 	/>
+	<TransferProgress events={transferProgress} {locale} />
 
 	<div class="editor-actions">
 		<div class="editor-feedback">

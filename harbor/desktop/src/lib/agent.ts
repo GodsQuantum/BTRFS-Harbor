@@ -5,6 +5,7 @@ import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from '.
 import {
 	demoStatus,
 	type BackupProgressEvent,
+	type BackupStreamEvent,
 	type DashboardStatus,
 	type EngineStatus,
 	type ProfileRuntime
@@ -337,7 +338,7 @@ export async function loadDashboardStatus(): Promise<DashboardStatus> {
 export async function runDraftBackup(
 	config: HarborConfig,
 	profileId: string,
-	onProgress?: (event: BackupProgressEvent) => void
+	onProgress?: (event: BackupStreamEvent) => void
 ): Promise<void> {
 	if (!isTauri()) {
 		for (const event of [
@@ -352,7 +353,7 @@ export async function runDraftBackup(
 		return;
 	}
 
-	const channel = new Channel<BackupProgressEvent>();
+	const channel = new Channel<BackupStreamEvent>();
 	channel.onmessage = (event) => onProgress?.(event);
 	await invoke<void>('send_draft_now_stream', {
 		configuration: JSON.stringify(config),
@@ -363,7 +364,7 @@ export async function runDraftBackup(
 
 export async function sendProfileNow(
 	profileId: string,
-	onProgress?: (event: BackupProgressEvent) => void
+	onProgress?: (event: BackupStreamEvent) => void
 ): Promise<void> {
 	if (!isTauri()) {
 		for (const event of [
@@ -379,7 +380,7 @@ export async function sendProfileNow(
 		return;
 	}
 
-	const channel = new Channel<BackupProgressEvent>();
+	const channel = new Channel<BackupStreamEvent>();
 	channel.onmessage = (event) => onProgress?.(event);
 	await invoke<void>('send_snapshot_now_stream', { profileId, onEvent: channel });
 }

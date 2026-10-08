@@ -49,6 +49,120 @@ export interface BackupProgressEvent {
 	stream?: 'stdout' | 'stderr';
 }
 
+export interface TransferProgressEvent {
+	schema: 1;
+	event: 'transfer_progress';
+	volume: string;
+	snapshot: string;
+	destination: string;
+	bytes_target: number | null;
+	bytes_source: number | null;
+	total_estimate: number | null;
+	estimate_kind: string | null;
+	bytes_per_second: number | null;
+	elapsed_seconds: number | null;
+	eta_seconds: number | null;
+	measurement: string;
+	certainty: 'unknown-total' | 'estimated-total' | string;
+}
+
+export type BackupStreamEvent = BackupProgressEvent | TransferProgressEvent;
+
+export interface TransferProgressSummary {
+	bytesTarget: number;
+	bytesPerSecond: number;
+	elapsedSeconds: number;
+	percent: number | null;
+	etaSeconds: number | null;
+	estimated: boolean;
+}
+
+function transferKey(event: TransferProgressEvent): string {
+	return `${event.volume}\u0000${event.snapshot}\u0000${event.destination}`;
+}
+
+export function upsertTransferProgress(
+	events: TransferProgressEvent[],
+	event: TransferProgressEvent
+): TransferProgressEvent[] {
+	const key = transferKey(event);
+	const next = events.filter((candidate) => transferKey(candidate) !== key);
+	next.push(event);
+	return next;
+}
+
+export function aggregateTransferProgress(
+	events: TransferProgressEvent[]
+): TransferProgressSummary {
+	const bytesTarget = events.reduce((sum, event) => sum + Math.max(0, event.bytes_target ?? 0), 0);
+	const bytesPerSecond = events.reduce(
+		(sum, event) => sum + Math.max(0, event.bytes_per_second ?? 0),
+		0
+	);
+	const elapsedSeconds = events.reduce(
+		(maximum, event) => Math.max(maximum, Math.max(0, event.elapsed_seconds ?? 0)),
+		0
+	);
+
+	const comparableTotals =
+		events.length > 0 &&
+		events.every(
+			(event) =>
+				event.total_estimate !== null &&
+				event.total_estimate > 0 &&
+				event.certainty === 'estimated-total'
+		);
+
+	if (!comparableTotals) {
+		return {
+			bytesTarget,
+			bytesPerSecond,
+			elapsedSeconds,
+			percent: null,
+			etaSeconds: null,
+			estimated: false
+		};
+	}
+
+	const total = events.reduce((sum, event) => sum + (event.total_estimate ?? 0), 0);
+	const percent = total > 0 ? Math.min(100, (bytesTarget / total) * 100) : null;
+	const remaining = Math.max(0, total - bytesTarget);
+	const etaSeconds = bytesPerSecond > 0 ? remaining / bytesPerSecond : null;
+
+	return {
+		bytesTarget,
+		bytesPerSecond,
+		elapsedSeconds,
+		percent,
+		etaSeconds,
+		estimated: true
+	};
+}
+
+export function formatBytesBinary(bytes: number): string {
+	const safe = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
+	const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+	let value = safe;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit += 1;
+	}
+	return unit === 0 ? `${Math.round(value)} ${units[unit]}` : `${value.toFixed(2)} ${units[unit]}`;
+}
+
+export function formatRateBinary(bytesPerSecond: number): string {
+	return `${formatBytesBinary(bytesPerSecond)}/s`;
+}
+
+export function formatDuration(seconds: number): string {
+	const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const secs = total % 60;
+	return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
 export function backupProgressPercent(event: BackupProgressEvent | null | undefined): number {
 	if (!event) return 0;
 	if (event.event === 'finished') return 100;

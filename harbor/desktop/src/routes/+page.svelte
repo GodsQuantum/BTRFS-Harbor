@@ -66,6 +66,7 @@
 		type TranslationKey
 	} from '#lib/i18n.ts';
 	import BackupProgress from '#lib/BackupProgress.svelte';
+	import TransferProgress from '#lib/TransferProgress.svelte';
 	import EngineManager from '#lib/EngineManager.svelte';
 	import EngineStatusRow from '#lib/EngineStatusRow.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
@@ -76,7 +77,9 @@
 		demoStatus,
 		protectionState,
 		runtimeRepresentsScheduledJob,
+		upsertTransferProgress,
 		type BackupProgressEvent,
+		type TransferProgressEvent,
 		type DashboardStatus,
 		type ProfileRuntime
 	} from '#lib/status.ts';
@@ -97,6 +100,7 @@
 	let loading = true;
 	let sending = false;
 	let backupProgress: BackupProgressEvent | null = null;
+	let transferProgress: TransferProgressEvent[] = [];
 	let backupDetail = '';
 	let backupEngine = '';
 	let dashboard: DashboardStatus = demoStatus;
@@ -283,10 +287,15 @@
 		}
 		sending = true;
 		backupProgress = null;
+		transferProgress = [];
 		backupDetail = '';
 		backupEngine = '';
 		try {
 			await sendProfileNow(dashboard.profileId, (event) => {
+				if (event.event === 'transfer_progress') {
+					transferProgress = upsertTransferProgress(transferProgress, event);
+					return;
+				}
 				if (event.phase === 'engine') backupEngine = event.message;
 				if (event.event === 'output') backupDetail = event.message;
 				else backupProgress = event;
@@ -595,6 +604,7 @@
 							engineLabel={backupEngine}
 							{locale}
 						/>
+						<TransferProgress events={transferProgress} {locale} />
 					</div>
 				</article>
 

@@ -718,6 +718,28 @@ pub(crate) fn emit_progress(
     Ok(())
 }
 
+fn engine_stream_line(stream: &str, phase: &str, line: &str) -> Result<String> {
+    if stream == "stdout"
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+        && value.get("event").and_then(serde_json::Value::as_str) == Some("transfer_progress")
+        && value.get("schema").and_then(serde_json::Value::as_u64) == Some(1)
+    {
+        return Ok(serde_json::to_string(&value)?);
+    }
+    progress_line("output", phase, line, Some(stream))
+}
+
+fn emit_engine_stream_line(stream: &str, phase: &str, line: &str) -> Result<()> {
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{}", engine_stream_line(stream, phase, line)?)?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn enable_engine_progress(command: &mut Command) {
+    command.env("BTRFS_BACKUP_NG_PROGRESS_JSONL", "1");
+}
+
 fn run_streaming_command(mut command: Command, phase: &str) -> Result<ExitStatus> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().context("cannot start backup subprocess")?;
@@ -744,7 +766,7 @@ fn run_streaming_command(mut command: Command, phase: &str) -> Result<ExitStatus
     });
 
     for (stream, line) in rx {
-        emit_progress("output", phase, &line, Some(stream))?;
+        emit_engine_stream_line(stream, phase, &line)?;
     }
 
     let status = child.wait().context("cannot wait for backup subprocess")?;
@@ -789,6 +811,7 @@ fn execute_profile_jsonl(
     emit_progress("phase", "backup", "Running btrfs-backup-ng", None)?;
     let mut engine = Command::new(&engine_resolution.executable);
     engine.arg("-c").arg(generated_path).arg("run");
+    enable_engine_progress(&mut engine);
     let status = run_streaming_command(engine, "backup")?;
     if !status.success() {
         bail!("btrfs-backup-ng run failed with {status}");
@@ -1726,6 +1749,42 @@ mod tests {
             engine_progress_message(&system),
             "System engine · btrfs-backup-ng 0.10.1 · /usr/bin/btrfs-backup-ng"
         );
+    }
+
+    #[test]
+    fn engine_transfer_telemetry_is_forwarded_without_log_wrapping() {
+        let line = r#"{"schema":1,"event":"transfer_progress","volume":"/home","bytes_target":2048,"bytes_per_second":1024.0}"#;
+        let raw = engine_stream_line("stdout", "backup", line).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["event"], "transfer_progress");
+        assert_eq!(value["schema"], 1);
+        assert_eq!(value["volume"], "/home");
+        assert_eq!(value["bytes_target"], 2048);
+        assert!(value.get("message").is_none());
+    }
+
+    #[test]
+    fn normal_engine_output_remains_a_harbor_output_event() {
+        let raw =
+            engine_stream_line("stdout", "backup", "Transfer completed successfully").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["event"], "output");
+        assert_eq!(value["phase"], "backup");
+        assert_eq!(value["message"], "Transfer completed successfully");
+        assert_eq!(value["stream"], "stdout");
+    }
+
+    #[test]
+    fn harbor_backup_command_explicitly_enables_machine_progress() {
+        let mut command = Command::new("/usr/bin/btrfs-backup-ng");
+        enable_engine_progress(&mut command);
+        let enabled = command
+            .get_envs()
+            .find(|(name, _)| name.to_string_lossy() == "BTRFS_BACKUP_NG_PROGRESS_JSONL")
+            .and_then(|(_, value)| value)
+            .map(|value| value == "1")
+            .unwrap_or(false);
+        assert!(enabled);
     }
 
     #[test]

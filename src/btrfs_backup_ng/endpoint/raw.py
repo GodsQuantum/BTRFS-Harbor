@@ -909,13 +909,21 @@ class RawEndpoint(Endpoint):
         self._progress_monitor = None
         if progress_jsonl_enabled() and not getattr(self, "_is_remote", False):
             context = progress_context or {}
+            comparable_total = (
+                context.get("total_estimate")
+                if not self.compress and not self.encrypt
+                else None
+            )
+            comparable_kind = (
+                context.get("estimate_kind") if comparable_total is not None else None
+            )
             sampler = FileSizeProgressSampler(
                 part_path,
                 volume=str(context.get("volume") or snapshot_name),
                 snapshot=str(context.get("snapshot") or snapshot_name),
                 destination=str(context.get("destination") or self.config["path"]),
-                total_estimate=context.get("total_estimate"),
-                estimate_kind=context.get("estimate_kind"),
+                total_estimate=comparable_total,
+                estimate_kind=comparable_kind,
             )
             self._progress_monitor = FileSizeProgressMonitor(sampler, proc).start()
 

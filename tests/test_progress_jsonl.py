@@ -172,8 +172,8 @@ def test_raw_receive_starts_out_of_band_target_file_monitor(
         progress_context={
             "volume": "/home",
             "destination": str(tmp_path),
-            "total_estimate": None,
-            "estimate_kind": None,
+            "total_estimate": 4096,
+            "estimate_kind": "snapshot-logical",
         },
     )
 
@@ -183,4 +183,6 @@ def test_raw_receive_starts_out_of_band_target_file_monitor(
     assert captured["sampler"].volume == "/home"
     assert captured["sampler"].snapshot == "home-20261008"
     assert captured["sampler"].destination == str(tmp_path)
+    assert captured["sampler"].total_estimate is None
+    assert captured["sampler"].estimate_kind is None
     assert endpoint._progress_monitor is not None

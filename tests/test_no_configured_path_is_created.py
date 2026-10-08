@@ -118,6 +118,8 @@ REGISTRY: dict[str, tuple[str, ...]] = {
     "transaction.py::set_transaction_log": (STATE,),
     "cli/dispatcher.py::show_migration_notice": (STATE,),
     "cli/run.py::_run_lock_path": (STATE,),
+    # Native XDG application state, never the actual backup target directory.
+    "cli/checkpoint_v2_cmd.py::_state_root": (STATE,),
     "core/chunked_transfer.py::ChunkedStreamWriter.write_chunks": (STATE,),
     "core/chunked_transfer.py::ChunkedTransferManager._ensure_cache_dir": (STATE,),
     "core/chunked_transfer.py::ChunkedTransferManager.create_transfer": (STATE,),

@@ -246,6 +246,7 @@ _btrfs_backup_ng() {
                         local -a subs
                         subs=(
                             'backfill-metadata'
+                            'checkpoint-v2'
                             'encrypt'
                             'list'
                             'verify'
@@ -260,6 +261,57 @@ _btrfs_backup_ng() {
                                     '--dry-run[Show which streams would be backfilled without writing sidecars]' \
                                     '--json[Output in JSON format for scripting]' \
                                     '--ssh-sudo[Use sudo for remote commands on a raw+ssh target]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '*:: :->rest'
+                                ;;
+                            checkpoint-v2)
+                                _arguments \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--source[]:file:_files' \
+                                    '--source-mode[]:value:(path latest-snapper selected-snapper create-snapper)' \
+                                    '--name[]:name:' \
+                                    '--profile-id[]:file:_files' \
+                                    '--parent[]:parent:' \
+                                    '--checkpoint-size-mib[]:checkpoint_size_mib:' \
+                                    '--performance[]:value:(balanced fast)' \
+                                    '--allow-local[]' \
+                                    '--experimental[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--snapper-config[]:snapper_config:' \
+                                    '--snapper-number[]:snapper_number:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--name[]:name:' \
+                                    '--transfer-id[]:transfer_id:' \
+                                    '--allow-local[]' \
+                                    '--experimental[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--transfer-id[]:transfer_id:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--transfer-id[]:transfer_id:' \
+                                    '--state-dir[]:file:_files' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--transfer-id[]:transfer_id:' \
+                                    '--state-dir[]:file:_files' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--name[]:name:' \
+                                    '--transfer-id[]:transfer_id:' \
+                                    '--confirm[]' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
                                     '*:: :->rest'

@@ -65,6 +65,7 @@ OPTIONAL_IDENTITY = frozenset(
         "snapper_type",
         "snapper_pre_number",
         "parent_path",
+        "parent_backup_name",
     }
 )
 CHECKPOINT_FIELDS = frozenset(
@@ -141,6 +142,17 @@ def _validate_identity(identity: dict[str, str | int | None]) -> None:
         raise ValueError("incremental parent path is required and must be absolute")
     if parent is None and parent_path is not None:
         raise ValueError("incremental parent path without UUID is not allowed")
+    parent_name = identity.get("parent_backup_name")
+    if parent_name is not None and (
+        parent is None
+        or not isinstance(parent_name, str)
+        or not parent_name
+        or parent_name in (".", "..")
+        or "/" in parent_name
+        or chr(0) in parent_name
+        or len(parent_name.encode("utf-8")) > 200
+    ):
+        raise ValueError("invalid incremental parent archive name")
     for name in ("source_volume", "source_path"):
         if not _valid_path(identity[name]):
             raise ValueError(f"invalid source path in identity: {name}")

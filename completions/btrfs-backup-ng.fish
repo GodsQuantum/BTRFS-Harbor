@@ -126,6 +126,51 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw back
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw backfill-metadata' -l dry-run -d 'Show which streams would be backfilled without writing sidecars'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw backfill-metadata' -l json -d 'Output in JSON format for scripting'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw backfill-metadata' -l ssh-sudo -d 'Use sudo for remote commands on a raw+ssh target'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command raw' -a checkpoint-v2 -d 'checkpoint-v2'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l source -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l source-mode -x -a 'path latest-snapper selected-snapper create-snapper'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l name -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l profile-id -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l parent -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l checkpoint-size-mib -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l performance -x -a 'balanced fast'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l experimental
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l snapper-config -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l snapper-number -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l name -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l experimental
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l name -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l transfer-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l confirm
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a discard -d 'discard'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a pause -d 'pause'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a resume -d 'resume'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a start -d 'start'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a status -d 'status'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a stop -d 'stop'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command raw' -a encrypt -d 'encrypt'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw encrypt' -s h -l help -d 'show this help message and exit'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw encrypt' -l encrypt -d 'Encryption method to apply' -x -a 'gpg openssl_enc'

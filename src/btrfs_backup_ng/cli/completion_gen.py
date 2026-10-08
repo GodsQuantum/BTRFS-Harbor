@@ -111,6 +111,14 @@ def _q(text: str) -> str:
     return text.replace("'", "'\\''")
 
 
+def _flags_below(node: dict[str, Any]) -> list[dict[str, Any]]:
+    """Include every nested command leaf, not only two parser levels."""
+    flags = list(node["flags"])
+    for child in node["subcommands"].values():
+        flags.extend(_flags_below(child))
+    return flags
+
+
 def _all_options(flags: list[dict[str, Any]]) -> list[str]:
     out: list[str] = []
     for f in flags:
@@ -142,6 +150,10 @@ def generate_bash(tree: dict[str, Any]) -> str:
         contexts = [(cmd, node)] + [
             (f"{cmd} {s}", sn) for s, sn in sorted(node["subcommands"].items())
         ]
+        for snode in node["subcommands"].values():
+            contexts.extend(
+                ("nested", leafnode) for leafnode in snode["subcommands"].values()
+            )
         for _, ctx in contexts:
             for f in ctx["flags"]:
                 opts = " ".join(f["short"] + f["long"])
@@ -197,7 +209,7 @@ def generate_bash(tree: dict[str, Any]) -> str:
             subs = " ".join(sorted(node["subcommands"]))
             lines.append('            case "$sub" in')
             for sub, snode in sorted(node["subcommands"].items()):
-                sopts = " ".join(_all_options(snode["flags"]))
+                sopts = " ".join(_all_options(_flags_below(snode)))
                 lines.append(f"                {sub})")
                 lines.append(
                     f'                    COMPREPLY=($(compgen -W "{sopts} {own} $global_opts" -- "$cur")) ;;'
@@ -262,7 +274,7 @@ def generate_zsh(tree: dict[str, Any]) -> str:
             for sub, snode in sorted(node["subcommands"].items()):
                 lines.append(f"                            {sub})")
                 lines.append("                                _arguments \\")
-                for f in snode["flags"] + node["flags"]:
+                for f in _flags_below(snode) + node["flags"]:
                     for o in f["short"] + f["long"]:
                         spec = f"'{o}[{_q(f['help'])}]"
                         if f["takes_value"]:
@@ -369,9 +381,14 @@ def generate_fish(tree: dict[str, Any]) -> str:
                 f"complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_command {cmd}' "
                 f"-a {sub} -d '{_q(sub)}'"
             )
-            for f in snode["flags"]:
+            for f in _flags_below(snode):
                 lines.extend(
                     flag_line(f"__fish_btrfs_backup_ng_using_subcommand {cmd} {sub}", f)
+                )
+            for leaf in sorted(snode["subcommands"]):
+                lines.append(
+                    f"complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand {cmd} {sub}' "
+                    f"-a {leaf} -d '{_q(leaf)}'"
                 )
         lines.append("")
 

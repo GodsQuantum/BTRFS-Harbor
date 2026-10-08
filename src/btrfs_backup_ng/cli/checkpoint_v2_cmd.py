@@ -237,6 +237,26 @@ def _resolve_source_choice(args: argparse.Namespace, target_root: Path) -> None:
     args.snapper_number = selected.snapshot.number
 
 
+def _saved_parent_name(root: Path, uuid_string: str) -> str:
+    """Require a completed authoritative incremental base on this same target."""
+    for snapshot in discover_raw_snapshots(root):
+        if (
+            snapshot.source_uuid == uuid_string
+            and snapshot.provenance_origin != "filename-inferred"
+            and snapshot.stream_completeness == "complete"
+            and isinstance(snapshot.checksum_value, str)
+            and len(snapshot.checksum_value) == 64
+            and all(ch in "0123456789abcdef" for ch in snapshot.checksum_value)
+            and snapshot.stream_path.is_file()
+            and snapshot.metadata_path.is_file()
+        ):
+            return snapshot.name
+    raise ValueError(
+        "incremental parent is not an authoritative complete backup at this destination; "
+        "save the parent or send a full backup"
+    )
+
+
 def _new_manifest(
     args: argparse.Namespace, stable: str
 ) -> tuple[ResumeManifest, SourceFingerprint, Path | None]:
@@ -251,6 +271,9 @@ def _new_manifest(
         source = replace(source, parent_uuid=parent.uuid)
         if args.source == args.parent or parent.uuid == source.uuid:
             raise ValueError("Btrfs incremental parent cannot equal source")
+        saved_parent_name = _saved_parent_name(Path(args.target), parent.uuid)
+    else:
+        saved_parent_name = None
     size = args.checkpoint_size_mib
     if type(size) is not int or not 1 <= size <= 1024:
         raise ValueError("checkpoint size must be 1..1024 MiB")
@@ -274,6 +297,7 @@ def _new_manifest(
     }
     if parent_path is not None:
         identity["parent_path"] = str(parent_path)
+        identity["parent_backup_name"] = saved_parent_name
     if args.snapper_config is not None:
         identity["snapper_config"] = args.snapper_config
         identity["snapper_number"] = args.snapper_number
@@ -562,6 +586,12 @@ def _execute(args: argparse.Namespace) -> int:
         if parent is not None:
             parent_probe = _source_check(str(parent))
             source = replace(source, parent_uuid=parent_probe.uuid)
+            recorded_name = manifest.identity.get("parent_backup_name")
+            if (
+                recorded_name is not None
+                and _saved_parent_name(root, parent_probe.uuid) != recorded_name
+            ):
+                raise ValueError("incremental parent archive identity changed")
         result = _send_worker(
             root=root,
             name=args.name,

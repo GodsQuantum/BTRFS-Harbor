@@ -39,6 +39,18 @@ _btrfs_backup_ng() {
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --gpg-keyring)
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        --target)
+            COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        --source)
+            COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        --source-mode)
+            COMPREPLY=($(compgen -W "path latest-snapper selected-snapper create-snapper" -- "$cur")); return ;;
+        --profile-id)
+            COMPREPLY=($(compgen -f -- "$cur")); return ;;
+        --performance)
+            COMPREPLY=($(compgen -W "balanced fast" -- "$cur")); return ;;
+        --state-dir)
+            COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --compress)
             COMPREPLY=($(compgen -W "none bzip2 gzip lz4 lzo lzop pbzip2 pigz xz zstd" -- "$cur")); return ;;
         --to)
@@ -121,6 +133,8 @@ _btrfs_backup_ng() {
             case "$sub" in
                 backfill-metadata)
                     COMPREPLY=($(compgen -W "-h --help --dry-run --json --ssh-sudo -h --help $global_opts" -- "$cur")) ;;
+                checkpoint-v2)
+                    COMPREPLY=($(compgen -W "-h --help -h --help --target --source --source-mode --name --profile-id --parent --checkpoint-size-mib --performance --allow-local --experimental --state-dir --snapper-config --snapper-number -h --help --target --name --transfer-id --allow-local --experimental --state-dir -h --help --target --transfer-id -h --help --transfer-id --state-dir -h --help --transfer-id --state-dir -h --help --target --name --transfer-id --confirm --allow-local --state-dir -h --help $global_opts" -- "$cur")) ;;
                 encrypt)
                     COMPREPLY=($(compgen -W "-h --help --encrypt --gpg-recipient --gpg-keyring --openssl-cipher --shred --yes --dry-run --json -h --help $global_opts" -- "$cur")) ;;
                 list)
@@ -128,7 +142,7 @@ _btrfs_backup_ng() {
                 verify)
                     COMPREPLY=($(compgen -W "-h --help --snapshot --json --ssh-sudo -h --help $global_opts" -- "$cur")) ;;
                 *)
-                    COMPREPLY=($(compgen -W "backfill-metadata encrypt list verify -h --help $global_opts" -- "$cur")) ;;
+                    COMPREPLY=($(compgen -W "backfill-metadata checkpoint-v2 encrypt list verify -h --help $global_opts" -- "$cur")) ;;
             esac ;;
         restore)
             COMPREPLY=($(compgen -W "-h --help -l --list -s --snapshot --before -a --all -i --interactive --dry-run --no-incremental --skip-verify --overwrite --in-place --yes-i-know-what-i-am-doing --prefix --timestamp-format --ssh-sudo --ssh-key --ssh-auth-sock --compress --rate-limit --gpg-keyring --openssl-cipher --fs-checks --no-fs-checks --ssh-host-key-policy --skip-remote-lock -c --config --volume --target --list-volumes --to --status --unlock --cleanup --progress --no-progress $global_opts" -- "$cur")) ;;

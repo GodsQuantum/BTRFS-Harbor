@@ -249,3 +249,60 @@ A \fBraw+ssh://\fR target is a POSIX-shell-remote model: btrfs-backup-ng runs
 \fBsh\fR, \fBcat\fR, \fBmv\fR, and \fBstat\fR over SSH on the remote host. For a
 non-POSIX or SMB/NFS/cloud destination, mount it locally and use a \fBraw://\fR
 path instead.
+.SS checkpoint-v2 (EXPERIMENTAL)
+An explicitly opt-in checkpointed raw backup engine, separate from the
+existing raw target commands. It has not yet passed end-to-end disaster
+recovery acceptance on real Btrfs and NFS mount-loss scenarios. Do not
+replace a verified disaster-recovery backup with this experimental mode.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 start
+requires \fB\-\-target\fR \fIPATH\fR,
+\fB\-\-name\fR \fINAME\fR,
+\fB\-\-profile-id\fR \fIIDENTITY\fR,
+and \fB\-\-experimental\fR. For direct sources, supply
+\fB\-\-source\fR \fIPATH\fR.
+.PP
+\fB\-\-source-mode\fR
+\fIpath|latest-snapper|selected-snapper|create-snapper\fR
+selects the source policy. For Snapper policies provide
+\fB\-\-snapper-config\fR \fICONFIG\fR, plus
+\fB\-\-snapper-number\fR \fINUMBER\fR when selecting a specific
+snapshot. Creating a new snapshot uses the native Snapper command.
+Snapper cleaning is pinned until completion or explicit discard.
+.PP
+\fB\-\-parent\fR \fIPATH\fR requests an incremental send parent.
+The exact immutable parent UUID and path are recorded and verified on Resume.
+An incremental send requires an authoritative complete backup of this parent
+already present in the SAME target; otherwise use a full send.
+\fB\-\-checkpoint-size-mib\fR \fISIZE\fR selects fixed raw chunk size
+(default 128 MiB). \fB\-\-performance\fR \fIbalanced|fast\fR
+selects a native resource/compression profile.
+\fB\-\-allow-local\fR must be explicitly set when the destination is not
+NFS/SMB, avoiding an accidental write to the underlying directory after
+a network mount disappears. The backup target directory is never created.
+.PP
+\fB\-\-state-dir\fR \fIPATH\fR overrides the default private local state
+(XDG_STATE_HOME/btrfs-harbor/checkpoint-v2) for persisted worker controls.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 status
+requires \fB\-\-target\fR and \fB\-\-transfer-id\fR and inspects a manifest
+without writing data.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 resume
+requires \fB\-\-target\fR,
+\fB\-\-name\fR, \fB\-\-transfer-id\fR, and \fB\-\-experimental\fR
+(with \fB\-\-allow-local\fR for a non-network target).
+It replays the immutable source locally from byte 0, verifies each
+committed raw checkpoint digest, and sends only missing frames.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 pause
+or \fBstop\fR uses \fB\-\-transfer-id\fR to persist a worker request.
+Pause finishes the current checkpoint and stops its worker.
+Stop may also signal a confirmed active Btrfs send via pidfd to avoid
+PID reuse; a queued request is not an acknowledgement of completion.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 discard
+requires \fB\-\-target\fR, \fB\-\-name\fR,
+\fB\-\-transfer-id\fR, and explicit \fB\-\-confirm\fR.
+This removes only the resumable partial, never a completed archive;
+Snapper native cleanup pinning is released after deletion and UUID check.

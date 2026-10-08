@@ -58,7 +58,7 @@ def _sealed_sidecar(sink: ResumableRawSink) -> bytes:
             str(sink.manifest.identity["source_path"])
         ).name,
         "parent_uuid": sink.manifest.identity["parent_uuid"],
-        "parent_name": None,
+        "parent_name": sink.manifest.identity.get("parent_backup_name"),
         "created": datetime.now(timezone.utc).isoformat(),
         "size": total,
         "pipeline": {

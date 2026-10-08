@@ -1062,7 +1062,6 @@ async fn checkpoint_action(
 
 #[tauri::command]
 async fn checkpoint_transfers(app: tauri::AppHandle, target: String) -> Result<String, String> {
-    let root = Path::new(&target);
     // Reject missing/symlink/nonabsolute targets without creating them.
     // Check presence of v2 manifests by filenames only; never follow symlinks.
     let has_manifests = tokio::task::spawn_blocking({

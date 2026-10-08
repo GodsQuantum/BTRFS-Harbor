@@ -85,5 +85,33 @@ class PinTests(unittest.TestCase):
         self.assertEqual(self.state.cleanup, "")
 
 
+class HarborCreatedSnapshotTest(unittest.TestCase):
+    def test_new_snapshot_stays_cleanup_exempt_until_backup_commits(self):
+        with tempfile.TemporaryDirectory(prefix="harbor-new-pin-") as path:
+            state = m.LiveSnapshot("created-uuid", "")
+            modified = []
+
+            def query(_config, _number):
+                return state
+
+            def modify(config, number, cleanup):
+                nonlocal state
+                modified.append(cleanup)
+                state = m.LiveSnapshot("created-uuid", cleanup)
+
+            manager = m.PinManager(Path(path) / "pins.json", query=query, modify=modify)
+            manager.acquire(
+                "root",
+                71,
+                "created-uuid",
+                "transfer-id",
+                restore_cleanup="number",
+            )
+            self.assertEqual(state.cleanup, "")
+            manager.release("root", 71, "created-uuid", "transfer-id")
+            self.assertEqual(state.cleanup, "number")
+            self.assertEqual(modified, ["number"])
+
+
 if __name__ == "__main__":
     unittest.main()

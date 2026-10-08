@@ -112,20 +112,38 @@ class PinManager:
         return f"{config}:{number}"
 
     def acquire(
-        self, config: str, number: int, snapshot_uuid: str, transfer_id: str
+        self,
+        config: str,
+        number: int,
+        snapshot_uuid: str,
+        transfer_id: str,
+        *,
+        restore_cleanup: str | None = None,
     ) -> None:
         key = self._key(config, number)
         if not snapshot_uuid or not transfer_id:
             raise ValueError("pin requires immutable source UUID and transfer id")
+        if restore_cleanup is not None and restore_cleanup not in (
+            "timeline",
+            "number",
+            "empty-pre-post",
+        ):
+            raise ValueError("invalid native Snapper restore cleanup algorithm")
         with self._locked() as state:
             item = state["pins"].get(key)
             current = self.query(config, number)
             if current is None or current.uuid != snapshot_uuid:
                 raise ValueError("cannot pin missing or different source UUID")
             if item is None:
+                if restore_cleanup is not None and current.cleanup != "":
+                    raise ValueError(
+                        "a Harbor-created Snapper source must initially be cleanup-exempt"
+                    )
                 item = {
                     "uuid": snapshot_uuid,
-                    "original_cleanup": current.cleanup,
+                    "original_cleanup": restore_cleanup
+                    if restore_cleanup is not None
+                    else current.cleanup,
                     "leases": [transfer_id],
                 }
                 state["pins"][key] = item
@@ -143,6 +161,13 @@ class PinManager:
                 return
             if item["uuid"] != snapshot_uuid:
                 raise ValueError("existing pin identity mismatch")
+            if (
+                restore_cleanup is not None
+                and item["original_cleanup"] != restore_cleanup
+            ):
+                raise ValueError(
+                    "Snapper cleanup restoration policy changed during pin"
+                )
             if transfer_id in item["leases"]:
                 return
             item["leases"].append(transfer_id)

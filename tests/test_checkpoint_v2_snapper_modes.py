@@ -118,6 +118,7 @@ def test_snapper_create_uses_native_snapshot_creation_command(tmp_path, monkeypa
     assert commands
     assert commands[0][:4] == ["snapper", "-c", "root", "create"]
     assert "--print-number" in commands[0]
+    assert commands[0][commands[0].index("--cleanup-algorithm") + 1] == ""
     assert args.snapper_number == 71
     assert args.source == str(snap.subvolume_path)
 

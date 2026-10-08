@@ -192,7 +192,7 @@ def _resolve_source_choice(args: argparse.Namespace, target_root: Path) -> None:
                 "single",
                 "--print-number",
                 "--cleanup-algorithm",
-                "number",
+                "",
                 "--description",
                 "Btrfs Harbor checkpointed backup",
             ],
@@ -520,6 +520,9 @@ def _execute(args: argparse.Namespace) -> int:
                 args.snapper_number,
                 source.uuid,
                 manifest.transfer_id,
+                restore_cleanup=(
+                    "number" if args.source_mode == "create-snapper" else None
+                ),
             )
         try:
             result = _send_worker(

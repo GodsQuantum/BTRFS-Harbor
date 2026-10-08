@@ -50,7 +50,9 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 
 The easiest way to **try Harbor or run manual backups** is the **Portable AppImage**. It stays portable: opening it does not install Harbor. It can detect the current Btrfs layout, choose sources and destinations, validate the target, browse backup snapshots, run **Back up now**, and stage a restore. Privileged Btrfs operations use polkit only when needed.
 
-Install Harbor on the system only when you want **automatic/background backups** that keep working after the AppImage is closed: systemd scheduling, startup integration and “after each Snapper snapshot” triggers.
+If you close the Harbor window while a manual backup is running, Harbor explains that the backup will continue, hides to a **temporary system-tray icon**, and keeps the transfer alive. The tray menu can reopen Harbor or **stop the active backup**. The tray disappears automatically when the run finishes.
+
+Install Harbor on the system only when you want **scheduled/background backups that start by themselves** while Harbor is not open: systemd scheduling, startup integration and “after each Snapper snapshot” triggers.
 
 The release provides:
 
@@ -63,9 +65,9 @@ The release provides:
 Universal installer:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.3/BTRFS-Harbor-0.2.3-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.3-linux-x86_64.run
-./BTRFS-Harbor-0.2.3-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.4/BTRFS-Harbor-0.2.4-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.4-linux-x86_64.run
+./BTRFS-Harbor-0.2.4-linux-x86_64.run
 ```
 
 Harbor **prefers a compatible system `btrfs-backup-ng` (>= 0.9.12)** when one is already installed. Otherwise it uses the compatible engine bundled with Harbor. Harbor no longer replaces or conflicts with a user-installed upstream engine.

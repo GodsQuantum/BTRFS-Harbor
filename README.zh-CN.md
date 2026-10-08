@@ -50,6 +50,8 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 最简单的试用方式是 **Portable AppImage**。它保持便携：启动时不会安装 Harbor。无需系统安装即可检测 Btrfs/Snapper、选择来源与目标、验证目标、执行**立即备份**、浏览已备份快照并进行分阶段恢复。需要 Btrfs 特权时才通过 polkit 提权。
 
+手动备份正在运行时关闭 Harbor 窗口，Harbor 会提示备份将在**后台继续**，隐藏窗口并保留一个临时**系统托盘图标**。托盘菜单可以重新打开 Harbor 或**停止当前备份**；备份结束后托盘图标会自动消失。
+
 只有在需要关闭 AppImage 后仍持续运行的**自动/后台备份**时才安装 Harbor，例如 systemd 计划任务、开机集成或“每次 Snapper 快照后”触发。
 
 Release 提供：
@@ -63,9 +65,9 @@ Release 提供：
 通用安装器：
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.3/BTRFS-Harbor-0.2.3-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.3-linux-x86_64.run
-./BTRFS-Harbor-0.2.3-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.4/BTRFS-Harbor-0.2.4-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.4-linux-x86_64.run
+./BTRFS-Harbor-0.2.4-linux-x86_64.run
 ```
 
 如果系统已经安装兼容的 **`btrfs-backup-ng` (>= 0.9.12)**，Harbor 会优先使用它；否则使用 Harbor 自带的兼容引擎。Harbor 不再替换或与用户安装的 upstream 引擎冲突。

@@ -50,7 +50,9 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 
 Le moyen le plus simple de **tester Harbor ou faire des sauvegardes manuelles** est l’**AppImage portable**. Elle reste portable : son lancement n’installe rien. Elle détecte Btrfs/Snapper, permet de choisir les sources et la destination, de la valider, de lancer **Sauvegarder maintenant**, de parcourir les snapshots sauvegardés et de préparer une restauration. Les opérations Btrfs privilégiées demandent polkit seulement quand c’est nécessaire.
 
-Installe Harbor sur le système uniquement si tu veux des **sauvegardes automatiques en arrière-plan** qui continuent quand l’AppImage est fermée : planification systemd, démarrage et déclenchement après chaque snapshot Snapper.
+Si tu fermes la fenêtre Harbor pendant une sauvegarde manuelle en cours, Harbor indique que la sauvegarde **continue en arrière-plan**, masque la fenêtre et conserve un **tray temporaire**. Son menu permet de rouvrir Harbor ou **d’arrêter la sauvegarde active**. Le tray disparaît automatiquement à la fin.
+
+Installe Harbor sur le système uniquement si tu veux des **sauvegardes planifiées qui démarrent toutes seules** lorsque Harbor n’est pas ouvert : planification systemd, démarrage et déclenchement après chaque snapshot Snapper.
 
 La release fournit :
 
@@ -63,9 +65,9 @@ La release fournit :
 Installateur universel :
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.3/BTRFS-Harbor-0.2.3-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.3-linux-x86_64.run
-./BTRFS-Harbor-0.2.3-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.4/BTRFS-Harbor-0.2.4-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.4-linux-x86_64.run
+./BTRFS-Harbor-0.2.4-linux-x86_64.run
 ```
 
 Harbor **préfère un `btrfs-backup-ng` système compatible (>= 0.9.12)** s’il existe déjà. Sinon il utilise le moteur compatible embarqué. Harbor ne remplace plus et n’entre plus en conflit avec un moteur upstream installé par l’utilisateur.

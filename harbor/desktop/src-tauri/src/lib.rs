@@ -5,7 +5,17 @@ use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tauri::{Manager, ipc::Channel};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use tauri::{
+    Manager, WindowEvent,
+    ipc::Channel,
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use uuid::Uuid;
@@ -13,6 +23,252 @@ use uuid::Uuid;
 const BUS_NAME: &str = "io.github.GodsQuantum.BtrfsHarbor1";
 const OBJECT_PATH: &str = "/io/github/GodsQuantum/BtrfsHarbor1";
 const INTERFACE: &str = "io.github.GodsQuantum.BtrfsHarbor1";
+const BACKUP_TRAY_ID: &str = "backup-running";
+const BACKUP_TRAY_SHOW_ID: &str = "backup-show";
+const BACKUP_TRAY_STOP_ID: &str = "backup-stop";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackupClosePolicy {
+    CloseNormally,
+    HideToTray,
+    KeepWindowOpen,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BackgroundBackupText {
+    title: &'static str,
+    message: &'static str,
+    no_tray_message: &'static str,
+    show_label: &'static str,
+    stop_label: &'static str,
+    tooltip: &'static str,
+    stopped: &'static str,
+}
+
+fn backup_close_policy(active: bool, tray_available: bool) -> BackupClosePolicy {
+    match (active, tray_available) {
+        (false, _) => BackupClosePolicy::CloseNormally,
+        (true, true) => BackupClosePolicy::HideToTray,
+        (true, false) => BackupClosePolicy::KeepWindowOpen,
+    }
+}
+
+fn background_backup_text(locale: Option<&str>) -> BackgroundBackupText {
+    let locale = locale.unwrap_or_default().to_ascii_lowercase();
+    if locale.starts_with("fr") {
+        BackgroundBackupText {
+            title: "Sauvegarde en cours",
+            message: "La sauvegarde continue en arrière-plan. Btrfs Harbor reste dans la zone de notification jusqu’à la fin. Utilisez son menu pour rouvrir l’application ou arrêter la sauvegarde.",
+            no_tray_message: "Une sauvegarde est en cours. Le système de zone de notification n’est pas disponible, donc Btrfs Harbor doit rester ouvert jusqu’à la fin ou jusqu’à l’arrêt manuel de la sauvegarde.",
+            show_label: "Afficher Btrfs Harbor",
+            stop_label: "Arrêter la sauvegarde",
+            tooltip: "Btrfs Harbor — sauvegarde en cours",
+            stopped: "Sauvegarde arrêtée par l’utilisateur.",
+        }
+    } else if locale.starts_with("zh") {
+        BackgroundBackupText {
+            title: "备份正在进行",
+            message: "备份将在后台继续。Btrfs Harbor 会保留在系统托盘中，直到备份结束。可通过托盘菜单重新打开应用或停止备份。",
+            no_tray_message: "备份正在进行，但系统托盘不可用。请保持 Btrfs Harbor 打开，直到备份完成或手动停止。",
+            show_label: "显示 Btrfs Harbor",
+            stop_label: "停止备份",
+            tooltip: "Btrfs Harbor — 正在备份",
+            stopped: "用户已停止备份。",
+        }
+    } else {
+        BackgroundBackupText {
+            title: "Backup in progress",
+            message: "The backup will continue in the background. Btrfs Harbor will remain in the system tray until it finishes. Use the tray menu to reopen Harbor or stop the backup.",
+            no_tray_message: "A backup is in progress, but the system tray is unavailable. Keep Btrfs Harbor open until the backup finishes or stop it manually.",
+            show_label: "Show Btrfs Harbor",
+            stop_label: "Stop backup",
+            tooltip: "Btrfs Harbor — backup in progress",
+            stopped: "Backup stopped by the user.",
+        }
+    }
+}
+
+fn process_group_target(pid: u32) -> String {
+    format!("-{pid}")
+}
+
+fn backup_stop_signal() -> &'static str {
+    "-INT"
+}
+
+#[derive(Default)]
+struct BackupRuntimeState {
+    active: AtomicBool,
+    tray_available: AtomicBool,
+    hidden_for_backup: AtomicBool,
+    stop_requested: AtomicBool,
+    process_group: Mutex<Option<u32>>,
+}
+
+impl BackupRuntimeState {
+    fn begin(&self) -> Result<(), String> {
+        self.active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "A Btrfs Harbor backup is already running.".to_string())?;
+        self.stop_requested.store(false, Ordering::SeqCst);
+        self.hidden_for_backup.store(false, Ordering::SeqCst);
+        *self
+            .process_group
+            .lock()
+            .expect("backup process mutex poisoned") = None;
+        Ok(())
+    }
+
+    fn set_process_group(&self, pid: u32) {
+        *self
+            .process_group
+            .lock()
+            .expect("backup process mutex poisoned") = Some(pid);
+    }
+
+    fn process_group(&self) -> Option<u32> {
+        *self
+            .process_group
+            .lock()
+            .expect("backup process mutex poisoned")
+    }
+
+    fn finish(&self) {
+        *self
+            .process_group
+            .lock()
+            .expect("backup process mutex poisoned") = None;
+        self.active.store(false, Ordering::SeqCst);
+        self.tray_available.store(false, Ordering::SeqCst);
+        self.stop_requested.store(false, Ordering::SeqCst);
+    }
+}
+
+fn current_background_backup_text() -> BackgroundBackupText {
+    let locale = std::env::var("LC_ALL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var("LANG").ok());
+    background_backup_text(locale.as_deref())
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    let state = app.state::<BackupRuntimeState>();
+    state.hidden_for_backup.store(false, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+async fn stop_active_backup_inner(app: &tauri::AppHandle) -> Result<String, String> {
+    let state = app.state::<BackupRuntimeState>();
+    let Some(pid) = state.process_group() else {
+        return Ok("no-active-backup".to_string());
+    };
+    state.stop_requested.store(true, Ordering::SeqCst);
+    show_main_window(app);
+
+    let target = process_group_target(pid);
+    let output = Command::new("/usr/bin/pkexec")
+        .arg("/usr/bin/kill")
+        .args([backup_stop_signal(), "--", target.as_str()])
+        .output()
+        .await
+        .map_err(|err| format!("Cannot stop the active backup: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("Cannot stop the active backup: {}", output.status)
+        } else {
+            stderr
+        });
+    }
+    Ok("stop-requested".to_string())
+}
+
+#[tauri::command]
+async fn stop_active_backup(app: tauri::AppHandle) -> Result<String, String> {
+    stop_active_backup_inner(&app).await
+}
+
+fn ensure_backup_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.tray_by_id(BACKUP_TRAY_ID).is_some() {
+        app.state::<BackupRuntimeState>()
+            .tray_available
+            .store(true, Ordering::SeqCst);
+        return Ok(());
+    }
+
+    let text = current_background_backup_text();
+    let show = MenuItem::with_id(
+        app,
+        BACKUP_TRAY_SHOW_ID,
+        text.show_label,
+        true,
+        None::<&str>,
+    )
+    .map_err(|err| format!("Cannot create Harbor tray menu: {err}"))?;
+    let stop = MenuItem::with_id(
+        app,
+        BACKUP_TRAY_STOP_ID,
+        text.stop_label,
+        true,
+        None::<&str>,
+    )
+    .map_err(|err| format!("Cannot create Harbor tray menu: {err}"))?;
+    let menu = Menu::with_items(app, &[&show, &stop])
+        .map_err(|err| format!("Cannot create Harbor tray menu: {err}"))?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| "Btrfs Harbor has no default tray icon.".to_string())?;
+
+    TrayIconBuilder::with_id(BACKUP_TRAY_ID)
+        .icon(icon)
+        .tooltip(text.tooltip)
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            BACKUP_TRAY_SHOW_ID => show_main_window(app),
+            BACKUP_TRAY_STOP_ID => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = stop_active_backup_inner(&app).await;
+                });
+            }
+            _ => {}
+        })
+        .build(app)
+        .map_err(|err| format!("Cannot create Harbor system tray icon: {err}"))?;
+
+    app.state::<BackupRuntimeState>()
+        .tray_available
+        .store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+fn remove_backup_tray(app: &tauri::AppHandle) {
+    let _ = app.remove_tray_by_id(BACKUP_TRAY_ID);
+    app.state::<BackupRuntimeState>()
+        .tray_available
+        .store(false, Ordering::SeqCst);
+}
+
+fn finish_background_backup(app: &tauri::AppHandle, success: bool) {
+    let state = app.state::<BackupRuntimeState>();
+    let was_hidden = state.hidden_for_backup.swap(false, Ordering::SeqCst);
+    state.finish();
+    remove_backup_tray(app);
+    if was_hidden {
+        if success {
+            app.exit(0);
+        } else {
+            show_main_window(app);
+        }
+    }
+}
 
 fn appimage_extract_reexec_required(
     appimage: Option<&OsStr>,
@@ -508,32 +764,41 @@ async fn apply_configuration(
     .await
 }
 
-#[tauri::command]
-async fn send_snapshot_now(app: tauri::AppHandle, profile_id: String) -> Result<String, String> {
-    run_privileged_profile_command(&app, "run-profile", &profile_id).await
-}
-
-async fn run_privileged_profile_stream(
+async fn run_privileged_profile_stream_inner(
     app: &tauri::AppHandle,
     command: &str,
     profile_id: &str,
     input: Option<&[u8]>,
     on_event: Channel<Value>,
+    backup_state: Option<&BackupRuntimeState>,
 ) -> Result<(), String> {
     let profile_id = Uuid::parse_str(profile_id)
         .map_err(|err| format!("Invalid profile UUID: {err}"))?
         .to_string();
     let helper = helper_executable(app)?;
 
-    let mut child = Command::new("/usr/bin/pkexec")
+    let mut helper_command = Command::new("/usr/bin/pkexec");
+    helper_command
         .arg(helper)
         .arg(command)
         .arg(profile_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if backup_state.is_some() {
+        helper_command.process_group(0);
+    }
+    let mut child = helper_command
         .spawn()
         .map_err(|err| format!("Cannot start privileged Harbor helper: {err}"))?;
+
+    if let Some(state) = backup_state {
+        let pid = child
+            .id()
+            .ok_or_else(|| "Cannot determine the Harbor backup process group.".to_string())?;
+        state.set_process_group(pid);
+        let _ = ensure_backup_tray(app);
+    }
 
     if let Some(mut stdin) = child.stdin.take() {
         if let Some(input) = input {
@@ -627,30 +892,60 @@ async fn run_privileged_profile_stream(
         .map_err(|err| format!("Cannot wait for privileged Harbor helper: {err}"))?;
 
     if !status.success() {
+        if backup_state.is_some_and(|state| state.stop_requested.load(Ordering::SeqCst)) {
+            return Err(current_background_backup_text().stopped.to_string());
+        }
         return Err(helper_failure_message(&status, &stderr_tail));
     }
 
     Ok(())
 }
 
+async fn run_background_backup_stream(
+    app: &tauri::AppHandle,
+    state: &BackupRuntimeState,
+    command: &str,
+    profile_id: &str,
+    input: Option<&[u8]>,
+    on_event: Channel<Value>,
+) -> Result<(), String> {
+    state.begin()?;
+    let result =
+        run_privileged_profile_stream_inner(app, command, profile_id, input, on_event, Some(state))
+            .await;
+    finish_background_backup(app, result.is_ok());
+    result
+}
+
 #[tauri::command]
 async fn send_snapshot_now_stream(
     app: tauri::AppHandle,
+    state: tauri::State<'_, BackupRuntimeState>,
     profile_id: String,
     on_event: Channel<Value>,
 ) -> Result<(), String> {
-    run_privileged_profile_stream(&app, "run-profile-jsonl", &profile_id, None, on_event).await
+    run_background_backup_stream(
+        &app,
+        state.inner(),
+        "run-profile-jsonl",
+        &profile_id,
+        None,
+        on_event,
+    )
+    .await
 }
 
 #[tauri::command]
 async fn send_draft_now_stream(
     app: tauri::AppHandle,
+    state: tauri::State<'_, BackupRuntimeState>,
     configuration: String,
     profile_id: String,
     on_event: Channel<Value>,
 ) -> Result<(), String> {
-    run_privileged_profile_stream(
+    run_background_backup_stream(
         &app,
+        state.inner(),
         "run-config-jsonl",
         &profile_id,
         Some(configuration.as_bytes()),
@@ -705,12 +1000,13 @@ async fn stage_restore(
     });
     let encoded = serde_json::to_vec(&envelope)
         .map_err(|err| format!("Cannot encode portable restore request: {err}"))?;
-    run_privileged_profile_stream(
+    run_privileged_profile_stream_inner(
         &app,
         "stage-restore-config-jsonl",
         &profile_id,
         Some(&encoded),
         on_event,
+        None,
     )
     .await
 }
@@ -843,7 +1139,41 @@ async fn uninstall_profile(app: tauri::AppHandle, profile_id: String) -> Result<
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(BackupRuntimeState::default())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            let WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            let app = window.app_handle();
+            let state = app.state::<BackupRuntimeState>();
+            let policy = backup_close_policy(
+                state.active.load(Ordering::SeqCst),
+                state.tray_available.load(Ordering::SeqCst),
+            );
+            let text = current_background_backup_text();
+            match policy {
+                BackupClosePolicy::CloseNormally => {}
+                BackupClosePolicy::HideToTray => {
+                    api.prevent_close();
+                    app.dialog()
+                        .message(text.message)
+                        .kind(MessageDialogKind::Info)
+                        .title(text.title)
+                        .blocking_show();
+                    state.hidden_for_backup.store(true, Ordering::SeqCst);
+                    let _ = window.hide();
+                }
+                BackupClosePolicy::KeepWindowOpen => {
+                    api.prevent_close();
+                    app.dialog()
+                        .message(text.no_tray_message)
+                        .kind(MessageDialogKind::Warning)
+                        .title(text.title)
+                        .blocking_show();
+                }
+            }
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -867,9 +1197,9 @@ pub fn run() {
             backup_status,
             inspect_mount,
             apply_configuration,
-            send_snapshot_now,
             send_snapshot_now_stream,
             send_draft_now_stream,
+            stop_active_backup,
             list_restore_points,
             stage_restore,
             replicate_lxc,
@@ -942,5 +1272,35 @@ mod tests {
             selected,
             PathBuf::from("/app/resources/portable/btrfs-harborctl")
         );
+    }
+
+    #[test]
+    fn closing_during_backup_hides_only_when_tray_is_available() {
+        assert_eq!(
+            backup_close_policy(true, true),
+            BackupClosePolicy::HideToTray
+        );
+        assert_eq!(
+            backup_close_policy(true, false),
+            BackupClosePolicy::KeepWindowOpen
+        );
+        assert_eq!(
+            backup_close_policy(false, true),
+            BackupClosePolicy::CloseNormally
+        );
+    }
+
+    #[test]
+    fn stop_targets_the_complete_backup_process_group() {
+        assert_eq!(backup_stop_signal(), "-INT");
+        assert_eq!(process_group_target(4242), "-4242");
+    }
+
+    #[test]
+    fn french_background_message_explicitly_says_backup_continues() {
+        let text = background_backup_text(Some("fr_FR.UTF-8"));
+        assert!(text.message.contains("continue"));
+        assert!(text.message.contains("zone de notification"));
+        assert_eq!(text.stop_label, "Arrêter la sauvegarde");
     }
 }

@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-harbor-desktop"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "harbor-agent",
  "harbor-storage",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-agent"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "harbor-core",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-engine"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "harbor-core",
  "serde_json",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-recovery"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "harbor-core",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-replica"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "harbor-core",
  "serde",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "harbor-storage"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "harbor-core",
  "rusqlite",
@@ -1531,7 +1531,7 @@ dependencies = [
 
 [[package]]
 name = "harborctl"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "harbor-core",

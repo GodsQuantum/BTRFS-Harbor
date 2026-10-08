@@ -233,6 +233,32 @@ class TestResumableRawSink(unittest.TestCase):
                 sink.append_frame(raw_sha256="b" * 64, raw_length=1, frame=b"BAD")
         self.assertEqual((self.root / "snap.btrfs.zst").read_bytes(), b"frame")
 
+    def test_published_manifest_marks_completed_after_durable_final(self):
+        with self.open_new() as sink:
+            sink.append_frame(raw_sha256="a" * 64, raw_length=1, frame=b"frame")
+            sink.publish(meta_bytes("snap", len(b"frame")))
+        loaded = self.v2.read_manifest(self.root / f".harbor-resume-{TRANSFER_ID}.json")
+        self.assertEqual(loaded.state, "completed")
+
+    def test_republish_after_sidecar_crash_tolerates_timestamp_variance(self):
+        with self.open_new() as sink:
+            sink.append_frame(raw_sha256="a" * 64, raw_length=1, frame=b"frame")
+            original = self.api._rename_noreplace
+
+            def interrupt(fd, old, new):
+                if new == "snap.btrfs.zst":
+                    raise OSError("crash between metadata and stream")
+                return original(fd, old, new)
+
+            metadata = meta_bytes("snap", len(b"frame"))
+            with patch.object(self.api, "_rename_noreplace", interrupt):
+                with self.assertRaises(OSError):
+                    sink.publish(metadata)
+            parsed = json.loads(metadata)
+            parsed["created"] = "2026-10-08T23:15:00Z"
+            result = sink.publish(json.dumps(parsed).encode())
+            self.assertTrue(result.is_file())
+
     def test_publish_crash_after_meta_stays_without_final(self):
         with self.open_new() as sink:
             sink.append_frame(raw_sha256="a" * 64, raw_length=1, frame=b"frame")

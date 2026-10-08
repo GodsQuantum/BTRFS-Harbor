@@ -415,7 +415,22 @@ class ResumableRawSink:
             fd = os.open(meta_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self._dir_fd)
             try:
                 with os.fdopen(fd, "rb") as existing:
-                    if existing.read(MAX_MANIFEST_BYTES + 1) != data:
+                    current_data = existing.read(MAX_MANIFEST_BYTES + 1)
+                    try:
+                        previous = json.loads(current_data)
+                        proposed = json.loads(data)
+                    except (ValueError, UnicodeDecodeError) as exc:
+                        raise FileExistsError(
+                            "previous sidecar is not trustworthy"
+                        ) from exc
+                    if not isinstance(previous, dict) or not isinstance(proposed, dict):
+                        raise FileExistsError("invalid existing final sidecar")
+                    # A crash after committing the sidecar but before stream
+                    # publication should not strand the backup just because
+                    # a retried RawSnapshot has a new discovery timestamp.
+                    previous.pop("created", None)
+                    proposed.pop("created", None)
+                    if previous != proposed:
                         raise FileExistsError("different authoritative sidecar exists")
             except Exception:
                 raise
@@ -443,6 +458,9 @@ class ResumableRawSink:
         self.guard.validate_fd(self._dir_fd)
         _rename_noreplace(self._dir_fd, self.part_name, self.final_name)
         os.fsync(self._dir_fd)
+        completed = replace(self.manifest, state="completed")
+        _manifest_commit(self._dir_fd, self.manifest_name, completed, self.guard)
+        self.manifest = completed
         final_path = self.root / self.final_name
         self.append_allowed = False
         self.close()

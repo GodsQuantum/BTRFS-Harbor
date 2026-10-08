@@ -34,7 +34,7 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 ## v0.2.6 开发预览 — 尚未发布
 
-**按检查点续传的原始 Btrfs 备份仍处于实验阶段，仅在此开发分支的命令行中提供。** 显式启用的 \`raw checkpoint-v2\` 支持持久化检查点清单、中断后在本地重新读取并核对 SHA-256、独立 zstd 帧、Snapper 快照选择和自动清理保护、暂停/停止请求，以及经确认后丢弃未完成的传输。非网络本地目标必须显式指定 \`--allow-local\`；开始或继续备份还须指定 \`--experimental\`。
+**按检查点续传的原始 Btrfs 备份仍处于实验阶段，仅在此开发分支的命令行中提供。** 显式启用的 `raw checkpoint-v2` 支持持久化检查点清单、中断后在本地重新读取并核对 SHA-256、独立 zstd 帧、Snapper 快照选择和自动清理保护、暂停/停止请求，以及经确认后丢弃未完成的传输。非网络本地目标必须显式指定 `--allow-local`；开始或继续备份还须指定 `--experimental`。
 
 **请勿将此功能作为唯一的灾难恢复备份。** 真实 Btrfs 完整/增量发送与接收、网络挂载中断后的恢复、桌面界面集成以及发行包验收尚未完成。已发布的 raw/SSH 备份流程保持不变。详见[设计规范](docs/superpowers/specs/2026-10-08-checkpointed-resume-snapper-design.md)和[实施计划](docs/superpowers/plans/2026-10-08-checkpointed-resume-snapper-v026.md)。
 

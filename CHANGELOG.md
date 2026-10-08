@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — Harbor v0.2.6 development branch
 
-- Added an **explicitly experimental** \`raw checkpoint-v2\` CLI path for
+- Added an **explicitly experimental** `raw checkpoint-v2` CLI path for
   durable raw checkpoints, local verified replay, restart-persistent pause/stop,
   Snapper source selection and native cleanup protection.
 - Added atomic final-stream recovery, fail-closed mount identity checks,

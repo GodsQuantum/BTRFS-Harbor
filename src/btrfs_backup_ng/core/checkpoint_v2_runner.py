@@ -54,6 +54,9 @@ def _sealed_sidecar(sink: ResumableRawSink) -> bytes:
         "name": sink.snapshot_name,
         "uuid": "",
         "source_uuid": sink.manifest.identity["source_uuid"],
+        "received_subvolume_name": Path(
+            str(sink.manifest.identity["source_path"])
+        ).name,
         "parent_uuid": sink.manifest.identity["parent_uuid"],
         "parent_name": None,
         "created": datetime.now(timezone.utc).isoformat(),

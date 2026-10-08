@@ -17,11 +17,20 @@ DEFAULT_SETTLE_SECONDS = 30
 
 
 class SnapshotCandidate(Protocol):
-    config_name: str
-    number: int
-    snapshot_type: str
-    date: datetime
-    pre_num: int | None
+    @property
+    def config_name(self) -> str: ...
+
+    @property
+    def number(self) -> int: ...
+
+    @property
+    def snapshot_type(self) -> str: ...
+
+    @property
+    def date(self) -> datetime: ...
+
+    @property
+    def pre_num(self) -> int | None: ...
 
 
 @dataclass(frozen=True)

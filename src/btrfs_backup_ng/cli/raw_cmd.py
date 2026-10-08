@@ -25,6 +25,10 @@ from btrfs_backup_ng.endpoint.raw_metadata import RawSnapshot
 def execute_raw(args: argparse.Namespace) -> int:
     """Dispatch a ``raw <action>`` subcommand."""
     action = getattr(args, "raw_action", None)
+    if action == "checkpoint-v2":
+        from .checkpoint_v2_cmd import execute_checkpoint_v2
+
+        return execute_checkpoint_v2(args)
     if action == "list":
         return _raw_list(args)
     if action == "verify":

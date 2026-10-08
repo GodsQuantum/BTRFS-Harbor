@@ -71,5 +71,43 @@ class ControlTests(unittest.TestCase):
             opening.assert_not_called()
 
 
+class ActiveProcessRegistryTests(unittest.TestCase):
+    def setUp(self):
+        t = tempfile.TemporaryDirectory(prefix="harbor-active-")
+        self.addCleanup(t.cleanup)
+        self.root = Path(t.name)
+        self.journal = c.ControlJournal(
+            self.root, "c370ef15-0c25-426f-9d0f-478541219133"
+        )
+
+    def test_registered_send_identity_persists_across_new_controller(self):
+        with patch.object(c, "_proc_starttime", return_value="fake-start-123"):
+            self.journal.register_send(10234)
+        restarted = c.ControlJournal(self.root, "c370ef15-0c25-426f-9d0f-478541219133")
+        assert restarted.read_active_send() == (10234, "fake-start-123")
+
+    def test_stop_uses_pidfd_only_for_matching_registered_process(self):
+        with patch.object(c, "_proc_starttime", return_value="fake-start-123"):
+            self.journal.register_send(10234)
+        self.journal.request("stop")
+        with patch.object(
+            self.journal, "signal_active_send", return_value=True
+        ) as signaller:
+            assert self.journal.signal_registered_send()
+            signaller.assert_called_once_with(10234, "fake-start-123")
+
+    def test_missing_active_send_never_sends_signal(self):
+        self.journal.request("stop")
+        assert not self.journal.signal_registered_send()
+
+    def test_clearing_active_record_never_clears_control_request(self):
+        with patch.object(c, "_proc_starttime", return_value="fake-start-123"):
+            self.journal.register_send(10234)
+        self.journal.request("pause")
+        self.journal.clear_active_send()
+        assert self.journal.read_active_send() is None
+        assert self.journal.action() == "pause"
+
+
 if __name__ == "__main__":
     unittest.main()

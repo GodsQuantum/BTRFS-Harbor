@@ -481,6 +481,61 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         description="Operate directly on a raw:// or raw+ssh:// backup target",
     )
     raw_subs = raw_parser.add_subparsers(dest="raw_action")
+    # V2 is an explicitly opt-in local/raw transfer engine. Keep the existing
+    # raw list/verify/encrypt and upstream experimental --use-chunked untouched.
+    v2_parser = raw_subs.add_parser(
+        "checkpoint-v2",
+        help="Checkpointed resumable raw backups (EXPERIMENTAL; do not use for DR yet)",
+    )
+    v2_actions = v2_parser.add_subparsers(dest="checkpoint_action", required=True)
+    start_v2 = v2_actions.add_parser("start", help="Start an explicit raw v2 job")
+    start_v2.add_argument("--target", required=True)
+    start_v2.add_argument("--source")
+    start_v2.add_argument(
+        "--source-mode",
+        choices=("path", "latest-snapper", "selected-snapper", "create-snapper"),
+        default="path",
+    )
+    start_v2.add_argument("--name", required=True)
+    start_v2.add_argument("--profile-id", required=True)
+    start_v2.add_argument("--parent")
+    start_v2.add_argument("--checkpoint-size-mib", type=int, default=128)
+    start_v2.add_argument(
+        "--performance", choices=["balanced", "fast"], default="balanced"
+    )
+    start_v2.add_argument("--allow-local", action="store_true")
+    start_v2.add_argument("--experimental", action="store_true")
+    start_v2.add_argument("--state-dir")
+    start_v2.add_argument("--snapper-config")
+    start_v2.add_argument("--snapper-number", type=int)
+    resume_v2 = v2_actions.add_parser("resume", help="Resume an existing v2 partial")
+    resume_v2.add_argument("--target", required=True)
+    resume_v2.add_argument("--name", required=True)
+    resume_v2.add_argument("--transfer-id", required=True)
+    resume_v2.add_argument("--allow-local", action="store_true")
+    resume_v2.add_argument("--experimental", action="store_true")
+    resume_v2.add_argument("--state-dir")
+    status_v2 = v2_actions.add_parser(
+        "status", help="Inspect persistent checkpoint manifest"
+    )
+    status_v2.add_argument("--target", required=True)
+    status_v2.add_argument("--transfer-id", required=True)
+    for command_name in ("pause", "stop"):
+        control_v2 = v2_actions.add_parser(
+            command_name, help=f"Request {command_name} of a v2 transfer"
+        )
+        control_v2.add_argument("--transfer-id", required=True)
+        control_v2.add_argument("--state-dir")
+    discard_v2 = v2_actions.add_parser(
+        "discard", help="Explicitly discard an unfinished v2 partial"
+    )
+    discard_v2.add_argument("--target", required=True)
+    discard_v2.add_argument("--name", required=True)
+    discard_v2.add_argument("--transfer-id", required=True)
+    discard_v2.add_argument("--confirm", action="store_true")
+    discard_v2.add_argument("--allow-local", action="store_true")
+    discard_v2.add_argument("--state-dir")
+
     raw_list_parser = raw_subs.add_parser(
         "list",
         help="List the backups a raw target holds",

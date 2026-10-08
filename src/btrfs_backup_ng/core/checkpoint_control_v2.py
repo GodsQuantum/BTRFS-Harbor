@@ -14,6 +14,7 @@ import signal
 import stat
 import uuid
 from pathlib import Path
+from typing import Literal, cast
 
 ACTIONS = frozenset({"run", "pause", "stop"})
 
@@ -79,7 +80,7 @@ class ControlJournal:
                 pass
             os.close(directory_fd)
 
-    def action(self) -> str:
+    def action(self) -> Literal["run", "pause", "stop"]:
         directory_fd = self._dirfd()
         try:
             try:
@@ -100,9 +101,105 @@ class ControlJournal:
                 or data.get("action") not in ACTIONS
             ):
                 raise ValueError("checkpoint control record is invalid")
-            return data["action"]
+            return cast(Literal["run", "pause", "stop"], data["action"])
         finally:
             os.close(directory_fd)
+
+    @property
+    def active_name(self) -> str:
+        return f".harbor-active-{self.transfer_id}.json"
+
+    def register_send(self, pid: int) -> None:
+        """Record one live source worker PID/starttime for safe emergency Stop."""
+        if type(pid) is not int or pid <= 1:
+            raise ValueError("invalid Btrfs send pid")
+        start = _proc_starttime(pid)
+        if not start:
+            raise RuntimeError("could not verify source process start time")
+        directory_fd = self._dirfd()
+        temporary = f".harbor-active-{uuid.uuid4().hex}.tmp"
+        try:
+            fd = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            with os.fdopen(fd, "wb") as writer:
+                writer.write(
+                    json.dumps(
+                        {
+                            "transfer_id": self.transfer_id,
+                            "pid": pid,
+                            "starttime": start,
+                        },
+                        separators=(",", ":"),
+                    ).encode()
+                )
+                writer.flush()
+                os.fsync(writer.fileno())
+            os.replace(
+                temporary,
+                self.active_name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            os.fsync(directory_fd)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            os.close(directory_fd)
+
+    def read_active_send(self) -> tuple[int, str] | None:
+        """Return only a valid record from the same transfer id, no symlinks."""
+        directory_fd = self._dirfd()
+        try:
+            try:
+                fd = os.open(
+                    self.active_name,
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=directory_fd,
+                )
+            except FileNotFoundError:
+                return None
+            with os.fdopen(fd, "rb") as reader:
+                if not stat.S_ISREG(os.fstat(reader.fileno()).st_mode):
+                    raise ValueError("invalid active source record")
+                data = json.loads(reader.read(4097))
+            if (
+                not isinstance(data, dict)
+                or data.get("transfer_id") != self.transfer_id
+                or type(data.get("pid")) is not int
+                or data["pid"] <= 1
+                or not isinstance(data.get("starttime"), str)
+                or not data["starttime"]
+            ):
+                raise ValueError("active send process identity is corrupt")
+            return data["pid"], data["starttime"]
+        finally:
+            os.close(directory_fd)
+
+    def clear_active_send(self) -> None:
+        directory_fd = self._dirfd()
+        try:
+            try:
+                os.unlink(self.active_name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+    def signal_registered_send(self) -> bool:
+        """Stop now by pidfd if this exact transfer still owns a live btrfs send."""
+        if self.action() != "stop":
+            return False
+        registered = self.read_active_send()
+        return bool(
+            registered and self.signal_active_send(registered[0], registered[1])
+        )
 
     def signal_active_send(self, pid: int, expected_starttime: str) -> bool:
         """Stop only a verified active Btrfs send, never an unrelated PID."""

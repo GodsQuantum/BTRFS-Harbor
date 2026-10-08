@@ -129,3 +129,5 @@ Thumbs.db
 *.log
 *.jsonl
 packaging/generated/
+
+.superpowers/

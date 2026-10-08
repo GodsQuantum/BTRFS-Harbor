@@ -42,6 +42,10 @@ pub fn collect_recovery_kit(
     };
 
     let (packages_explicit, packages_foreign) = collect_package_intent();
+    let capabilities = crate::platform::detect_platform_capabilities();
+    let package_manager = format!("{:?}\n", capabilities.package_manager).to_ascii_lowercase();
+    let platform_capabilities_json =
+        serde_json::to_string_pretty(&capabilities).unwrap_or_else(|_| "{}".to_string()) + "\n";
 
     let inputs = RecoveryKitInputs {
         harbor_config_toml,
@@ -67,6 +71,8 @@ pub fn collect_recovery_kit(
         ),
         packages_explicit,
         packages_foreign,
+        package_manager,
+        platform_capabilities_json,
         boot_status: capture_best_effort("bootctl", &["status", "--no-pager"]),
         kernel_cmdline: read_optional("/etc/kernel/cmdline"),
         initramfs_config: first_existing(&["/etc/mkinitcpio.conf", "/etc/dracut.conf"]),

@@ -15,7 +15,7 @@
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-0B1622">
   <img alt="Btrfs" src="https://img.shields.io/badge/filesystem-Btrfs-58D6C5">
   <img alt="Tauri" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB">
-  <img alt="CachyOS" src="https://img.shields.io/badge/CachyOS-ready-00A3FF">
+  <img alt="systemd" src="https://img.shields.io/badge/automation-systemd-5C6BC0">
 </p>
 
 <p align="center">
@@ -65,37 +65,28 @@ Release 提供：
 通用安装器：
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.4/BTRFS-Harbor-0.2.4-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.4-linux-x86_64.run
-./BTRFS-Harbor-0.2.4-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.5/BTRFS-Harbor-0.2.5-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.5-linux-x86_64.run
+./BTRFS-Harbor-0.2.5-linux-x86_64.run
 ```
 
 如果系统已经安装兼容的 **`btrfs-backup-ng` (>= 0.9.12)**，Harbor 会优先使用它；否则使用 Harbor 自带的兼容引擎。Harbor 不再替换或与用户安装的 upstream 引擎冲突。
 
-## 🚀 在 CachyOS / Arch Linux 上从源码构建
+## 🐧 Linux 支持
 
-推荐直接从 Git 仓库安装：
+Harbor 根据**可用能力**工作，而不是绑定某个发行版名称。
 
-```bash
-git clone https://github.com/GodsQuantum/btrfs-harbor.git
-cd btrfs-harbor
-./install-cachyos.sh
-```
+- **手动备份 + 恢复：**需要 Linux、Btrfs 用户空间工具以及所选工作流需要的能力。Portable AppImage 不要求安装 Harbor。
+- **持久自动计划：**另外需要 systemd。没有 systemd 的 Btrfs Linux 仍可使用手动备份/恢复；Harbor 只会把自动计划标记为不可用。
+- **Tier-A 代表系列：**Arch/CachyOS、Debian/Ubuntu、Fedora 和 openSUSE。
+- **其他 glibc/systemd 发行版：**按检测到的能力支持，不使用发行版 allowlist。
+- **安装通道：**通用 `.run` 可检测 pacman、apt、dnf 或 zypper；DEB/RPM/Arch 配方作为可选原生通道保留。
 
-安装脚本会：
+旧的 `install-cachyos.sh` 只作为兼容 shim 保留，并委托给发行版无关的 `install-linux.sh`；其中不再包含 CachyOS 专用安装逻辑。
 
-1. 检查当前系统是否使用 pacman；
-2. 安装标准 Arch 构建依赖；
-3. 以普通用户通过 `makepkg` 构建仓库中的 `PKGBUILD`；
-4. 使用 pacman 安装生成的软件包；
-5. 启用原生 `btrfs-harbor-agent.service`；
-6. 删除临时构建目录。
+## 🛠️ 从源码构建
 
-安装后可从应用菜单启动 **Btrfs Harbor**，或运行：
-
-```bash
-btrfs-harbor
-```
+源码构建面向贡献者和打包者，使用下方 **开发** 章节中的 Python、Rust 和 Svelte/Tauri 工具链。Arch 用户仍可检查 `packaging/arch/PKGBUILD`，但它只是 Arch 打包方式，并不是 Harbor 的可移植性层。
 
 > 特权操作通过 polkit 完成。不要用 root 用户启动桌面应用。
 
@@ -126,7 +117,9 @@ btrfs-harbor
 
 ## ♻️ 恢复快照
 
-**恢复**页会读取真实备份仓库，并按时间从新到旧列出可用快照。选择子卷、目标和精确快照，然后恢复到独立的 **Btrfs staging** 位置；Harbor 会验证接收到的数据。
+**恢复**页会读取真实备份仓库，并按时间从新到旧列出可用快照。恢复首先区分**替换这台机器**（例如同一台电脑更换新 NVMe）和**迁移到另一台机器**。迁移模式会要求新的主机名，并规划重新生成或调整 machine-id、SSH 主机密钥、存储 UUID 引用、initramfs 和启动状态，使源机器与恢复后的机器可以安全共存。
+
+然后选择子卷、目标和精确快照，恢复到独立的 **Btrfs staging** 位置；Harbor 会验证接收到的数据。
 
 - 非 root 子卷可以在当前系统运行时恢复到 staging。
 - Harbor 不会直接覆盖正在运行的 `/`。系统/root 恢复必须进入 **rescue/live ISO** 流程并结合 Recovery Kit。

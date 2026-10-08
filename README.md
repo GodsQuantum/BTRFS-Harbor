@@ -15,7 +15,7 @@
   <img alt="Linux" src="https://img.shields.io/badge/platform-Linux-0B1622">
   <img alt="Btrfs" src="https://img.shields.io/badge/filesystem-Btrfs-58D6C5">
   <img alt="Tauri" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB">
-  <img alt="CachyOS" src="https://img.shields.io/badge/CachyOS-ready-00A3FF">
+  <img alt="systemd" src="https://img.shields.io/badge/automation-systemd-5C6BC0">
 </p>
 
 <p align="center">
@@ -65,53 +65,30 @@ The release provides:
 Universal installer:
 
 ```bash
-curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.4/BTRFS-Harbor-0.2.4-linux-x86_64.run
-chmod +x BTRFS-Harbor-0.2.4-linux-x86_64.run
-./BTRFS-Harbor-0.2.4-linux-x86_64.run
+curl -LO https://github.com/GodsQuantum/BTRFS-Harbor/releases/download/v0.2.5/BTRFS-Harbor-0.2.5-linux-x86_64.run
+chmod +x BTRFS-Harbor-0.2.5-linux-x86_64.run
+./BTRFS-Harbor-0.2.5-linux-x86_64.run
 ```
 
 Harbor **prefers a compatible system `btrfs-backup-ng` (>= 0.9.12)** when one is already installed. Otherwise it uses the compatible engine bundled with Harbor. Harbor no longer replaces or conflicts with a user-installed upstream engine.
 
-## 🚀 Build from source on CachyOS / Arch Linux
+## 🐧 Linux support
 
-The recommended source install uses the repository's native Arch package recipe:
+Harbor is capability-driven rather than tied to a distro name.
 
-```bash
-git clone https://github.com/GodsQuantum/btrfs-harbor.git
-cd btrfs-harbor
-./install-cachyos.sh
-```
+- **Manual backup + recovery:** requires Linux, Btrfs userspace tools and the capabilities used by the selected workflow. The Portable AppImage does not require Harbor to be installed.
+- **Persistent automatic scheduling:** additionally requires systemd. A non-systemd Btrfs system remains usable for manual backup/recovery; Harbor simply reports automatic scheduling as unavailable.
+- **Tier-A release families:** Arch/CachyOS, Debian/Ubuntu, Fedora and openSUSE are exercised as representative glibc/systemd/Btrfs families.
+- **Other glibc/systemd distributions:** supported by detected capabilities rather than an allowlist.
+- **Package/install channels:** the universal `.run` detects pacman, apt, dnf or zypper. Native DEB/RPM/Arch recipes remain available where appropriate.
 
-The installer:
+The legacy `install-cachyos.sh` name is retained only as a compatibility shim and delegates to the distro-neutral `install-linux.sh`. It contains no CachyOS-specific installation logic.
 
-1. verifies it is running on a pacman-based system;
-2. installs only the standard Arch build prerequisites;
-3. builds the tracked `PKGBUILD` with `makepkg` as your normal user;
-4. installs the resulting package through pacman;
-5. enables the native `btrfs-harbor-agent.service`;
-6. deletes its temporary build directory.
+## 🛠️ Build from source
 
-Then launch **Btrfs Harbor** from your application menu or run:
-
-```bash
-btrfs-harbor
-```
+Source builds are for contributors and packagers. They use the same Python, Rust and Svelte/Tauri toolchain documented under **Development** below. Arch users may additionally inspect `packaging/arch/PKGBUILD`; that recipe is an Arch packaging option, not Harbor's portability layer.
 
 > Harbor uses polkit for privileged operations. Do not run the desktop application as root.
-
-### Manual Arch build
-
-If you prefer to inspect every step:
-
-```bash
-sudo pacman -S --needed base-devel git
-git clone https://github.com/GodsQuantum/btrfs-harbor.git
-cd btrfs-harbor
-cp packaging/arch/PKGBUILD /tmp/PKGBUILD.btrfs-harbor
-# Review packaging/arch/PKGBUILD, then build it with makepkg in a clean build directory.
-```
-
-The same package recipe is intended to become the AUR package after public testing.
 
 ## 🛟 Your first backup
 
@@ -142,7 +119,9 @@ Harbor deliberately separates local snapshots from off-host protection:
 
 ## ♻️ Recover a snapshot
 
-The **Recover** tab reads the real backup repository and lists available snapshots newest first. Choose the protected subvolume, destination and exact snapshot, then restore it into a separate **Btrfs staging location**. Harbor verifies the received data before considering the rehearsal complete.
+The **Recover** tab reads the real backup repository and lists available snapshots newest first. Recovery starts by asking whether you are **replacing this machine** (for example a fresh NVMe in the same computer) or **migrating to another machine**. A migration asks for a new hostname and plans regeneration/adaptation of machine identity, SSH host keys, storage UUID references, initramfs and boot state so the source and restored computers can coexist safely.
+
+Choose the protected subvolume, destination and exact snapshot, then restore it into a separate **Btrfs staging location**. Harbor verifies the received data before considering the rehearsal complete.
 
 - A non-root subvolume can be staged from the running system.
 - The live `/` root is never overwritten in place. Root/system recovery is intentionally redirected to a **rescue/live-ISO workflow** using the Recovery Kit.

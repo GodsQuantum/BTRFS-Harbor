@@ -32,6 +32,8 @@ pub struct RecoveryKitInputs {
     pub snapper_configs_json: String,
     pub packages_explicit: String,
     pub packages_foreign: String,
+    pub package_manager: String,
+    pub platform_capabilities_json: String,
     pub boot_status: String,
     pub kernel_cmdline: String,
     pub initramfs_config: String,
@@ -70,6 +72,11 @@ pub fn recovery_kit_documents(
         ("snapper-configs.json", &inputs.snapper_configs_json),
         ("packages-explicit.txt", &inputs.packages_explicit),
         ("packages-foreign.txt", &inputs.packages_foreign),
+        ("package-manager.txt", &inputs.package_manager),
+        (
+            "platform-capabilities.json",
+            &inputs.platform_capabilities_json,
+        ),
         ("boot-status.txt", &inputs.boot_status),
         ("kernel-cmdline", &inputs.kernel_cmdline),
         ("initramfs.conf", &inputs.initramfs_config),
@@ -512,6 +519,8 @@ mod tests {
             harbor_config_toml: "name = \"Récupération Workstation\"\n".into(),
             fstab: "UUID=abc / btrfs rw 0 0\n".into(),
             packages_explicit: "btrfs-progs\nsnapper\n".into(),
+            package_manager: "pacman\n".into(),
+            platform_capabilities_json: "{\"systemd\":true}\n".into(),
             ..RecoveryKitInputs::default()
         };
 
@@ -521,6 +530,8 @@ mod tests {
         assert!(docs["README-RESTORE.md"].contains("Fresh-install recovery"));
         assert_eq!(docs["fstab"], inputs.fstab);
         assert_eq!(docs["packages-explicit.txt"], inputs.packages_explicit);
+        assert_eq!(docs["package-manager.txt"], "pacman\n");
+        assert_eq!(docs["platform-capabilities.json"], "{\"systemd\":true}\n");
         assert!(!docs.keys().any(|name| name.contains("credential")));
     }
 

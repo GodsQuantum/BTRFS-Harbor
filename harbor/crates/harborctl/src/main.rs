@@ -1,4 +1,5 @@
 mod lxc_replica;
+mod platform;
 mod recovery_kit;
 
 use anyhow::{Context, Result, bail};
@@ -6,7 +7,8 @@ use harbor_core::{
     BackupProfile, BackupSource, DestinationKind, DestinationSpec, EnginePolicy, profile_unit_stem,
 };
 use harbor_recovery::{
-    StagedRestorePlan, StagedRestoreRequest, staged_restore_path,
+    MachineRecoveryRequest, RecoveryKitManifest, StagedRestorePlan, StagedRestoreRequest,
+    plan_machine_recovery, recovery_kit_relative_dir, staged_restore_path,
     staging_is_separate_from_destination, staging_is_separate_from_live_source,
 };
 use harbor_storage::{
@@ -80,6 +82,18 @@ fn main() -> Result<()> {
             let id = parse_profile_id(args.next())?;
             recovery_kit_profile(id)
         }
+        "recovery-kit-context-json" => {
+            let id = parse_profile_id(args.next())?;
+            recovery_kit_context_json(id)
+        }
+        "machine-recovery-plan-json" => machine_recovery_plan_json(),
+        "platform-capabilities-json" => {
+            println!(
+                "{}",
+                serde_json::to_string(&platform::detect_platform_capabilities())?
+            );
+            Ok(())
+        }
         "list-restore-points-json" => {
             let id = parse_profile_id(args.next())?;
             list_restore_points_json(id)
@@ -106,7 +120,7 @@ fn main() -> Result<()> {
 
 fn usage() {
     eprintln!(
-        "Usage: btrfs-harborctl <list|render-profile|apply-config|set-engine-policy|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID|POLICY]"
+        "Usage: btrfs-harborctl <list|render-profile|apply-config|set-engine-policy|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|recovery-kit-context-json|machine-recovery-plan-json|platform-capabilities-json|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID|POLICY]"
     );
 }
 
@@ -653,6 +667,92 @@ fn recovery_kit_profile(id: Uuid) -> Result<()> {
     for destination in &report.skipped_destinations {
         eprintln!("Recovery Kit skipped for unsupported destination {destination}");
     }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct RecoveryKitContextQuery {
+    configuration: HarborConfig,
+    destination_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct RecoveryKitContext {
+    manifest: RecoveryKitManifest,
+    os_release: String,
+}
+
+fn recovery_kit_context_from(
+    profile_id: Uuid,
+    query: RecoveryKitContextQuery,
+    mounts: &MountTable,
+) -> Result<RecoveryKitContext> {
+    let profile = query
+        .configuration
+        .profile(profile_id)
+        .with_context(|| format!("profile {profile_id} not found"))?;
+    if !profile.destination_ids.contains(&query.destination_id) {
+        bail!(
+            "destination {} is not attached to profile {profile_id}",
+            query.destination_id
+        );
+    }
+    let destination = query
+        .configuration
+        .destinations
+        .iter()
+        .find(|candidate| candidate.id == query.destination_id)
+        .with_context(|| format!("destination {} not found", query.destination_id))?;
+    if destination.kind == DestinationKind::Ssh {
+        bail!("Recovery Kit context over SSH is not yet readable from portable mode");
+    }
+    validate_destination_mount(destination, mounts)
+        .with_context(|| format!("destination {} failed mount guard", destination.name))?;
+
+    let kit_dir = destination.path.join(recovery_kit_relative_dir(profile_id));
+    let manifest_raw = fs::read_to_string(kit_dir.join("manifest.json"))
+        .with_context(|| format!("cannot read Recovery Kit manifest in {}", kit_dir.display()))?;
+    let manifest: RecoveryKitManifest =
+        serde_json::from_str(&manifest_raw).context("invalid Recovery Kit manifest")?;
+    let os_release = fs::read_to_string(kit_dir.join("os-release")).with_context(|| {
+        format!(
+            "cannot read Recovery Kit os-release in {}",
+            kit_dir.display()
+        )
+    })?;
+    if os_release.trim().is_empty() {
+        bail!("Recovery Kit os-release is empty");
+    }
+    Ok(RecoveryKitContext {
+        manifest,
+        os_release,
+    })
+}
+
+fn recovery_kit_context_json(profile_id: Uuid) -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin()
+        .read_to_string(&mut raw)
+        .context("cannot read Recovery Kit context query")?;
+    let query: RecoveryKitContextQuery =
+        serde_json::from_str(&raw).context("invalid Recovery Kit context query")?;
+    let mountinfo =
+        fs::read_to_string("/proc/self/mountinfo").context("cannot read mount table")?;
+    let mounts = MountTable::from_mountinfo(&mountinfo);
+    let context = recovery_kit_context_from(profile_id, query, &mounts)?;
+    println!("{}", serde_json::to_string(&context)?);
+    Ok(())
+}
+
+fn machine_recovery_plan_json() -> Result<()> {
+    let mut raw = String::new();
+    std::io::stdin()
+        .read_to_string(&mut raw)
+        .context("cannot read machine recovery request")?;
+    let request: MachineRecoveryRequest =
+        serde_json::from_str(&raw).context("invalid machine recovery request")?;
+    let plan = plan_machine_recovery(&request).map_err(anyhow::Error::msg)?;
+    println!("{}", serde_json::to_string(&plan)?);
     Ok(())
 }
 

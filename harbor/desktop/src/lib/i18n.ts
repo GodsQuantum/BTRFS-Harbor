@@ -211,6 +211,25 @@ const en = {
 		'Harbor restores only into a separate staging path. Activation is a separate rescue/review step.',
 	rootRestoreRequiresRescue:
 		'The running root filesystem cannot be restored from the live system. Use a fresh install or rescue environment.',
+	recoveryIntentQuestion: 'What are you trying to do?',
+	recoveryReplaceMachine: 'Replace this machine',
+	recoveryReplaceMachineDesc:
+		'New NVMe or reinstall on the same computer. Keep this machine’s identity where safe and adapt storage/boot state.',
+	recoveryMigrateMachine: 'Migrate to another machine',
+	recoveryMigrateMachineDesc:
+		'Restore the environment onto different hardware with a new hostname and regenerated machine identity.',
+	recoveryNewHostname: 'New hostname',
+	recoveryContinue: 'Continue',
+	recoveryBack: 'Back',
+	recoveryReview: 'Review recovery plan',
+	recoveryRestored: 'Restored',
+	recoveryAdapted: 'Adapted',
+	recoveryRegenerated: 'Regenerated',
+	recoveryNeedsAttention: 'Needs your attention',
+	recoveryDataOnly:
+		'Source and target Linux families differ. Harbor blocks system-root transplantation and limits this plan to data and user configuration.',
+	recoveryKitUnavailable:
+		'Recovery Kit context could not be read. Refresh the backup or check the destination before a machine-level recovery.',
 	restoreRequiredFields:
 		'Choose a source, destination and Btrfs staging directory before restoring.',
 	replicaTitle: 'System Replica',
@@ -569,6 +588,25 @@ const fr: Dictionary = {
 		'Harbor restaure uniquement vers un chemin de staging séparé. L’activation reste une étape distincte de secours/relecture.',
 	rootRestoreRequiresRescue:
 		'La racine système en cours d’exécution ne peut pas être restaurée depuis le système live. Utilise une installation fraîche ou un environnement de secours.',
+	recoveryIntentQuestion: 'Que veux-tu faire ?',
+	recoveryReplaceMachine: 'Remplacer cette machine',
+	recoveryReplaceMachineDesc:
+		'Nouveau NVMe ou réinstallation sur le même ordinateur. Conserver l’identité de cette machine lorsque c’est sûr et adapter stockage/démarrage.',
+	recoveryMigrateMachine: 'Migrer vers une autre machine',
+	recoveryMigrateMachineDesc:
+		'Restaurer l’environnement sur un autre matériel avec un nouveau nom d’hôte et une identité machine régénérée.',
+	recoveryNewHostname: 'Nouveau nom d’hôte',
+	recoveryContinue: 'Continuer',
+	recoveryBack: 'Retour',
+	recoveryReview: 'Vérifier le plan de récupération',
+	recoveryRestored: 'Restauré',
+	recoveryAdapted: 'Adapté',
+	recoveryRegenerated: 'Régénéré',
+	recoveryNeedsAttention: 'À vérifier',
+	recoveryDataOnly:
+		'Les familles Linux source et cible diffèrent. Harbor bloque la transplantation du système racine et limite ce plan aux données et configurations utilisateur.',
+	recoveryKitUnavailable:
+		'Le contexte du Recovery Kit n’a pas pu être lu. Actualise la sauvegarde ou vérifie la destination avant une récupération machine complète.',
 	restoreRequiredFields:
 		'Choisis une source, une destination et un répertoire de staging Btrfs avant de restaurer.',
 	replicaTitle: 'System Replica',
@@ -912,6 +950,25 @@ const zhCN: Dictionary = {
 	stagingSafetyDesc: 'Harbor 只恢复到独立暂存路径。激活仍是单独的救援/审核步骤。',
 	rootRestoreRequiresRescue:
 		'运行中的根文件系统不能从当前 live 系统恢复。请使用全新安装或救援环境。',
+	recoveryIntentQuestion: '你想执行哪种恢复？',
+	recoveryReplaceMachine: 'Replace this machine',
+	recoveryReplaceMachineDesc:
+		'Replace the disk or reinstall on this computer while adapting storage and boot state.',
+	recoveryMigrateMachine: 'Migrate to another machine',
+	recoveryMigrateMachineDesc:
+		'Restore onto different hardware with a new hostname and regenerated machine identity.',
+	recoveryNewHostname: 'New hostname',
+	recoveryContinue: 'Continue',
+	recoveryBack: 'Back',
+	recoveryReview: 'Review recovery plan',
+	recoveryRestored: 'Restored',
+	recoveryAdapted: 'Adapted',
+	recoveryRegenerated: 'Regenerated',
+	recoveryNeedsAttention: 'Needs attention',
+	recoveryDataOnly:
+		'Source and target Linux families differ. System-root transplantation is blocked; restore data and user configuration only.',
+	recoveryKitUnavailable:
+		'Recovery Kit context could not be read. Refresh the backup or check the destination before machine recovery.',
 	restoreRequiredFields: '恢复前请选择来源、备份目标和 Btrfs 暂存目录。',
 	replicaTitle: '系统复制',
 	replicaIntro: '把系统 userspace 复用到物理机、虚拟机或 LXC，而不是盲目复制硬件启动状态。',

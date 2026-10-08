@@ -8,21 +8,40 @@
 	import RefreshCw from 'lucide-svelte/icons/refresh-cw';
 	import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
 	import ShieldCheck from 'lucide-svelte/icons/shield-check';
+	import RecoveryIntentView from './RecoveryIntent.svelte';
+	import RecoveryReview from './RecoveryReview.svelte';
 	import {
 		chooseStagingDirectory,
 		listRestorePoints,
 		stageRestoreProfile,
+		loadRecoveryKitContext,
+		loadLocalOsRelease,
+		planMachineRecovery,
 		type RestorePoint,
 		type StagedRestoreRequest
 	} from './agent';
 	import { resolveProfile, type HarborConfig } from './config';
 	import { translate, type Locale, type TranslationKey } from './i18n';
+	import {
+		validateMigrationHostname,
+		type RecoveryIntent,
+		type MachineRecoveryPlan
+	} from './recovery';
 	import type { BackupProgressEvent } from './status';
 
 	export let config: HarborConfig;
 	export let profileId: string | undefined = undefined;
 	export let locale: Locale = 'en';
 
+	let step: 1 | 2 | 3 = 1;
+	let intent: RecoveryIntent = 'replace_machine';
+	let sourceHostname = '';
+	let requestedHostname = '';
+	let sourceOsRelease = '';
+	let targetOsRelease = '';
+	let machinePlan: MachineRecoveryPlan | null = null;
+	let contextLoading = false;
+	let contextError = '';
 	let selectedSourcePath = '';
 	let selectedDestinationId = '';
 	let selectedSnapshot = '';
@@ -45,50 +64,101 @@
 		selectedDestinationId = destinations[0]?.id ?? '';
 	}
 	$: rootSelected = selectedSourcePath === '/';
+	$: includesSystem = profile.sources.some((source) => source.path === '/');
 	$: selectedPoint = restorePoints.find((point) => point.name === selectedSnapshot) ?? null;
 
 	const t = (key: TranslationKey) => translate(locale, key);
 
-	onMount(() => {
-		void refreshRestorePoints();
+	onMount(async () => {
+		await Promise.all([refreshMachineContext(), refreshRestorePoints()]);
 	});
 
 	function phaseLabel(phase: string): string {
-		switch (phase) {
-			case 'restore_start':
-				return t('restorePreparing');
-			case 'restore_plan':
-				return t('restoreDryRun');
-			case 'restore':
-				return t('restoreReceiving');
-			case 'restore_verify':
-				return t('restoreVerifying');
-			case 'restore_complete':
-				return t('restoreReady');
-			case 'restore_error':
-				return t('restoreFailed');
-			default:
-				return t('stagedRestore');
-		}
+		const labels: Record<string, TranslationKey> = {
+			restore_start: 'restorePreparing',
+			restore_plan: 'restoreDryRun',
+			restore: 'restoreReceiving',
+			restore_verify: 'restoreVerifying',
+			restore_complete: 'restoreReady',
+			restore_error: 'restoreFailed'
+		};
+		return t(labels[phase] ?? 'stagedRestore');
 	}
 
 	function formatPoint(point: RestorePoint): string {
 		const date = point.created ? new Date(point.created).toLocaleString(locale) : point.name;
 		const size =
 			point.size && point.size > 0
-				? ` · ${new Intl.NumberFormat(locale, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(point.size / 1_000_000)}`
+				? ` �� ${new Intl.NumberFormat(locale, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(point.size / 1_000_000)}`
 				: '';
 		return `${date}${size}`;
 	}
 
+	async function refreshMachineContext() {
+		contextError = '';
+		machinePlan = null;
+		if (!profile.id || !selectedDestinationId) return;
+		contextLoading = true;
+		try {
+			const [kit, target] = await Promise.all([
+				loadRecoveryKitContext(config, profile.id, selectedDestinationId),
+				loadLocalOsRelease()
+			]);
+			sourceHostname = kit.manifest.hostname || profile.name;
+			sourceOsRelease = kit.os_release;
+			targetOsRelease = target;
+			if (intent === 'migrate_machine' && !requestedHostname)
+				requestedHostname = `${sourceHostname}-clone`;
+			await refreshMachinePlan();
+		} catch (cause) {
+			contextError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			contextLoading = false;
+		}
+	}
+
+	async function refreshMachinePlan() {
+		machinePlan = null;
+		if (!sourceHostname || !sourceOsRelease || !targetOsRelease) return;
+		if (intent === 'migrate_machine') {
+			const validation = validateMigrationHostname(sourceHostname, requestedHostname);
+			if (validation) {
+				contextError = validation;
+				return;
+			}
+		}
+		contextError = '';
+		try {
+			machinePlan = await planMachineRecovery({
+				intent,
+				source_hostname: sourceHostname,
+				requested_hostname: intent === 'migrate_machine' ? requestedHostname.trim() : null,
+				source_os_release: sourceOsRelease,
+				target_os_release: targetOsRelease,
+				includes_system: includesSystem
+			});
+		} catch (cause) {
+			contextError = cause instanceof Error ? cause.message : String(cause);
+		}
+	}
+
+	async function changeIntent(value: RecoveryIntent) {
+		intent = value;
+		if (value === 'migrate_machine' && !requestedHostname && sourceHostname)
+			requestedHostname = `${sourceHostname}-clone`;
+		await refreshMachinePlan();
+	}
+	async function changeHostname(value: string) {
+		requestedHostname = value;
+		await refreshMachinePlan();
+	}
 	async function sourceChanged() {
 		selectedSnapshot = '';
 		await refreshRestorePoints();
 	}
-
 	async function destinationChanged() {
 		selectedSnapshot = '';
-		await refreshRestorePoints();
+		await Promise.all([refreshRestorePoints(), refreshMachineContext()]);
 	}
 
 	async function refreshRestorePoints() {
@@ -106,9 +176,8 @@
 				selectedSourcePath,
 				selectedDestinationId
 			);
-			if (!restorePoints.some((point) => point.name === selectedSnapshot)) {
+			if (!restorePoints.some((point) => point.name === selectedSnapshot))
 				selectedSnapshot = restorePoints[0]?.name ?? '';
-			}
 		} catch (cause) {
 			restorePoints = [];
 			selectedSnapshot = '';
@@ -122,6 +191,19 @@
 		error = '';
 		const selected = await chooseStagingDirectory(stagingRoot);
 		if (selected) stagingRoot = selected;
+	}
+
+	async function advanceFromIntent() {
+		await refreshMachinePlan();
+		if (machinePlan && !contextError) step = 2;
+	}
+	function advanceToReview() {
+		if (!selectedSnapshot || !stagingRoot.trim()) {
+			error = t('restoreRequiredFields');
+			return;
+		}
+		error = '';
+		step = 3;
 	}
 
 	async function runRestore() {
@@ -141,7 +223,6 @@
 			error = t('rootRestoreRequiresRescue');
 			return;
 		}
-
 		const request: StagedRestoreRequest = {
 			destination_id: selectedDestinationId,
 			source_path: selectedSourcePath,
@@ -149,7 +230,6 @@
 			snapshot: selectedSnapshot,
 			before: null
 		};
-
 		restoring = true;
 		try {
 			await stageRestoreProfile(config, profile.id, request, (event) => {
@@ -174,135 +254,155 @@
 			</div>
 		</div>
 
-		<div class="restore-form">
-			<label>
-				<span>{t('restoreSource')}</span>
-				<select bind:value={selectedSourcePath} onchange={sourceChanged}>
-					{#each profile.sources as source (source.path)}
-						<option value={source.path}>
-							{source.path}{source.snapper_config ? ` · Snapper ${source.snapper_config}` : ''}
-						</option>
-					{/each}
-				</select>
-			</label>
+		<nav class="wizard-steps" aria-label={t('recoveryReview')}>
+			<span class:active={step === 1}>1 �� {t('recoveryIntentQuestion')}</span>
+			<span class:active={step === 2}>2 �� {t('restorePoint')}</span>
+			<span class:active={step === 3}>3 �� {t('recoveryReview')}</span>
+		</nav>
 
-			<label>
-				<span>{t('backupDestination')}</span>
-				<select bind:value={selectedDestinationId} onchange={destinationChanged}>
-					{#each destinations as destination (destination.id)}
-						<option value={destination.id}>{destination.name}</option>
-					{/each}
-				</select>
-			</label>
-
-			<label class="restore-point-field">
-				<span>{t('restorePoint')}</span>
-				<div class="input-action">
-					<select
-						bind:value={selectedSnapshot}
-						disabled={loadingPoints || restorePoints.length === 0}
-					>
-						{#each restorePoints as point (point.name)}
-							<option value={point.name}>{formatPoint(point)}</option>
-						{/each}
-					</select>
-					<button
-						class="secondary"
-						type="button"
-						onclick={refreshRestorePoints}
-						disabled={loadingPoints}
-					>
-						<span class:spin={loadingPoints}><RefreshCw size={15} /></span>
-						{t('refreshSnapshots')}
-					</button>
-				</div>
-				<small>
-					{#if loadingPoints}
-						{t('loadingSnapshots')}
-					{:else if restorePoints.length === 0}
-						{t('noRestorePoints')}
-					{:else if selectedPoint?.parent_name}
-						{t('snapshotParent')}: {selectedPoint.parent_name}
-					{:else}
-						{selectedPoint?.name ?? ''}
-					{/if}
-				</small>
-			</label>
-
-			<label class="staging-field">
-				<span>{t('stagingRoot')}</span>
-				<div class="input-action">
-					<input bind:value={stagingRoot} placeholder="/mnt/restore-staging" spellcheck="false" />
-					<button type="button" class="secondary" onclick={browseStaging}>
-						<FolderOpen size={15} />
-						{t('chooseFolder')}
-					</button>
-				</div>
-				<small>{t('stagingBtrfsRequired')}</small>
-			</label>
-		</div>
-
-		<div class="coverage-card">
-			<ShieldCheck size={18} />
-			<div>
-				<strong>{t('recoveryCoverage')}</strong>
-				<span>{t('recoveryCoverageDesc')}</span>
+		{#if step === 1}
+			<RecoveryIntentView
+				{intent}
+				{sourceHostname}
+				{requestedHostname}
+				{locale}
+				onIntent={changeIntent}
+				onHostname={changeHostname}
+			/>
+			{#if contextLoading}<small class="muted">{t('loadingSnapshots')}</small>{/if}
+			{#if contextError}<div class="restore-error">
+					<CircleAlert size={15} /><span>{contextError || t('recoveryKitUnavailable')}</span>
+				</div>{/if}
+			<div class="step-actions">
+				<span></span><button
+					class="primary"
+					type="button"
+					onclick={advanceFromIntent}
+					disabled={contextLoading || !machinePlan}>{t('recoveryContinue')}</button
+				>
 			</div>
-		</div>
-
-		{#if rootSelected}
-			<div class="restore-warning">
-				<CircleAlert size={18} />
-				<div>
-					<strong>{t('requiresRescue')}</strong>
-					<span>{t('rootRestoreRequiresRescue')}</span>
-				</div>
+		{:else if step === 2}
+			<div class="restore-form">
+				<label
+					><span>{t('restoreSource')}</span><select
+						bind:value={selectedSourcePath}
+						onchange={sourceChanged}
+						>{#each profile.sources as source (source.path)}<option value={source.path}
+								>{source.path}{source.snapper_config
+									? ` �� Snapper ${source.snapper_config}`
+									: ''}</option
+							>{/each}</select
+					></label
+				>
+				<label
+					><span>{t('backupDestination')}</span><select
+						bind:value={selectedDestinationId}
+						onchange={destinationChanged}
+						>{#each destinations as destination (destination.id)}<option value={destination.id}
+								>{destination.name}</option
+							>{/each}</select
+					></label
+				>
+				<label class="wide"
+					><span>{t('restorePoint')}</span>
+					<div class="input-action">
+						<select
+							bind:value={selectedSnapshot}
+							disabled={loadingPoints || restorePoints.length === 0}
+							>{#each restorePoints as point (point.name)}<option value={point.name}
+									>{formatPoint(point)}</option
+								>{/each}</select
+						><button
+							class="secondary"
+							type="button"
+							onclick={refreshRestorePoints}
+							disabled={loadingPoints}
+							><span class:spin={loadingPoints}><RefreshCw size={15} /></span>{t(
+								'refreshSnapshots'
+							)}</button
+						>
+					</div>
+					<small
+						>{loadingPoints
+							? t('loadingSnapshots')
+							: restorePoints.length === 0
+								? t('noRestorePoints')
+								: selectedPoint?.parent_name
+									? `${t('snapshotParent')}: ${selectedPoint.parent_name}`
+									: (selectedPoint?.name ?? '')}</small
+					></label
+				>
+				<label class="wide"
+					><span>{t('stagingRoot')}</span>
+					<div class="input-action">
+						<input
+							bind:value={stagingRoot}
+							placeholder="/mnt/restore-staging"
+							spellcheck="false"
+						/><button type="button" class="secondary" onclick={browseStaging}
+							><FolderOpen size={15} />{t('chooseFolder')}</button
+						>
+					</div>
+					<small>{t('stagingBtrfsRequired')}</small></label
+				>
+			</div>
+			{#if error}<div class="restore-error"><CircleAlert size={15} /><span>{error}</span></div>{/if}
+			<div class="step-actions">
+				<button class="secondary" type="button" onclick={() => (step = 1)}
+					>{t('recoveryBack')}</button
+				><button
+					class="primary"
+					type="button"
+					onclick={advanceToReview}
+					disabled={!selectedSnapshot}>{t('recoveryContinue')}</button
+				>
 			</div>
 		{:else}
-			<div class="restore-safety">
+			{#if machinePlan}<RecoveryReview plan={machinePlan} {locale} />{/if}
+			<div class="coverage-card">
 				<ShieldCheck size={18} />
-				<div>
-					<strong>{t('stagingSafetyTitle')}</strong>
-					<span>{t('stagingSafetyDesc')}</span>
+				<div><strong>{t('recoveryCoverage')}</strong><span>{t('recoveryCoverageDesc')}</span></div>
+			</div>
+			{#if rootSelected || machinePlan?.requires_rescue_environment}
+				<div class="restore-warning">
+					<CircleAlert size={18} />
+					<div>
+						<strong>{t('requiresRescue')}</strong><span>{t('rootRestoreRequiresRescue')}</span>
+					</div>
 				</div>
-			</div>
-		{/if}
-
-		<div class="restore-actions">
-			<div class="restore-target">
-				<HardDrive size={16} />
-				<span>{selectedSnapshot || '—'} → {stagingRoot || '—'}</span>
-			</div>
-			<button
-				type="button"
-				class="primary"
-				disabled={restoring || rootSelected || !selectedSnapshot || !stagingRoot.trim()}
-				onclick={runRestore}
-			>
-				{#if restoring}
-					<RotateCcw class="spin" size={16} /> {t('restoring')}
-				{:else}
-					<Play size={16} fill="currentColor" /> {t('stageRestoreNow')}
-				{/if}
-			</button>
-		</div>
-
-		{#if progress}
-			<div
-				class="restore-progress"
-				class:complete={progress.event === 'finished'}
-				class:failed={progress.event === 'failed'}
-			>
-				<span class="dot"></span>
-				<div>
-					<strong>{phaseLabel(progress.phase)}</strong>
-					<small>{progress.message}</small>
+			{:else}
+				<div class="restore-safety">
+					<ShieldCheck size={18} />
+					<div><strong>{t('stagingSafetyTitle')}</strong><span>{t('stagingSafetyDesc')}</span></div>
 				</div>
+			{/if}
+			<div class="restore-actions">
+				<button class="secondary" type="button" onclick={() => (step = 2)}
+					>{t('recoveryBack')}</button
+				>
+				<div class="restore-target">
+					<HardDrive size={16} /><span>{selectedSnapshot || '���'} ��� {stagingRoot || '���'}</span>
+				</div>
+				<button
+					type="button"
+					class="primary"
+					disabled={restoring || rootSelected || !selectedSnapshot || !stagingRoot.trim()}
+					onclick={runRestore}
+					>{#if restoring}<RotateCcw class="spin" size={16} />{t('restoring')}{:else}<Play
+							size={16}
+							fill="currentColor"
+						/>{t('stageRestoreNow')}{/if}</button
+				>
 			</div>
-		{/if}
-
-		{#if error}
-			<div class="restore-error"><CircleAlert size={15} /><span>{error}</span></div>
+			{#if progress}<div
+					class="restore-progress"
+					class:complete={progress.event === 'finished'}
+					class:failed={progress.event === 'failed'}
+				>
+					<span class="dot"></span>
+					<div><strong>{phaseLabel(progress.phase)}</strong><small>{progress.message}</small></div>
+				</div>{/if}
+			{#if error}<div class="restore-error"><CircleAlert size={15} /><span>{error}</span></div>{/if}
 		{/if}
 	</article>
 </div>
@@ -327,7 +427,8 @@
 	.restore-target,
 	.restore-progress,
 	.restore-error,
-	.input-action {
+	.input-action,
+	.step-actions {
 		display: flex;
 		align-items: center;
 	}
@@ -363,18 +464,34 @@
 	.restore-safety span,
 	.restore-warning span,
 	.coverage-card span,
-	.restore-progress small {
+	.restore-progress small,
+	.muted {
 		color: var(--muted);
 		font-size: 10px;
 		line-height: 1.4;
+	}
+	.wizard-steps {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 6px;
+	}
+	.wizard-steps span {
+		padding: 7px 8px;
+		border-bottom: 2px solid var(--border);
+		color: var(--muted);
+		font-size: 9px;
+	}
+	.wizard-steps span.active {
+		border-color: var(--accent);
+		color: var(--text);
+		font-weight: 700;
 	}
 	.restore-form {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
 	}
-	.restore-point-field,
-	.staging-field {
+	.wide {
 		grid-column: span 2;
 	}
 	label {
@@ -425,9 +542,10 @@
 		display: grid;
 		gap: 2px;
 	}
+	.step-actions,
 	.restore-actions {
 		justify-content: space-between;
-		gap: 12px;
+		gap: 10px;
 	}
 	.restore-target {
 		min-width: 0;
@@ -464,6 +582,11 @@
 	.failed .dot {
 		background: var(--danger);
 	}
+	button {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
 	.spin {
 		animation: spin 1s linear infinite;
 	}
@@ -473,11 +596,11 @@
 		}
 	}
 	@media (max-width: 760px) {
-		.restore-form {
+		.restore-form,
+		.wizard-steps {
 			grid-template-columns: 1fr;
 		}
-		.restore-point-field,
-		.staging-field {
+		.wide {
 			grid-column: auto;
 		}
 		.restore-actions {

@@ -2,6 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { createDefaultConfiguration, type DiscoveredSource, type HarborConfig } from './config';
 import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from './engine';
+import type { MachineRecoveryPlan, MachineRecoveryRequest } from './recovery';
 import {
 	demoStatus,
 	type BackupProgressEvent,
@@ -383,6 +384,71 @@ export async function sendProfileNow(
 	const channel = new Channel<BackupStreamEvent>();
 	channel.onmessage = (event) => onProgress?.(event);
 	await invoke<void>('send_snapshot_now_stream', { profileId, onEvent: channel });
+}
+
+export interface RecoveryKitContext {
+	manifest: {
+		schema_version: number;
+		created_at: string;
+		profile_id: string;
+		profile_name: string;
+		hostname: string;
+		distro_id: string | null;
+		distro_name: string | null;
+		kernel_release: string;
+	};
+	os_release: string;
+}
+
+export async function loadRecoveryKitContext(
+	config: HarborConfig,
+	profileId: string,
+	destinationId: string
+): Promise<RecoveryKitContext> {
+	if (!isTauri()) {
+		return {
+			manifest: {
+				schema_version: 1,
+				created_at: new Date().toISOString(),
+				profile_id: profileId,
+				profile_name: 'Demo recovery',
+				hostname: 'workstation',
+				distro_id: 'linux',
+				distro_name: 'Linux',
+				kernel_release: 'demo'
+			},
+			os_release: 'ID=linux\nNAME="Linux"\n'
+		};
+	}
+	const raw = await invoke<string>('recovery_kit_context', {
+		configuration: JSON.stringify(config),
+		profileId,
+		destinationId
+	});
+	return JSON.parse(raw) as RecoveryKitContext;
+}
+
+export async function loadLocalOsRelease(): Promise<string> {
+	if (!isTauri()) return 'ID=linux\nNAME="Linux"\n';
+	return invoke<string>('local_os_release');
+}
+
+export async function planMachineRecovery(
+	request: MachineRecoveryRequest
+): Promise<MachineRecoveryPlan> {
+	if (!isTauri()) {
+		return {
+			intent: request.intent,
+			hostname: request.requested_hostname || request.source_hostname,
+			compatibility: 'full_system',
+			requires_rescue_environment: request.includes_system,
+			actions: []
+		};
+	}
+	const raw = await invoke<string>('machine_recovery_plan', {
+		request: JSON.stringify(request)
+	});
+	return JSON.parse(raw) as MachineRecoveryPlan;
 }
 
 export interface RestorePoint {

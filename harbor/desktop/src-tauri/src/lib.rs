@@ -1048,6 +1048,49 @@ async fn run_privileged_profile_command(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+async fn run_unscoped_command_with_stdin(
+    app: &tauri::AppHandle,
+    command: &str,
+    input: &[u8],
+) -> Result<String, String> {
+    let helper = helper_executable(app)?;
+    let mut child = Command::new(helper)
+        .arg(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("Cannot start Harbor helper: {err}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input)
+            .await
+            .map_err(|err| format!("Cannot send data to Harbor helper: {err}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|err| format!("Cannot finish Harbor helper input: {err}"))?;
+    } else {
+        return Err("Harbor helper stdin was unavailable".into());
+    }
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|err| format!("Cannot wait for Harbor helper: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(if stderr.is_empty() {
+            format!("Harbor helper failed with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 async fn run_profile_command_with_stdin(
     app: &tauri::AppHandle,
     command: &str,
@@ -1355,6 +1398,36 @@ async fn send_draft_now_stream(
 }
 
 #[tauri::command]
+async fn recovery_kit_context(
+    app: tauri::AppHandle,
+    configuration: String,
+    profile_id: String,
+    destination_id: String,
+) -> Result<String, String> {
+    let configuration: Value =
+        serde_json::from_str(&configuration).map_err(|err| err.to_string())?;
+    let query = serde_json::json!({
+        "configuration": configuration,
+        "destination_id": destination_id,
+    });
+    let encoded = serde_json::to_vec(&query).map_err(|err| err.to_string())?;
+    run_profile_command_with_stdin(&app, "recovery-kit-context-json", &profile_id, &encoded).await
+}
+
+#[tauri::command]
+async fn machine_recovery_plan(app: tauri::AppHandle, request: String) -> Result<String, String> {
+    let request: Value = serde_json::from_str(&request).map_err(|err| err.to_string())?;
+    let encoded = serde_json::to_vec(&request).map_err(|err| err.to_string())?;
+    run_unscoped_command_with_stdin(&app, "machine-recovery-plan-json", &encoded).await
+}
+
+#[tauri::command]
+fn local_os_release() -> Result<String, String> {
+    std::fs::read_to_string("/etc/os-release")
+        .map_err(|err| format!("Cannot read /etc/os-release: {err}"))
+}
+
+#[tauri::command]
 async fn list_restore_points(
     app: tauri::AppHandle,
     configuration: String,
@@ -1605,6 +1678,9 @@ pub fn run() {
             send_snapshot_now_stream,
             send_draft_now_stream,
             stop_active_backup,
+            recovery_kit_context,
+            machine_recovery_plan,
+            local_os_release,
             list_restore_points,
             stage_restore,
             replicate_lxc,

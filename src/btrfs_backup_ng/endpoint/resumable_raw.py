@@ -341,6 +341,31 @@ class ResumableRawSink:
         self.manifest = updated
         return checkpoint
 
+    def transition(self, state: str) -> None:
+        """Persist an explicit worker state without inventing a checkpoint."""
+        from ..core.checkpoint_v2 import VALID_STATES
+
+        self._check()
+        if state not in VALID_STATES or state in ("completed", "discarded"):
+            raise ValueError("worker may not mark completed/discarded via transition")
+        updated = replace(self.manifest, state=state)
+        _manifest_commit(self._dir_fd, self.manifest_name, updated, self.guard)
+        self.manifest = updated
+
+    def discard(self, *, confirmed: bool) -> None:
+        """Explicitly remove only this transaction, never finalized restore points."""
+        if not confirmed:
+            raise PermissionError("partial discard requires explicit confirmation")
+        self._check()
+        if _exists(self._dir_fd, self.final_name):
+            raise RuntimeError("a finalized snapshot exists: discard cannot remove it")
+        self.guard.validate_fd(self._dir_fd)
+        os.unlink(self.part_name, dir_fd=self._dir_fd)
+        self.guard.validate_fd(self._dir_fd)
+        os.unlink(self.manifest_name, dir_fd=self._dir_fd)
+        os.fsync(self._dir_fd)
+        self.close()
+
     def authorize_replayed_prefix(self, proof: ReplayProof) -> None:
         """Enable remote append only for a fully hash-matched committed prefix.
 

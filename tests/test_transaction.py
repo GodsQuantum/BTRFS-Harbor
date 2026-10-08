@@ -80,6 +80,14 @@ class TestLogTransaction:
         # Should not raise
         log_transaction(action="test", status="completed")
 
+    def test_new_transaction_log_file_is_private(self, temp_log_dir):
+        """Fresh transaction logs must not expose paths/errors to other users."""
+        log_path = temp_log_dir / "transactions.jsonl"
+        set_transaction_log(log_path)
+        log_transaction(action="snapshot", status="completed")
+
+        assert (log_path.stat().st_mode & 0o777) == 0o600
+
     def test_log_basic_transaction(self, temp_log_file):
         """Test logging a basic transaction."""
         set_transaction_log(temp_log_file)

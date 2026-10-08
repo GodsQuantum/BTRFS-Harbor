@@ -231,6 +231,7 @@ struct EngineConfig {
 struct EngineGlobal {
     snapshot_dir: &'static str,
     incremental: bool,
+    transaction_log: String,
     retention: EngineRetention,
 }
 
@@ -326,6 +327,7 @@ pub fn render_engine_config(
         global: EngineGlobal {
             snapshot_dir: ".snapshots",
             incremental: true,
+            transaction_log: format!("/var/tmp/btrfs-harbor/transactions/{}.jsonl", profile.id),
             retention: EngineRetention::from(&profile.retention),
         },
         volumes,
@@ -819,6 +821,10 @@ mod tests {
         let rendered = render_engine_config(&profile, &[destination]).unwrap();
 
         assert!(rendered.contains("incremental = true"));
+        assert!(rendered.contains(&format!(
+            "transaction_log = \"/var/tmp/btrfs-harbor/transactions/{}.jsonl\"",
+            profile.id
+        )));
         assert!(rendered.contains("source = \"snapper\""));
         assert!(rendered.contains("config_name = \"root\""));
         assert!(rendered.contains("path = \"raw:///mnt/backup-nas/harbor/workstation/rootfs\""));

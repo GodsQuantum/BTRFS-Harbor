@@ -97,7 +97,12 @@ def log_transaction(
 
     try:
         with _transaction_lock:
-            with open(_transaction_log_path, "a", encoding="utf-8") as f:
+            fd = os.open(
+                _transaction_log_path,
+                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                0o600,
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record) + "\n")
     except OSError as e:
         logger.warning("Failed to write transaction log: %s", e)

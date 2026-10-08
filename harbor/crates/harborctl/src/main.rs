@@ -338,6 +338,37 @@ fn parse_restore_points(raw: &str) -> Result<Vec<RestorePoint>> {
     Ok(points)
 }
 
+fn query_restore_points(engine: &Path, uri: &str) -> Result<Vec<RestorePoint>> {
+    let output = Command::new(engine)
+        .args(["raw", "list", uri, "--json"])
+        .output()
+        .with_context(|| format!("failed to list backup snapshots for {uri}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        bail!(
+            "backup snapshot listing failed for {uri}: {}",
+            if stderr.is_empty() { stdout } else { stderr }
+        );
+    }
+    parse_restore_points(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn require_restore_coverage(
+    source: &BackupSource,
+    destination: &DestinationSpec,
+    points: &[RestorePoint],
+) -> Result<()> {
+    if points.is_empty() {
+        bail!(
+            "backup produced no restorable point for source {} on destination {}",
+            source.path.display(),
+            destination.name
+        );
+    }
+    Ok(())
+}
+
 fn resolve_restore_target<'a>(
     config: &'a HarborConfig,
     profile: &'a BackupProfile,
@@ -403,19 +434,7 @@ fn list_restore_points_json(id: Uuid) -> Result<()> {
 
     let uri = engine_target_uri(source, destination)?;
     let engine = engine_executable_for_policy(query.configuration.engine_policy)?;
-    let output = Command::new(engine)
-        .args(["raw", "list", &uri, "--json"])
-        .output()
-        .context("failed to list backup snapshots")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        bail!(
-            "backup snapshot listing failed: {}",
-            if stderr.is_empty() { stdout } else { stderr }
-        );
-    }
-    let points = parse_restore_points(&String::from_utf8_lossy(&output.stdout))?;
+    let points = query_restore_points(&engine, &uri)?;
     serde_json::to_writer(std::io::stdout(), &points)?;
     Ok(())
 }
@@ -929,6 +948,23 @@ fn execute_profile_jsonl(
     let status = run_streaming_command(engine, "backup")?;
     if !status.success() {
         bail!("btrfs-backup-ng run failed with {status}");
+    }
+
+    for destination in &selected {
+        for source in &profile.sources {
+            let uri = engine_target_uri(source, destination)?;
+            emit_progress(
+                "phase",
+                "verify",
+                &format!(
+                    "Checking restore-point coverage for {}",
+                    source.path.display()
+                ),
+                None,
+            )?;
+            let points = query_restore_points(&engine_resolution.executable, &uri)?;
+            require_restore_coverage(source, destination, &points)?;
+        }
     }
 
     if profile.verify_after_backup {
@@ -2063,6 +2099,40 @@ line two"
             Some("home-20261005T020000")
         );
         assert_eq!(points[0].checksum.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn restore_coverage_rejects_a_selected_source_with_no_restore_point() {
+        let config = configuration();
+        let profile = &config.profiles[0];
+        let source = &profile.sources[0];
+        let destination = &config.destinations[0];
+
+        let err = require_restore_coverage(source, destination, &[])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("no restorable point"), "{err}");
+        assert!(err.contains("/"), "{err}");
+        assert!(err.contains("Backup NAS"), "{err}");
+    }
+
+    #[test]
+    fn restore_coverage_accepts_a_finalized_restore_point() {
+        let config = configuration();
+        let profile = &config.profiles[0];
+        let source = &profile.sources[0];
+        let destination = &config.destinations[0];
+        let points = vec![RestorePoint {
+            name: "root-20261008T120000".into(),
+            created: Some("2026-10-08T12:00:00+00:00".into()),
+            size: Some(1024),
+            parent_name: None,
+            checksum: Some("abc".into()),
+            origin: Some("native".into()),
+        }];
+
+        require_restore_coverage(source, destination, &points).unwrap();
     }
 
     #[test]

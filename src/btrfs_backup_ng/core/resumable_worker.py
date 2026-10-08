@@ -77,6 +77,17 @@ def run_worker(
                 raw = next(checkpoints)
             except StopIteration:
                 break
+            # A short read at a true EOF can also be a Btrfs send process
+            # that died part-way through a checkpoint. Never COMMIT that
+            # incomplete frame unless the source process exited successfully.
+            # Otherwise a subsequent Resume cannot append after a short
+            # checkpoint, and would strand every previous valid checkpoint.
+            if len(raw) < chunk_size and source_exit_status is not None:
+                if source_exit_status() != 0:
+                    sink.transition("failed_resumable")
+                    raise RuntimeError(
+                        "source send failed with an incomplete final checkpoint"
+                    )
             frame = compress_frame(raw, level=level, threads=threads)
             # A stop before commit discards only the current (uncommitted)
             # local frame, not any previously acknowledged checkpoint.

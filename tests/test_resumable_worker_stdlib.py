@@ -183,6 +183,35 @@ class WorkerTest(unittest.TestCase):
                 )
             self.assertNotEqual(sink.manifest.state, "finalizing")
 
+    def test_failed_send_short_tail_never_commits_or_breaks_resume(self):
+        # A crashed btrfs send may close stdout after writing only part of
+        # the next raw checkpoint. Its short final block is NOT durable.
+        with self.create() as sink:
+            with self.assertRaisesRegex(RuntimeError, "source"):
+                worker.run_worker(
+                    io.BytesIO(b"A" * 16 + b"B" * 5),
+                    sink,
+                    action=lambda: "run",
+                    chunk_size=16,
+                    level=1,
+                    source_exit_status=lambda: 17,
+                )
+            self.assertEqual(len(sink.manifest.checkpoints), 1)
+            self.assertEqual(sink.manifest.checkpoints[0].raw_length, 16)
+        with self.reopen() as sink:
+            result = worker.resume_worker(
+                io.BytesIO(b"A" * 16 + b"B" * 16 + b"C" * 3),
+                sink,
+                identity(),
+                dest(),
+                action=lambda: "run",
+                chunk_size=16,
+                level=1,
+                source_exit_status=lambda: 0,
+            )
+            self.assertEqual(result.status, "ready_to_finalize")
+            self.assertEqual(len(sink.manifest.checkpoints), 3)
+
     def test_pause_already_requested_before_read_does_not_read(self):
         class Refuse(io.BytesIO):
             def read(self, size=-1):

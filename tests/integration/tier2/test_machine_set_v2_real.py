@@ -172,6 +172,29 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
         f.read_text() == "home payload v2\n" for f in final_stage.rglob("user.txt")
     )
 
+    # Retention must keep the full incremental dependency graph despite
+    # a user policy of only one current set. This is a read-only plan.
+    retention = _run(
+        "set-retention-plan",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--keep",
+        "1",
+        "--min",
+        "0d",
+        "--allow-local",
+        "--experimental",
+    )
+    assert retention["dry_run"] is True
+    assert retention["deletion_performed"] is False
+    assert set(retention["keep_sets"]) == {
+        outcome["set_id"],
+        incremental_machine["set_id"],
+    }
+    assert not retention["retention_eligible_sets"]
+
     # Completed backup validity must not depend on retaining the original
     # snapshot; it should remain verifiable after loss of the old machine.
     saved = json.loads(

@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Iterator
 
 from .. import __util__
+from ..config import RetentionConfig
+from ..core.machine_retention_v2 import SetPoint, calculate_set_retention
+from ..endpoint.raw_metadata import discover_raw_snapshots
 from ..core.machine_inventory_v2 import inspect_live_machine
 from ..core.native_snapshots import (
     NATIVE_FOLDER,
@@ -291,6 +294,102 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
     return data
 
 
+def _retention_plan(root: Path, args: argparse.Namespace) -> int:
+    """Read-only, fail-closed policy preview; NEVER unlinks a backup."""
+    profile = _canonical_uuid(args.profile_id)
+    counts = [
+        args.hourly,
+        args.daily,
+        args.weekly,
+        args.monthly,
+        args.yearly,
+        args.keep,
+    ]
+    if any(type(value) is not int or value < 0 or value > 10000 for value in counts):
+        raise ValueError("retention bucket values must be between 0 and 10000")
+    retention = RetentionConfig(
+        min=args.min,
+        hourly=args.hourly,
+        daily=args.daily,
+        weekly=args.weekly,
+        monthly=args.monthly,
+        yearly=args.yearly,
+        keep=args.keep,
+    )
+    guard, _ = _open_guard(root, allow_local=args.allow_local)
+    with guard:
+        guard.validate_fd(guard.directory_fd)
+        names = sorted(os.listdir(guard.directory_fd))
+        if len(names) > 8192:
+            raise ValueError(
+                "too many destination entries for safe retention inventory"
+            )
+        catalog_names = [
+            name
+            for name in names
+            if name.startswith(".harbor-machine-set-") and name.endswith(".json")
+        ]
+        records: list[dict] = []
+        for name in catalog_names:
+            identifier = name[len(".harbor-machine-set-") : -len(".json")]
+            record = _read(root, _canonical_uuid(identifier))
+            if record["profile_id"] != profile:
+                raise ValueError(
+                    "another backup profile shares this destination; refusing plan"
+                )
+            records.append(record)
+        snapshots = discover_raw_snapshots(root)
+        # Strict metadata: never issue a deletion proposal for incomplete
+        # or legacy sidecars, unknown parents, symlinks, or missing streams.
+        graph: dict[str, str | None] = {}
+        for row in snapshots:
+            if (
+                not row.name
+                or not row.stream_path.is_file()
+                or row.stream_path.is_symlink()
+                or row.metadata_path.is_symlink()
+                or not row.metadata_path.is_file()
+                or row.stream_completeness != "complete"
+                or row.provenance_origin != "native-write"
+                or row.checksum_algorithm != "sha256"
+                or not isinstance(row.checksum_value, str)
+                or len(row.checksum_value) != 64
+                or (row.parent_uuid is not None and not row.parent_name)
+            ):
+                raise ValueError("unverified raw archive in retention inventory")
+            graph[row.name] = row.parent_name
+        points: list[SetPoint] = []
+        for record in records:
+            stamp = datetime.fromisoformat(record["created_utc"])
+            points.append(
+                SetPoint(
+                    record["set_id"],
+                    stamp,
+                    tuple(member["archive"] for member in record["members"]),
+                    record["status"] == "completed_btrfs_only",
+                )
+            )
+        plan = calculate_set_retention(
+            points, graph, retention, now=datetime.now(timezone.utc)
+        )
+        guard.validate_fd(guard.directory_fd)
+    print(
+        json.dumps(
+            {
+                "dry_run": True,
+                "deletion_performed": False,
+                "keep_sets": sorted(plan.keep),
+                "protected_incremental_sets": sorted(plan.protected_dependencies),
+                "retention_eligible_sets": sorted(plan.eligible),
+                "keep_archives": sorted(plan.kept_archives),
+                "note": "Preview only; automatic pruning is not enabled.",
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def _sources_from_inventory() -> tuple[list[str], dict]:
     inventory = inspect_live_machine()
     if not inventory["inventory_complete"]:
@@ -322,6 +421,8 @@ def execute_machine_set(args: argparse.Namespace) -> int:
         )
     root = _target_root(args.target)
     action = args.checkpoint_action
+    if action == "set-retention-plan":
+        return _retention_plan(root, args)
     if action == "set-list":
         rows: list[dict[str, object]] = []
         for name in sorted(os.listdir(root))[:4096]:

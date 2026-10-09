@@ -528,6 +528,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         "set-status",
         "set-restore",
         "set-list",
+        "set-retention-plan",
     ):
         set_parser = v2_actions.add_parser(
             set_action, help="Portable Btrfs-only multi-subvolume backup set"
@@ -539,8 +540,20 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         if set_action == "set-start":
             set_parser.add_argument("--profile-id", required=True)
             set_parser.add_argument("--source", action="append")
-        elif set_action != "set-list":
+        elif set_action not in ("set-list", "set-retention-plan"):
             set_parser.add_argument("--set-id", required=True)
+        if set_action == "set-retention-plan":
+            set_parser.add_argument("--profile-id", required=True)
+            set_parser.add_argument("--min", default="1d")
+            for bucket, default in (
+                ("hourly", 0),
+                ("daily", 7),
+                ("weekly", 4),
+                ("monthly", 3),
+                ("yearly", 0),
+            ):
+                set_parser.add_argument(f"--{bucket}", type=int, default=default)
+            set_parser.add_argument("--keep", type=int, default=0)
         if set_action == "set-restore":
             set_parser.add_argument("--staging", required=True)
             set_parser.add_argument("--confirm", action="store_true")

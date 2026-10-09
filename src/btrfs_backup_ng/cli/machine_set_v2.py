@@ -226,6 +226,9 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
                 profile_id=data["profile_id"],
                 source=member["snapshot_path"],
                 source_mode="path",
+                # Harbor-owned readonly native snapshots can reuse verified
+                # remote parent chains, instead of sending fulls forever.
+                native_root=member["original_mount"],
                 parent=None,
                 checkpoint_size_mib=128,
                 performance="balanced",

@@ -106,3 +106,68 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
     assert actual["restored"] is True and actual["bootable"] is False
     assert any(f.read_text() == "root payload\n" for f in staging.rglob("system.txt"))
     assert any(f.read_text() == "home payload\n" for f in staging.rglob("user.txt"))
+
+    # A subsequent machine point must choose an independently verified
+    # incremental parent for BOTH nested Btrfs sources.
+    (root / "system.txt").write_text("root payload v2\n")
+    (home / "user.txt").write_text("home payload v2\n")
+    incremental_machine = _run(
+        "set-start",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--source",
+        str(root),
+        "--source",
+        str(home),
+        "--allow-local",
+        "--state-dir",
+        str(journal),
+        "--experimental",
+    )
+    assert incremental_machine["status"] == "completed_btrfs_only"
+    second_names = [m["archive"] for m in incremental_machine["members"]]
+    first_names = [m["archive"] for m in outcome["members"]]
+    assert second_names != first_names
+
+    records = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "btrfs_backup_ng",
+            "raw",
+            "list",
+            str(archive),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=90,
+    )
+    by_name = {item["name"]: item for item in json.loads(records.stdout)}
+    for second, parent in zip(second_names, first_names, strict=True):
+        assert by_name[second]["parent_name"] == parent
+
+    final_stage = btrfs_volume / "incremental-fresh"
+    final_stage.mkdir()
+    recovered = _run(
+        "set-restore",
+        "--target",
+        str(archive),
+        "--set-id",
+        incremental_machine["set_id"],
+        "--staging",
+        str(final_stage),
+        "--allow-local",
+        "--experimental",
+        "--confirm",
+    )
+    assert recovered["restored"] is True
+    assert any(
+        f.read_text() == "root payload v2\n" for f in final_stage.rglob("system.txt")
+    )
+    assert any(
+        f.read_text() == "home payload v2\n" for f in final_stage.rglob("user.txt")
+    )

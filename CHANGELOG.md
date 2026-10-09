@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — crash-safe snapshot reservation and mounted-target checks
+
+- Persist each Btrfs subvolume snapshot reservation before creation; on
+  SIGKILL recover the exact intended readonly source.
+- Installed schedules refuse detached mount, symlinks and path traversal
+  while creating backup directories; descriptor-relative operations.
+- Real disposable NFSv4 end-to-end remount/resume SHA-256 acceptance on GitHub.
+- Added privileged mount-detach and ENOSPC recovery tests.
+- Not yet a bootable disk restore or a unified SSH/timer v2 engine.
+
 ## [0.2.6-rc.7] — supervised multi-subvolume backup/recovery preview
 
 - Portable Btrfs-only machine-set catalog for mounted persistent subvolumes;

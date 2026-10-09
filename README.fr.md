@@ -32,6 +32,22 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## Préversion non publiée — résistance aux coupures
+
+- Les identifiants des snapshots multivolumes sont enregistrés **avant**
+  leur création ; une coupure ne les laisse plus sans catalogue récupérable.
+- La préparation des destinations des tâches installées se fait avec des
+  descripteurs vérifiés : montage disparu, lien symbolique et traversée de
+  chemin sont refusés.
+- Un test intégral sur un **véritable NFSv4 jetable**, hébergé par GitHub,
+  a réussi : SIGKILL, démontage/remontage, reprise sans perdre les checkpoints
+  validés et comparaison SHA-256 des données restaurées.
+- Des tests séparés couvrent le démontage à chaud et le manque d'espace.
+
+**Non stabilisé :** reconstruction amorçable UEFI, migration SSH et tâches
+planifiées vers les checkpoints v2, et coupure du serveur pendant une écriture.
+Les changements ci-dessus ne sont pas dans le binaire rc.7 déjà publié.
+
 ## v0.2.6-rc.7 — préversion supervisée des ensembles Btrfs
 
 L'interface native propose **Sauvegarder tous les volumes Btrfs** :

@@ -32,6 +32,22 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## Unreleased preview — crash and mount-loss hardening
+
+- Multi-volume snapshot names are journaled **before** creation; after a crash,
+  Harbor can reattach the exact readonly snapshot instead of leaving it unknown.
+- The installed profile helper now creates target subdirectories via validated
+  directory descriptors; a detached mount, symlink or path traversal is refused.
+- An isolated GitHub-hosted **real NFSv4** end-to-end test successfully
+  exercised SIGKILL, NFS unmount/remount, checksum-preserving checkpoint Resume
+  and restored-content SHA-256 verification.
+- Separate tests cover disposable mount detachment and target ENOSPC recovery.
+
+**Not yet stable:** bootable UEFI disk reconstruction, SSH/scheduler migration
+to checkpoint v2, and network-server failure *during* an active write remain
+separate acceptance requirements. The published rc.7 binary does not contain
+these unreleased changes.
+
 ## v0.2.6-rc.7 — supervised Btrfs volume-set prerelease
 
 The native desktop preview now offers **Back up all Btrfs volumes**, one

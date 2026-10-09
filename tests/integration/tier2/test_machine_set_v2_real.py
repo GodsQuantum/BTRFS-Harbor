@@ -172,6 +172,28 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
         f.read_text() == "home payload v2\n" for f in final_stage.rglob("user.txt")
     )
 
+    # Completed backup validity must not depend on retaining the original
+    # snapshot; it should remain verifiable after loss of the old machine.
+    saved = json.loads(
+        (
+            archive / f".harbor-machine-set-{incremental_machine['set_id']}.json"
+        ).read_text()
+    )
+    original = Path(saved["members"][0]["snapshot_path"])
+    subprocess.run(["btrfs", "subvolume", "delete", str(original)], check=True)
+    rechecked = _run(
+        "set-resume",
+        "--target",
+        str(archive),
+        "--set-id",
+        incremental_machine["set_id"],
+        "--allow-local",
+        "--state-dir",
+        str(journal),
+        "--experimental",
+    )
+    assert rechecked["status"] == "completed_btrfs_only"
+
 
 def test_machine_set_recovery_after_snapshot_creation_crash(
     btrfs_volume: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

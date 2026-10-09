@@ -16,10 +16,15 @@ use harbor_storage::{
 };
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -1434,22 +1439,122 @@ fn selected_destinations<'a>(
         .collect()
 }
 
+fn checked_directory_fd(destination: &DestinationSpec) -> Result<OwnedFd> {
+    // Neither network roots nor parent paths are invented by a backup job.
+    if destination.path.is_symlink() || !destination.path.is_dir() {
+        bail!(
+            "destination {} must be an existing real directory",
+            destination.path.display()
+        );
+    }
+    let cpath = CString::new(destination.path.as_os_str().as_bytes())
+        .context("backup destination contains a NUL byte")?;
+    // SAFETY: cpath is NUL terminated, and open returns a new owned fd.
+    let fd = unsafe {
+        libc::open(
+            cpath.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("cannot open destination {}", destination.path.display()));
+    }
+    // SAFETY: successful open returned ownership of a new, nonnegative fd.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+fn ensure_live_destination(destination: &DestinationSpec, root_fd: &OwnedFd) -> Result<()> {
+    let current_mounts = fs::read_to_string("/proc/self/mountinfo")
+        .context("cannot recheck live destination mount table")?;
+    let mounts = MountTable::from_mountinfo(&current_mounts);
+    validate_destination_mount(destination, &mounts)
+        .with_context(|| format!("destination {} mount changed", destination.name))?;
+
+    if destination.path.is_symlink() {
+        bail!("destination directory became a symbolic link");
+    }
+    let path = fs::metadata(&destination.path)
+        .context("destination disappeared while preparing target subdirectories")?;
+    // fstat against the directory descriptor pinned before any mkdirat.
+    // SAFETY: root_fd is valid, and stat_buf points to writable initialized storage.
+    let mut stat_buf: libc::stat = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::fstat(root_fd.as_raw_fd(), &mut stat_buf) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("cannot stat pinned destination descriptor");
+    }
+    if path.dev() != stat_buf.st_dev || path.ino() != stat_buf.st_ino {
+        bail!("destination mount was detached or replaced during backup preparation");
+    }
+    Ok(())
+}
+
+fn create_target_below_pinned(
+    destination: &DestinationSpec,
+    root_fd: &OwnedFd,
+    target_subdir: &str,
+) -> Result<()> {
+    let mut current = root_fd.try_clone()?;
+    let mut components = 0usize;
+    for part in Path::new(target_subdir).components() {
+        let Component::Normal(name) = part else {
+            bail!("unsafe backup destination subdirectory component");
+        };
+        components += 1;
+        if components > 128 {
+            bail!("backup target has too many subdirectory components");
+        }
+        let cpart =
+            CString::new(name.as_bytes()).context("backup subdirectory contains a NUL byte")?;
+        ensure_live_destination(destination, root_fd)?;
+
+        // SAFETY: all path components are relative to a directory descriptor,
+        // and only one component is created; it cannot rebuild a missing mount.
+        let made = unsafe { libc::mkdirat(current.as_raw_fd(), cpart.as_ptr(), 0o700) };
+        if made != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(err).context("cannot create target below pinned destination");
+            }
+        }
+        // O_NOFOLLOW also rejects symlinks left by other tenants.
+        // SAFETY: cpart is NUL terminated and openat yields a new owned fd.
+        let child = unsafe {
+            libc::openat(
+                current.as_raw_fd(),
+                cpart.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if child < 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("backup target component is unsafe or no longer accessible");
+        }
+        // SAFETY: the new fd has single ownership and is closed on drop.
+        current = unsafe { OwnedFd::from_raw_fd(child) };
+        ensure_live_destination(destination, root_fd)?;
+    }
+    if components == 0 {
+        bail!("backup target subdirectory cannot be empty");
+    }
+    Ok(())
+}
+
 fn prepare_local_target_dirs(profile: &BackupProfile, destination: &DestinationSpec) -> Result<()> {
     if matches!(destination.kind, DestinationKind::Ssh) {
         return Ok(());
     }
-
-    if !destination.path.exists() {
-        bail!(
-            "destination base {} does not exist; Harbor never creates a missing mount root",
-            destination.path.display()
-        );
-    }
-
+    let pinned = checked_directory_fd(destination)?;
     for source in &profile.sources {
-        let path = destination.path.join(&source.target_subdir);
-        fs::create_dir_all(&path)
-            .with_context(|| format!("cannot create backup target {}", path.display()))?;
+        create_target_below_pinned(destination, &pinned, &source.target_subdir).with_context(
+            || {
+                format!(
+                    "cannot safely prepare backup target {}",
+                    destination.path.join(&source.target_subdir).display()
+                )
+            },
+        )?;
     }
     Ok(())
 }
@@ -1665,6 +1770,48 @@ mod tests {
             },
             verify_after_backup: true,
         }
+    }
+
+    #[test]
+    fn pinned_backup_destination_preparation_is_leaf_only_and_refuses_symlinks() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("harbor-mkdirat-{}", Uuid::new_v4()));
+        fs::create_dir(&base).unwrap();
+        let backup = base.join("backup");
+        fs::create_dir(&backup).unwrap();
+        let destination = DestinationSpec {
+            id: Uuid::new_v4(),
+            name: "isolated test".into(),
+            kind: DestinationKind::Local,
+            path: backup.clone(),
+            mount_point: None,
+            expected_mount_source: None,
+            compression: "zstd".into(),
+            optional: false,
+        };
+        let mut p = profile();
+        p.sources[0].target_subdir = "rootfs/2026".into();
+        prepare_local_target_dirs(&p, &destination).unwrap();
+        assert!(backup.join("rootfs/2026").is_dir());
+
+        p.sources[0].target_subdir = "../outside".into();
+        assert!(prepare_local_target_dirs(&p, &destination).is_err());
+        assert!(!base.join("outside").exists());
+
+        let external = base.join("external");
+        fs::create_dir(&external).unwrap();
+        symlink(&external, backup.join("linked")).unwrap();
+        p.sources[0].target_subdir = "linked/secret".into();
+        assert!(prepare_local_target_dirs(&p, &destination).is_err());
+        assert!(!external.join("secret").exists());
+
+        // A pinned fd is NOT permission to write into a replacement mount.
+        let pinned = checked_directory_fd(&destination).unwrap();
+        fs::rename(&backup, base.join("detached")).unwrap();
+        fs::create_dir(&backup).unwrap();
+        assert!(ensure_live_destination(&destination, &pinned).is_err());
+
+        fs::remove_dir_all(&base).unwrap();
     }
 
     fn configuration() -> HarborConfig {

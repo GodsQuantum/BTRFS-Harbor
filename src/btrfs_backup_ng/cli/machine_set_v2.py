@@ -182,6 +182,14 @@ def _archive_valid(root: Path, archive: str) -> bool:
 def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) -> dict:
     for member in data["members"]:
         archive = member["archive"]
+        if member["status"] == "completed":
+            # A completed, verified backup must not depend on the original
+            # computer or a Snapper/native snapshot still being present.
+            if not _archive_valid(root, archive):
+                raise ValueError(
+                    f"completed member has invalid/missing archive: {archive}"
+                )
+            continue
         snapshot_path = Path(member["snapshot_path"])
         if (
             snapshot_path.is_symlink()
@@ -219,12 +227,6 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
         details = inspect_readonly_btrfs_source(snapshot_path)
         if not details.readonly or details.uuid != recorded_uuid:
             raise ValueError("machine set readonly source identity changed")
-        if member["status"] == "completed":
-            if not _archive_valid(root, archive):
-                raise ValueError(
-                    f"completed member has invalid/missing archive: {archive}"
-                )
-            continue
         candidates = [entry for entry in _list_v2(root) if entry["name"] == archive]
         if len(candidates) > 1:
             raise ValueError("ambiguous checkpoint transactions for machine member")

@@ -173,3 +173,29 @@ def test_machine_set_list_only_shows_valid_catalogs(tmp_path, capsys):
     assert len(found) == 1
     assert found[0]["set_id"] == valid_id
     assert found[0]["bootable"] is False
+
+
+def test_set_lock_refuses_missing_mount_without_creating_file(tmp_path):
+    """Simulated detached mount must not create a lock in an underlying folder."""
+    import os
+    import uuid
+    import pytest
+
+    from btrfs_backup_ng.cli.machine_set_v2 import _exclusive_set_lock
+
+    class Detached:
+        directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+
+        def validate_fd(self, directory_fd):
+            assert directory_fd == self.directory_fd
+            raise RuntimeError("destination live mount ID has changed")
+
+    guard = Detached()
+    set_id = str(uuid.uuid4())
+    try:
+        with pytest.raises(RuntimeError, match="mount ID"):
+            with _exclusive_set_lock(guard, set_id):
+                raise AssertionError("must never enter acquired lock")
+        assert not list(tmp_path.glob(".harbor-machine-set-*.lock"))
+    finally:
+        os.close(guard.directory_fd)

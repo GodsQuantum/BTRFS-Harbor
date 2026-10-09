@@ -25,6 +25,7 @@ from ..core.machine_inventory_v2 import inspect_live_machine
 from ..core.native_snapshots import NATIVE_FOLDER, NAME_PATTERN, create_native_snapshot
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
 from ..core.verify_v2 import verify_checkpoint_index
+from ..endpoint.mount_guard_v2 import MountGuard
 from .checkpoint_v2_cmd import (
     _list_v2,
     _open_guard,
@@ -103,13 +104,23 @@ def _read(root: Path, set_id: str) -> dict:
 
 
 @contextmanager
-def _exclusive_set_lock(root: Path, set_id: str) -> Iterator[None]:
-    path = root / f".harbor-machine-set-{_canonical_uuid(set_id)}.lock"
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+def _exclusive_set_lock(guard: MountGuard, set_id: str) -> Iterator[None]:
+    """Never create a lock beneath a disappeared or replaced NFS mount."""
+    directory_fd = guard.directory_fd
+    guard.validate_fd(directory_fd)
+    filename = f".harbor-machine-set-{_canonical_uuid(set_id)}.lock"
+    fd = os.open(
+        filename,
+        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=directory_fd,
+    )
     try:
+        guard.validate_fd(directory_fd)
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError("unsafe set lock")
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        guard.validate_fd(directory_fd)
         yield
     finally:
         os.close(fd)
@@ -307,7 +318,6 @@ def execute_machine_set(args: argparse.Namespace) -> int:
         if not sources or len(set(sources)) != len(sources):
             raise ValueError("machine set needs distinct nonempty sources")
         guard, stable = _open_guard(root, allow_local=args.allow_local)
-        guard.close()
         set_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         members = []
@@ -350,7 +360,7 @@ def execute_machine_set(args: argparse.Namespace) -> int:
             "inventory": inventory,
             "members": members,
         }
-        with _exclusive_set_lock(root, set_id):
+        with guard, _exclusive_set_lock(guard, set_id):
             _write(root, data, allow_local=args.allow_local)
             return _result(
                 _drive(
@@ -358,24 +368,26 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                 )
             )
     set_id = _canonical_uuid(args.set_id)
-    with _exclusive_set_lock(root, set_id):
+    guard, stable = _open_guard(root, allow_local=args.allow_local)
+    with guard:
         data = _read(root, set_id)
-        guard, _ = _open_guard(
-            root,
-            allow_local=args.allow_local,
-            expected=data["destination_fingerprint"],
-        )
-        guard.close()
+        if stable != data.get("destination_fingerprint"):
+            raise ValueError("machine-set destination fingerprint changed")
+        # A read-only status or dry-run needs no extra lock file.
         if action == "set-status":
             return _result(data)
-        if action == "set-resume":
-            return _result(
-                _drive(
-                    root, data, allow_local=args.allow_local, state_dir=args.state_dir
+        with _exclusive_set_lock(guard, set_id):
+            if action == "set-resume":
+                return _result(
+                    _drive(
+                        root,
+                        data,
+                        allow_local=args.allow_local,
+                        state_dir=args.state_dir,
+                    )
                 )
-            )
-        if action == "set-restore":
-            return _restore(root, data, args)
+            if action == "set-restore":
+                return _restore(root, data, args)
     raise ValueError("unknown machine-set action")
 
 

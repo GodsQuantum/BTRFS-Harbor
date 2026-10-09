@@ -1,0 +1,62 @@
+# Explicit isolated runner acceptance. Never configures a Cloud9/user mount.
+name: NFS Interruption and Resume Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nfs-reconnect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Configure localhost-only disposable NFSv4 service
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            btrfs-progs nfs-kernel-server nfs-common rpcbind util-linux
+          sudo mkdir -p /mnt/harbor-nfs-server /mnt/harbor-nfs-client
+          sudo chmod 0700 /mnt/harbor-nfs-server
+          echo '/mnt/harbor-nfs-server 127.0.0.1/32(rw,sync,no_subtree_check,no_root_squash,fsid=0)' \
+            | sudo tee /etc/exports.d/harbor-ci.exports
+          sudo modprobe nfsd || test -d /proc/fs/nfsd
+          if ! mountpoint -q /proc/fs/nfsd; then
+            sudo mount -t nfsd nfsd /proc/fs/nfsd
+          fi
+          sudo systemctl start rpcbind.service
+          sudo systemctl start nfs-kernel-server.service
+          sudo exportfs -rav
+          sudo systemctl is-active --quiet nfs-kernel-server.service
+          sleep 2
+          sudo mount -t nfs4 -o vers=4.1,soft,timeo=50,retrans=1 \
+            127.0.0.1:/ /mnt/harbor-nfs-client
+          findmnt -n -o SOURCE,FSTYPE,TARGET -T /mnt/harbor-nfs-client
+          test "$(findmnt -n -o FSTYPE -T /mnt/harbor-nfs-client)" = nfs4
+
+      - name: Validate REAL NFSv4 remount and checkpoint replay
+        env:
+          HARBOR_TEST_NFS_TARGET: /mnt/harbor-nfs-client
+        run: |
+          set -euxo pipefail
+          uv sync --frozen --extra test --python python3.12
+          sudo -E env PATH="$PATH" HARBOR_TEST_NFS_TARGET="$HARBOR_TEST_NFS_TARGET" \
+            "$(pwd)/.venv/bin/python" -m pytest \
+              tests/integration/tier3/test_nfs_reconnect_real.py -q -m tier3
+
+      - name: Cleanup ephemeral NFS export
+        if: always()
+        run: |
+          sudo umount -l /mnt/harbor-nfs-client || true
+          sudo exportfs -u '127.0.0.1:/mnt/harbor-nfs-server' || true
+          sudo rm -f /etc/exports.d/harbor-ci.exports

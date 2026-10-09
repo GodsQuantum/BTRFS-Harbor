@@ -1636,7 +1636,8 @@ snapshots with raw checkpoint-v2 native-list --source /path/to/subvolume.
 Starting in latest-native mode with --source /path/to/subvolume uses the newest
 Harbor native snapshot, or creates one when none exists. create-native always
 takes a new readonly snapshot; selected-native --native-name requires an
-already-listed, managed snapshot. None reconfigures mounts or Snapper.
+already-listed, managed snapshot. Newly created names include nine-digit
+fractional seconds; original second-granularity names remain accepted. None reconfigures mounts or Snapper.
 Native snapshots are kept after transfers: deleting an incremental parent
 may destroy resumability. Never delete an active resume source or an
 incremental parent still in use.

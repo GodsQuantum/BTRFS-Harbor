@@ -87,7 +87,7 @@ export async function listHostNativeSnapshots(source: string): Promise<NativeSna
 			typeof item.path === 'string' &&
 			typeof item.uuid === 'string' &&
 			typeof item.date === 'string' &&
-			/^harbor-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$/.test(item.name)
+			/^harbor-[0-9]{8}T[0-9]{6}(?:\.[0-9]{9})?Z-[0-9a-f]{12}$/.test(item.name)
 	);
 }
 

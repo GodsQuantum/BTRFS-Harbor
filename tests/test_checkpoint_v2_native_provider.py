@@ -74,6 +74,31 @@ def test_native_list_displays_actual_readonly_snapshots_only(tmp_path, monkeypat
         native.find_native_snapshot(source, "../etc")
 
 
+def test_native_same_second_sort_preserves_legacy_names_and_uses_nanoseconds(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "subvol"
+    directory = source / native.NATIVE_FOLDER
+    directory.mkdir(parents=True)
+    legacy = "harbor-20261009T120000Z-ffffffffffff"
+    early = "harbor-20261009T120000.000000001Z-ffffffffffff"
+    late = "harbor-20261009T120000.999999999Z-000000000000"
+    for item in (legacy, early, late):
+        (directory / item).mkdir()
+    monkeypatch.setattr(native, "_subvolume_root", lambda path: path)
+    monkeypatch.setattr(native, "inspect_readonly_btrfs_source", fake_source)
+    assert [x.name for x in native.list_native_snapshots(source)] == [
+        late,
+        early,
+        legacy,
+    ]
+    assert native.native_snapshot_sort_key(late) > native.native_snapshot_sort_key(
+        early
+    )
+    with pytest.raises(ValueError, match="invalid"):
+        native.native_snapshot_sort_key("../etc")
+
+
 def test_native_creation_uses_argv_and_never_mounts_or_deletes(tmp_path, monkeypatch):
     source = tmp_path / "subvol"
     source.mkdir()

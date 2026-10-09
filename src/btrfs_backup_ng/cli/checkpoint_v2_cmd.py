@@ -33,6 +33,7 @@ from ..core.verify_v2 import verify_checkpoint_index
 from ..core.checkpoint_v2_runner import SendProcess, execute_checkpoint_job
 from ..core.native_snapshots import (
     list_native_snapshots,
+    native_snapshot_sort_key,
     find_native_snapshot,
     create_native_snapshot,
 )
@@ -326,7 +327,11 @@ def _select_automatic_incremental_parent(
         for native_candidate in list_native_snapshots(Path(args.native_root)):
             if native_candidate.path == selected:
                 continue
-            if native_candidate.name < selected.name and native_candidate.uuid in remote_by_uuid:
+            if (
+                native_snapshot_sort_key(native_candidate.name)
+                < native_snapshot_sort_key(selected.name)
+                and native_candidate.uuid in remote_by_uuid
+            ):
                 args.parent = str(native_candidate.path)
                 return
         return

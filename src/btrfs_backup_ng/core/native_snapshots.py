@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,8 +19,9 @@ from .. import __util__
 from .native_send_v2 import inspect_readonly_btrfs_source
 
 NATIVE_FOLDER = ".btrfs-harbor-snapshots"
-NAME_PATTERN = re.compile(r"^harbor-(\d{8}T\d{6}Z)-([0-9a-f]{12})$")
-MAX_NATIVE_SNAPSHOTS = 256
+# Legacy names without a fractional timestamp remain readable.
+NAME_PATTERN = re.compile(r"^harbor-(\d{8}T\d{6})(?:\.(\d{9}))?Z-([0-9a-f]{12})$")
+MAX_NATIVE_SNAPSHOTS = 8192
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,16 @@ class NativeSnapshot:
     date: str
 
 
+def native_snapshot_sort_key(name: str) -> tuple[str, int]:
+    """Sort by actual timestamp, not a random UUID suffix in the same second."""
+    match = NAME_PATTERN.fullmatch(name)
+    if match is None:
+        raise ValueError("invalid native snapshot name")
+    return match.group(1), int(match.group(2) or "0")
+
+
 def _subvolume_root(source: Path) -> Path:
-    if not source.is_absolute() or source == Path("/") and source.is_symlink():
+    if not source.is_absolute():
         raise ValueError("source must be an absolute real Btrfs subvolume")
     if source.is_symlink() or not source.is_dir():
         raise ValueError("source must be an existing, non-symlink Btrfs directory")
@@ -68,7 +78,7 @@ def list_native_snapshots(source: Path) -> list[NativeSnapshot]:
     if not directory.exists():
         return []
     found: list[NativeSnapshot] = []
-    names = sorted(directory.iterdir(), key=lambda p: p.name, reverse=True)
+    names = list(directory.iterdir())
     if len(names) > MAX_NATIVE_SNAPSHOTS:
         raise ValueError("too many native snapshots; manually review retention")
     for path in names:
@@ -77,12 +87,16 @@ def list_native_snapshots(source: Path) -> list[NativeSnapshot]:
             continue
         try:
             details = inspect_readonly_btrfs_source(path)
-            moment = dt.datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(
+            moment = dt.datetime.strptime(match.group(1), "%Y%m%dT%H%M%S").replace(
                 tzinfo=dt.timezone.utc
+            )
+            moment += dt.timedelta(
+                microseconds=int((match.group(2) or "000000000")[:6])
             )
         except (ValueError, OSError):
             continue
         found.append(NativeSnapshot(path.name, path, details.uuid, moment.isoformat()))
+    found.sort(key=lambda item: native_snapshot_sort_key(item.name), reverse=True)
     return found
 
 
@@ -99,8 +113,11 @@ def find_native_snapshot(source: Path, name: str) -> NativeSnapshot:
 
 def create_native_snapshot(source: Path) -> NativeSnapshot:
     directory = _snapshot_directory(source, create=True)
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    name = f"harbor-{stamp}-{uuid.uuid4().hex[:12]}"
+    epoch_ns = time.time_ns()
+    stamp = dt.datetime.fromtimestamp(
+        epoch_ns // 1_000_000_000, tz=dt.timezone.utc
+    ).strftime("%Y%m%dT%H%M%S")
+    name = f"harbor-{stamp}.{epoch_ns % 1_000_000_000:09d}Z-{uuid.uuid4().hex[:12]}"
     target = directory / name
     if target.exists() or target.is_symlink():
         raise ValueError("native snapshot already exists")

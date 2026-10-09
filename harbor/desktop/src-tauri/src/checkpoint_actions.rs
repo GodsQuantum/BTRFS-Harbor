@@ -174,12 +174,19 @@ fn valid_native_snapshot_name(value: &str) -> bool {
     let Some((date, uid)) = rest.split_once('-') else {
         return false;
     };
-    date.len() == 16
-        && date.is_ascii()
-        && date.ends_with('Z')
-        && date.as_bytes()[..8].iter().all(u8::is_ascii_digit)
-        && date.as_bytes()[8] == b'T'
-        && date.as_bytes()[9..15].iter().all(u8::is_ascii_digit)
+    let Some(stamp) = date.strip_suffix('Z') else {
+        return false;
+    };
+    let (seconds, nanos) = match stamp.split_once('.') {
+        Some((seconds, nanos)) => (seconds, Some(nanos)),
+        None => (stamp, None),
+    };
+    seconds.len() == 15
+        && seconds.is_ascii()
+        && seconds.as_bytes()[..8].iter().all(u8::is_ascii_digit)
+        && seconds.as_bytes()[8] == b'T'
+        && seconds.as_bytes()[9..15].iter().all(u8::is_ascii_digit)
+        && nanos.is_none_or(|n| n.len() == 9 && n.bytes().all(|b| b.is_ascii_digit()))
         && uid.len() == 12
         && uid
             .bytes()
@@ -220,6 +227,10 @@ mod tests {
         req.source_mode = Some("selected-native".into());
         req.native_name = Some("harbor-20261009T120000Z-abcdef012345".into());
         assert!(action_arguments(&req).is_ok());
+        req.native_name = Some("harbor-20261009T120000.123456789Z-abcdef012345".into());
+        assert!(action_arguments(&req).is_ok());
+        req.native_name = Some("harbor-20261009T120000.12Z-abcdef012345".into());
+        assert!(action_arguments(&req).is_err());
         req.native_name = Some("../../etc/passwd".into());
         assert!(action_arguments(&req).is_err());
     }

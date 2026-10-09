@@ -32,6 +32,20 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## Post-rc.6 preview — complete Btrfs volume sets (not yet released)
+
+The native desktop preview now offers **Back up all Btrfs volumes**, one
+durable machine-set catalog, full then parent-verified incremental streams for
+each selected mounted Btrfs subvolume, Resume, and **Recover from destination
+backup** to an empty Btrfs staging folder. No original profile is needed for
+staged recovery. Tested with real nested root/home Btrfs transfers and restores.
+
+**Honest limits:** EFI, non-Btrfs partitions, disconnected/unmounted sources,
+SSH and legacy scheduled jobs are not included in these machine sets. Bootable
+system reconstruction, actual NFS outage/return, and live graphical systray
+acceptance still require validation. Do not use this preview as the sole backup.
+It is not yet an official release; stable v0.2.5 remains unchanged.
+
 ## v0.2.6-rc.6 — portable recovery of historical archive names
 
 The profile-free recovery screen accepts original raw archive names with dots, spaces or Unicode (within the engine's safe filename rules) and retains path-traversal protection. An additional privileged Btrfs integration test now exercises the **actual Harbor checkpointed backup engine**, durable raw catalog, incremental parent and recovery from a destination alone. This prerelease remains supervised; fully bootable disaster recovery and NAS power-loss Resume are not yet qualified.

@@ -32,6 +32,21 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## Après rc.6 — préversion des ensembles de volumes Btrfs (non publiée)
+
+L'interface native propose **Sauvegarder tous les volumes Btrfs** :
+un catalogue durable par ensemble, des sauvegardes complètes puis
+incrémentales avec parent vérifié pour chaque sous-volume Btrfs monté,
+la reprise, puis la **restauration depuis la destination seule** dans un
+dossier Btrfs vide. Le profil de l'ancien ordinateur n'est pas nécessaire.
+L'envoi et la restauration réels de sous-volumes imbriqués root/home sont testés.
+
+**Limites explicites :** partitions EFI et non-Btrfs, volumes déconnectés ou non
+montés, SSH et anciennes tâches planifiées non couverts. La reconstruction
+amorçable, une vraie coupure/reprise NFS et le systray graphique restent à
+valider. Ne pas en faire l'unique sauvegarde. Ceci n'est pas encore une
+nouvelle release ; la stable v0.2.5 ne change pas.
+
 ## v0.2.6-rc.6 — restauration des archives historiques
 
 La restauration sans profil reconnaît les noms originaux d'archives contenant des points, des espaces ou des caractères accentués, sans autoriser la traversée de dossiers. Un nouveau test Btrfs privilégié vérifie le vrai moteur de sauvegarde Harbor, les incrémentaux et la restauration à partir de la destination seule. La restauration système amorçable et les coupures réseau restent à qualifier.

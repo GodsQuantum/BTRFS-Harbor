@@ -111,13 +111,29 @@ def find_native_snapshot(source: Path, name: str) -> NativeSnapshot:
     return found
 
 
-def create_native_snapshot(source: Path) -> NativeSnapshot:
-    directory = _snapshot_directory(source, create=True)
+def reserve_native_snapshot_name() -> str:
+    """Name can be journaled *before* a snapshot is created.
+
+    This permits recovery from a crash between the Btrfs snapshot ioctl and
+    the first successful manifest write. All names remain Harbor-owned.
+    """
     epoch_ns = time.time_ns()
     stamp = dt.datetime.fromtimestamp(
         epoch_ns // 1_000_000_000, tz=dt.timezone.utc
     ).strftime("%Y%m%dT%H%M%S")
-    name = f"harbor-{stamp}.{epoch_ns % 1_000_000_000:09d}Z-{uuid.uuid4().hex[:12]}"
+    return f"harbor-{stamp}.{epoch_ns % 1_000_000_000:09d}Z-{uuid.uuid4().hex[:12]}"
+
+
+def create_native_snapshot(
+    source: Path, *, reserved_name: str | None = None
+) -> NativeSnapshot:
+    """Never reuse a name unless a crash-recovery caller has checked it."""
+    if reserved_name is not None and not NAME_PATTERN.fullmatch(reserved_name):
+        raise ValueError("invalid reserved native Btrfs snapshot name")
+    directory = _snapshot_directory(source, create=True)
+    name = (
+        reserved_name if reserved_name is not None else reserve_native_snapshot_name()
+    )
     target = directory / name
     if target.exists() or target.is_symlink():
         raise ValueError("native snapshot already exists")

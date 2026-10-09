@@ -22,7 +22,13 @@ from typing import Iterator
 
 from .. import __util__
 from ..core.machine_inventory_v2 import inspect_live_machine
-from ..core.native_snapshots import NATIVE_FOLDER, NAME_PATTERN, create_native_snapshot
+from ..core.native_snapshots import (
+    NATIVE_FOLDER,
+    NAME_PATTERN,
+    create_native_snapshot,
+    find_native_snapshot,
+    reserve_native_snapshot_name,
+)
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
 from ..core.verify_v2 import verify_checkpoint_index
 from ..endpoint.mount_guard_v2 import MountGuard
@@ -180,11 +186,38 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
         if (
             snapshot_path.is_symlink()
             or snapshot_path.parent.is_symlink()
-            or not snapshot_path.is_dir()
+            or (
+                (
+                    member.get("snapshot_uuid") is not None
+                    or member["status"] != "pending"
+                )
+                and not snapshot_path.is_dir()
+            )
         ):
             raise ValueError("machine set source snapshot changed")
+        recorded_uuid = member.get("snapshot_uuid")
+        if recorded_uuid is None and member["status"] == "pending":
+            # A process may have died before, during, or after the snapshot
+            # ioctl. The manifest already names its only permitted target.
+            # Reuse that exact readonly snapshot or create it under that name.
+            if snapshot_path.exists() or snapshot_path.is_symlink():
+                found = find_native_snapshot(
+                    Path(member["original_mount"]), snapshot_path.name
+                )
+            else:
+                found = create_native_snapshot(
+                    Path(member["original_mount"]),
+                    reserved_name=snapshot_path.name,
+                )
+            if found.path != snapshot_path:
+                raise ValueError("recovered native snapshot path changed")
+            member["snapshot_uuid"] = found.uuid
+            _write(root, data, allow_local=allow_local)
+            recorded_uuid = found.uuid
+        elif not isinstance(recorded_uuid, str) or not recorded_uuid:
+            raise ValueError("invalid machine-set snapshot UUID")
         details = inspect_readonly_btrfs_source(snapshot_path)
-        if not details.readonly or details.uuid != member["snapshot_uuid"]:
+        if not details.readonly or details.uuid != recorded_uuid:
             raise ValueError("machine set readonly source identity changed")
         if member["status"] == "completed":
             if not _archive_valid(root, archive):
@@ -338,15 +371,17 @@ def execute_machine_set(args: argparse.Namespace) -> int:
             )
             if result.returncode != 0:
                 raise ValueError(f"not a Btrfs subvolume root: {source}")
+        # Durable write-ahead reservation BEFORE creating any snapshot.
+        # A killed process leaves only a known, recoverable pending member,
+        # never an untracked native Btrfs snapshot.
         for i, source in enumerate(sources):
-            live = Path(source)
-            snapshot = create_native_snapshot(live)
+            reserved_name = reserve_native_snapshot_name()
             members.append(
                 {
                     "archive": f"machine{timestamp}-{set_id[:8]}-{i:03d}",
                     "original_mount": source,
-                    "snapshot_path": str(snapshot.path),
-                    "snapshot_uuid": snapshot.uuid,
+                    "snapshot_path": str(Path(source) / NATIVE_FOLDER / reserved_name),
+                    "snapshot_uuid": None,
                     "status": "pending",
                     "transfer_id": None,
                 }

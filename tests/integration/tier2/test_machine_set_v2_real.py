@@ -171,3 +171,85 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
     assert any(
         f.read_text() == "home payload v2\n" for f in final_stage.rglob("user.txt")
     )
+
+
+def test_machine_set_recovery_after_snapshot_creation_crash(
+    btrfs_volume: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Kill between snapshot ioctl and UUID journal: the reserved name is reused."""
+    import argparse
+    from btrfs_backup_ng.cli import machine_set_v2 as machine
+
+    live = btrfs_volume / "crash-source"
+    subprocess.run(["btrfs", "subvolume", "create", str(live)], check=True)
+    (live / "before-crash.txt").write_text("durable data before crash\n")
+    archive = tmp_path / "backup"
+    archive.mkdir()
+    state = tmp_path / "state"
+
+    actual = machine.create_native_snapshot
+    generated: list[Path] = []
+
+    def die_after_creation(source: Path, *, reserved_name: str | None = None):
+        snapshot = actual(source, reserved_name=reserved_name)
+        generated.append(snapshot.path)
+        raise RuntimeError("synthetic process death AFTER snapshot ioctl")
+
+    monkeypatch.setattr(machine, "create_native_snapshot", die_after_creation)
+    with pytest.raises(RuntimeError, match="AFTER snapshot"):
+        machine.execute_machine_set(
+            argparse.Namespace(
+                checkpoint_action="set-start",
+                target=str(archive),
+                profile_id=PROFILE_ID,
+                source=[str(live)],
+                allow_local=True,
+                state_dir=str(state),
+                experimental=True,
+            )
+        )
+    assert len(generated) == 1
+    catalogs = list(archive.glob(".harbor-machine-set-*.json"))
+    assert len(catalogs) == 1
+    pending = json.loads(catalogs[0].read_text())
+    assert pending["members"][0]["snapshot_uuid"] is None
+    assert pending["members"][0]["snapshot_path"] == str(generated[0])
+    assert pending["members"][0]["status"] == "pending"
+
+    # Emulate fresh process with no in-memory context.
+    monkeypatch.undo()
+    finished = _run(
+        "set-resume",
+        "--target",
+        str(archive),
+        "--set-id",
+        pending["set_id"],
+        "--allow-local",
+        "--state-dir",
+        str(state),
+        "--experimental",
+    )
+    assert finished["status"] == "completed_btrfs_only"
+    assert len(list((live / ".btrfs-harbor-snapshots").iterdir())) == 1
+    completed = json.loads(catalogs[0].read_text())
+    assert completed["members"][0]["snapshot_uuid"]
+
+    recovery = btrfs_volume / "crash-recovery"
+    recovery.mkdir()
+    result = _run(
+        "set-restore",
+        "--target",
+        str(archive),
+        "--set-id",
+        pending["set_id"],
+        "--staging",
+        str(recovery),
+        "--allow-local",
+        "--experimental",
+        "--confirm",
+    )
+    assert result["restored"] is True
+    assert any(
+        file.read_text() == "durable data before crash\n"
+        for file in recovery.rglob("before-crash.txt")
+    )

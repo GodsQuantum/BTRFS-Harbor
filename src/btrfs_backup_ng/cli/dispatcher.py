@@ -544,6 +544,22 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         if set_action == "set-restore":
             set_parser.add_argument("--staging", required=True)
             set_parser.add_argument("--confirm", action="store_true")
+    scheduled_v2 = v2_actions.add_parser(
+        "schedule-run",
+        help="One installed profile source via v2; resume incomplete job first",
+    )
+    scheduled_v2.add_argument("--target", required=True)
+    scheduled_v2.add_argument("--profile-id", required=True)
+    scheduled_v2.add_argument("--source")
+    scheduled_v2.add_argument("--snapper-config")
+    scheduled_v2.add_argument("--name-prefix")
+    scheduled_v2.add_argument("--checkpoint-size-mib", type=int, default=128)
+    scheduled_v2.add_argument(
+        "--performance", choices=("balanced", "fast"), default="balanced"
+    )
+    scheduled_v2.add_argument("--state-dir")
+    scheduled_v2.add_argument("--allow-local", action="store_true")
+    scheduled_v2.add_argument("--experimental", action="store_true")
     native_list_v2 = v2_actions.add_parser(
         "native-list", help="Read-only inventory of Harbor-owned native Btrfs snapshots"
     )

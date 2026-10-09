@@ -475,6 +475,7 @@ def _new_manifest(
     profile = resolve_performance_profile(args.performance)
     identity: dict[str, str | int | None] = {
         "profile_id": args.profile_id,
+        "archive_name": args.name,
         "source_volume": getattr(args, "native_root", args.source),
         "source_uuid": source.uuid,
         "source_path": source.path,
@@ -619,14 +620,14 @@ def execute_checkpoint_v2(args: argparse.Namespace) -> int:
         return 2
 
 
-def _list_v2(root: Path) -> list[dict[str, object]]:
+def _list_v2(root: Path, *, max_entries: int = 100) -> list[dict[str, object]]:
     """Read-only, bounded, nofollow preview, safe to run through native polkit."""
     entries: list[dict[str, object]] = []
     directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         names = sorted(os.listdir(directory_fd))[:8192]
         for filename in names:
-            if len(entries) >= 100:
+            if len(entries) >= max_entries:
                 break
             if not (
                 filename.startswith(".harbor-resume-") and filename.endswith(".json")
@@ -664,6 +665,13 @@ def _list_v2(root: Path) -> list[dict[str, object]]:
                 and "/" not in name
             ]
             archive_name = names_found[0] if len(names_found) == 1 else None
+            reserved_name = manifest.identity.get("archive_name")
+            if reserved_name is not None:
+                if not isinstance(reserved_name, str):
+                    continue
+                if archive_name is not None and archive_name != reserved_name:
+                    continue
+                archive_name = reserved_name
             # A completed stream no longer has a partial: check its sidecar
             # transaction ID read-only and with a nofollow handle.
             if archive_name is None and manifest.state == "completed":
@@ -721,6 +729,10 @@ def _list_v2(root: Path) -> list[dict[str, object]]:
 
 def _execute(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
+    if action == "schedule-run":
+        from .scheduled_v2 import execute_scheduled_checkpoint_v2
+
+        return execute_scheduled_checkpoint_v2(args)
     if action in ("set-start", "set-resume", "set-status", "set-restore", "set-list"):
         from .machine_set_v2 import execute_machine_set
 
@@ -899,6 +911,11 @@ def _execute(args: argparse.Namespace) -> int:
             raise
     else:
         manifest = read_manifest(_manifest_path(root, args.transfer_id))
+        reserved_name = manifest.identity.get("archive_name")
+        if reserved_name is not None and reserved_name != args.name:
+            raise ValueError(
+                "requested archive differs from immutable checkpoint identity"
+            )
         # A crash may occur after the final stream and .meta are durable but
         # before the journal could be switched to completed. Never regenerate
         # a huge btrfs send merely to acknowledge a finished archive.

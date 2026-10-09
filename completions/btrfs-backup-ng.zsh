@@ -326,6 +326,18 @@ _btrfs_backup_ng() {
                                     '--experimental[]' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--profile-id[]:file:_files' \
+                                    '--source[]:file:_files' \
+                                    '--snapper-config[]:snapper_config:' \
+                                    '--name-prefix[]:name_prefix:' \
+                                    '--checkpoint-size-mib[]:checkpoint_size_mib:' \
+                                    '--performance[]:value:(balanced fast)' \
+                                    '--state-dir[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--experimental[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
                                     '--source[]:file:_files' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \

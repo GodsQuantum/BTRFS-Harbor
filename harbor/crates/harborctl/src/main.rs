@@ -16,7 +16,7 @@ use harbor_storage::{
 };
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::ffi::CString;
+use std::ffi::{CString, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -75,6 +75,10 @@ fn main() -> Result<()> {
             let id = parse_profile_id(args.next())?;
             run_profile(id)
         }
+        "run-profile-v2" => {
+            let id = parse_profile_id(args.next())?;
+            run_profile_v2(id)
+        }
         "run-profile-jsonl" => {
             let id = parse_profile_id(args.next())?;
             run_profile_jsonl(id)
@@ -125,7 +129,7 @@ fn main() -> Result<()> {
 
 fn usage() {
     eprintln!(
-        "Usage: btrfs-harborctl <list|render-profile|apply-config|set-engine-policy|install-profile|uninstall-profile|run-profile|run-profile-jsonl|run-config-jsonl|recovery-kit|recovery-kit-context-json|machine-recovery-plan-json|platform-capabilities-json|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID|POLICY]"
+        "Usage: btrfs-harborctl <list|render-profile|apply-config|set-engine-policy|install-profile|uninstall-profile|run-profile|run-profile-v2|run-profile-jsonl|run-config-jsonl|recovery-kit|recovery-kit-context-json|machine-recovery-plan-json|platform-capabilities-json|list-restore-points-json|stage-restore-jsonl|stage-restore-config-jsonl|replicate-lxc-jsonl|status-profile> [PROFILE_UUID|POLICY]"
     );
 }
 
@@ -777,6 +781,90 @@ fn machine_recovery_plan_json() -> Result<()> {
         serde_json::from_str(&raw).context("invalid machine recovery request")?;
     let plan = plan_machine_recovery(&request).map_err(anyhow::Error::msg)?;
     println!("{}", serde_json::to_string(&plan)?);
+    Ok(())
+}
+
+fn checkpoint_schedule_arguments(
+    profile: &BackupProfile,
+    source: &BackupSource,
+    destination: &DestinationSpec,
+) -> Result<Vec<OsString>> {
+    if matches!(destination.kind, DestinationKind::Ssh) {
+        bail!("SSH checkpoint v2 transport is not implemented; refusing to silently fall back");
+    }
+    let mut args: Vec<OsString> = ["raw", "checkpoint-v2", "schedule-run", "--profile-id"]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    args.push(profile.id.to_string().into());
+    args.push("--target".into());
+    args.push(
+        destination
+            .path
+            .join(&source.target_subdir)
+            .into_os_string(),
+    );
+    args.extend([
+        OsString::from("--experimental"),
+        OsString::from("--state-dir"),
+        OsString::from("/var/lib/btrfs-harbor/checkpoint-v2"),
+    ]);
+    if matches!(
+        destination.kind,
+        DestinationKind::Local | DestinationKind::Raw
+    ) {
+        args.push("--allow-local".into());
+    }
+    if let Some(config) = &source.snapper_config {
+        args.push("--snapper-config".into());
+        args.push(config.into());
+    } else {
+        args.push("--source".into());
+        args.push(source.path.as_os_str().to_os_string());
+    }
+    Ok(args)
+}
+
+fn run_profile_v2(id: Uuid) -> Result<()> {
+    ensure_root()?;
+    let (config, profile) = load_profile(id)?;
+    let selected = validate_profile_destinations(&config, &profile)?;
+    // Never silently change the legacy remote SSH transport semantics.
+    if selected
+        .iter()
+        .any(|dest| matches!(dest.kind, DestinationKind::Ssh))
+    {
+        bail!("SSH checkpoint v2 unavailable: legacy SSH profiles are not migrated");
+    }
+    let engine = bundled_engine_candidate()
+        .context("bundled Harbor checkpoint-v2 engine is not installed")?;
+    for destination in &selected {
+        // The checked mkdirat/fstat mount guard is also used by legacy jobs.
+        prepare_local_target_dirs(&profile, destination)?;
+        for source in &profile.sources {
+            let args = checkpoint_schedule_arguments(&profile, source, destination)?;
+            let status = Command::new(&engine).args(args).status().with_context(|| {
+                format!(
+                    "could not run checkpoint-v2 for {} -> {}",
+                    source.path.display(),
+                    destination.path.display()
+                )
+            })?;
+            if !status.success() {
+                bail!(
+                    "checkpoint v2 failed for {}: {status}",
+                    source.path.display()
+                );
+            }
+        }
+    }
+    if profile.verify_after_backup {
+        verify_profile_targets(&profile, &selected, &engine)?;
+    }
+    if let Err(err) = refresh_recovery_kit(&config, &profile, &selected) {
+        eprintln!("warning: Recovery Kit refresh failed: {err}");
+    }
+    println!("Checkpoint-v2 scheduled profile {} completed", profile.name);
     Ok(())
 }
 
@@ -1812,6 +1900,55 @@ mod tests {
         assert!(ensure_live_destination(&destination, &pinned).is_err());
 
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn v2_scheduled_profile_reuses_existing_systemd_and_checkpoint_engine() {
+        let p = profile();
+        let source = &p.sources[0];
+        let destination = DestinationSpec {
+            id: Uuid::new_v4(),
+            name: "dedicated destination".into(),
+            kind: DestinationKind::Nfs,
+            path: PathBuf::from("/mnt/backup"),
+            mount_point: Some(PathBuf::from("/mnt/backup")),
+            expected_mount_source: None,
+            compression: "zstd".into(),
+            optional: false,
+        };
+        let args = checkpoint_schedule_arguments(&p, source, &destination).unwrap();
+        let text = args.iter().map(|v| v.to_string_lossy()).collect::<Vec<_>>();
+        assert!(
+            text.windows(2)
+                .any(|w| w == ["--target", "/mnt/backup/rootfs"])
+        );
+        assert!(text.windows(2).any(|w| w == ["--snapper-config", "root"]));
+        assert!(!text.iter().any(|item| item == "--allow-local"));
+        assert!(text.iter().any(|item| item == "schedule-run"));
+        assert!(text.iter().any(|item| item == "--experimental"));
+
+        let local = DestinationSpec {
+            kind: DestinationKind::Local,
+            ..destination.clone()
+        };
+        let args = checkpoint_schedule_arguments(&p, source, &local).unwrap();
+        assert!(args.iter().any(|arg| arg == "--allow-local"));
+        let native = BackupSource {
+            snapper_config: None,
+            path: PathBuf::from("/home"),
+            ..source.clone()
+        };
+        let args = checkpoint_schedule_arguments(&p, &native, &local).unwrap();
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "--source" && pair[1] == "/home")
+        );
+
+        let ssh = DestinationSpec {
+            kind: DestinationKind::Ssh,
+            ..destination
+        };
+        assert!(checkpoint_schedule_arguments(&p, source, &ssh).is_err());
     }
 
     fn configuration() -> HarborConfig {

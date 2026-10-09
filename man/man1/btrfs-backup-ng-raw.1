@@ -353,6 +353,20 @@ With \fB\-\-confirm\fR it verifies all streams and stages subvolumes.
 It never overwrites a running OS or partitions or repairs EFI/bootloaders.
 
 .PP
+.B btrfs-backup-ng raw checkpoint-v2 schedule-run
+runs one explicitly selected installed-profile Btrfs source through the
+existing durable checkpoint-v2 engine and resumes its matching unfinished
+transaction before creating a new one. It requires
+\fB\-\-target\fR, \fB\-\-profile-id\fR and \fB\-\-experimental\fR.
+For Snapper use \fB\-\-snapper-config\fR; for Harbor native Btrfs
+subvolumes use \fB\-\-source\fR and the crash-safe machine-set catalog.
+Options \fB\-\-state-dir\fR, \fB\-\-allow-local\fR,
+\fB\-\-name-prefix\fR, \fB\-\-performance\fR and
+\fB\-\-checkpoint-size-mib\fR match normal checkpoint sending.
+A Snapper source already backed up gives an idempotent no-change result.
+SSH is NOT supported by this v2 coordinator; the existing SSH engine stays
+unchanged. The installed systemd units are not migrated automatically.
+.PP
 .B btrfs-backup-ng raw checkpoint-v2 set-list
 lists durable machine-level Btrfs backup catalogs in an existing
 \fB\-\-target\fR without starting a backup or loading a former profile.

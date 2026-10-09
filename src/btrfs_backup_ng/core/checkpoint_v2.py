@@ -67,6 +67,7 @@ OPTIONAL_IDENTITY = frozenset(
         "parent_path",
         "parent_backup_name",
         "parent_snapper_number",
+        "archive_name",
     }
 )
 CHECKPOINT_FIELDS = frozenset(
@@ -162,6 +163,16 @@ def _validate_identity(identity: dict[str, str | int | None]) -> None:
         or len(parent_name.encode("utf-8")) > 200
     ):
         raise ValueError("invalid incremental parent archive name")
+    archive = identity.get("archive_name")
+    if archive is not None and (
+        not isinstance(archive, str)
+        or not archive
+        or archive in (".", "..")
+        or "/" in archive
+        or chr(0) in archive
+        or len(archive.encode("utf-8")) > 200
+    ):
+        raise ValueError("invalid checkpoint archive identity")
     for name in ("source_volume", "source_path"):
         if not _valid_path(identity[name]):
             raise ValueError(f"invalid source path in identity: {name}")

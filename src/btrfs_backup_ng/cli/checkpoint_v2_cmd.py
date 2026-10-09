@@ -762,7 +762,14 @@ def _execute(args: argparse.Namespace) -> int:
         from .scheduled_v2 import execute_scheduled_checkpoint_v2
 
         return execute_scheduled_checkpoint_v2(args)
-    if action in ("set-start", "set-resume", "set-status", "set-restore", "set-list"):
+    if action in (
+        "set-start",
+        "set-resume",
+        "set-status",
+        "set-restore",
+        "set-list",
+        "set-retention-plan",
+    ):
         from .machine_set_v2 import execute_machine_set
 
         return execute_machine_set(args)

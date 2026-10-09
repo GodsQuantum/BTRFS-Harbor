@@ -293,6 +293,7 @@ _btrfs_backup_ng() {
                                     '--allow-local[]' \
                                     '--state-dir[]:file:_files' \
                                     '--experimental[]' \
+                                    '--max-incremental-depth[]:max_incremental_depth:' \
                                     '--profile-id[]:file:_files' \
                                     '--source[]:file:_files' \
                                     '-h[show this help message and exit]' \
@@ -324,6 +325,20 @@ _btrfs_backup_ng() {
                                     '--allow-local[]' \
                                     '--state-dir[]:file:_files' \
                                     '--experimental[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--profile-id[]:file:_files' \
+                                    '--min[]:min:' \
+                                    '--hourly[]:hourly:' \
+                                    '--daily[]:daily:' \
+                                    '--weekly[]:weekly:' \
+                                    '--monthly[]:monthly:' \
+                                    '--yearly[]:yearly:' \
+                                    '--keep[]:keep:' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \

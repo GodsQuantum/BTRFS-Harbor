@@ -34,6 +34,8 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 
 ## Unreleased preview — crash and mount-loss hardening
 
+- Automatic v2 incremental chains now have a maximum of **7 links by default**; the next save is a full independently restorable anchor (configurable 1–256). A read-only retention plan is available; automatic deletion is not enabled.
+
 - Multi-volume snapshot names are journaled **before** creation; after a crash,
   Harbor can reattach the exact readonly snapshot instead of leaving it unknown.
 - The installed profile helper now creates target subdirectories via validated

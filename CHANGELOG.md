@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — crash-safe snapshot reservation and mounted-target checks
 
+- Independent full Btrfs anchors after maximum seven incremental links by default;
+  dependency-safe read-only machine-set retention plan with strict unknown-chain refusal.
 - Optional per-profile scheduled v2 engine in native UI; legacy default kept
   on upgrade, and unsupported SSH checkpoint v2 blocked at config time.
 - Descriptor-pinned Recovery Kit writes with nofollow traversal, fsync,

@@ -34,6 +34,8 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 
 ## Préversion non publiée — résistance aux coupures
 
+- Les chaînes incrémentales v2 sont limitées à **7 niveaux par défaut** : Harbor crée alors une nouvelle base complète autonome (réglable de 1 à 256). Le plan de rétention est consultable sans suppression ; la purge automatique reste désactivée.
+
 - Les identifiants des snapshots multivolumes sont enregistrés **avant**
   leur création ; une coupure ne les laisse plus sans catalogue récupérable.
 - La préparation des destinations des tâches installées se fait avec des

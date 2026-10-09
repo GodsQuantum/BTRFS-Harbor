@@ -251,9 +251,9 @@ non-POSIX or SMB/NFS/cloud destination, mount it locally and use a \fBraw://\fR
 path instead.
 .SS checkpoint-v2 (EXPERIMENTAL)
 An explicitly opt-in checkpointed raw backup engine, separate from the
-existing raw target commands. It has not yet passed end-to-end disaster
-recovery acceptance on real Btrfs and NFS mount-loss scenarios. Do not
-replace a verified disaster-recovery backup with this experimental mode.
+existing raw target commands. Real Btrfs/NFS outage and recovery tests
+have passed, but bootable blank-disk restoration and SSH checkpoint resume
+are not yet supported. Keep independent verified full-system backups.
 .PP
 .B btrfs-backup-ng raw checkpoint-v2 start
 requires \fB\-\-target\fR \fIPATH\fR,
@@ -337,6 +337,8 @@ The \fB\-\-state-dir\fR and \fB\-\-allow-local\fR options
 match single-source checkpoint v2.
 A portable set catalog records each independently committed backup.
 The command does NOT back up non-Btrfs EFI or create a bootable system image.
+--max-incremental-depth N (1..256, default 7) starts a fresh independent
+FULL Btrfs backup after N incremental parents in the previous chain.
 .PP
 .B btrfs-backup-ng raw checkpoint-v2 set-resume
 uses \fB\-\-set-id\fR and the original \fB\-\-target\fR
@@ -370,3 +372,13 @@ unchanged. The installed systemd units are not migrated automatically.
 .B btrfs-backup-ng raw checkpoint-v2 set-list
 lists durable machine-level Btrfs backup catalogs in an existing
 \fB\-\-target\fR without starting a backup or loading a former profile.
+
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-retention-plan
+uses --target, --profile-id and --experimental to build a strictly read-only
+machine-set retention plan. --min DURATION (default 1d) sets the minimum
+retention window. --hourly, --daily, --weekly, --monthly and --yearly
+set bucket counts; --keep N selects the newest N recovery points instead.
+The plan conservatively preserves every incremental parent and unfinished
+set, and fails closed on unindexed or broken backups. No data is deleted.
+Automatic v2 retention is not yet enabled.

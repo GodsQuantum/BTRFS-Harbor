@@ -11,9 +11,19 @@ from pathlib import Path
 import pytest
 
 from btrfs_backup_ng.core.checkpoint_v2 import read_manifest
-from .conftest import requires_btrfs
+from .conftest import LoopbackBtrfs, requires_btrfs
 
 pytestmark = [pytest.mark.tier2, requires_btrfs]
+
+
+@pytest.fixture
+def large_enospc_btrfs(tmp_path: Path):
+    # Btrfs requires sizeable reserved metadata/headroom during actual
+    # receive; using 256 MiB would fail *restore preflight*, not the
+    # intended ENOSPC->checkpoint-resume regression.
+    with LoopbackBtrfs(size_mb=768, label="harbor-enospc", base_dir=tmp_path) as vol:
+        yield vol
+
 
 PROFILE_ID = "55555555-5555-4555-8555-555555555555"
 
@@ -29,8 +39,9 @@ def run(*args: str, timeout: int = 240) -> subprocess.CompletedProcess[str]:
 
 
 def test_tmpfs_enospc_resume_preserves_committed_frames(
-    btrfs_volume: Path, tmp_path: Path
+    large_enospc_btrfs: Path, tmp_path: Path
 ):
+    btrfs_volume = large_enospc_btrfs
     source = btrfs_volume / "enospc-source"
     subprocess.run(["btrfs", "subvolume", "create", str(source)], check=True)
     digest = hashlib.sha256()

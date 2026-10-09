@@ -1579,7 +1579,12 @@ async fn machine_set_catalog(app: tauri::AppHandle, target: String) -> Result<St
     if let Ok(response) = Command::new(&engine).args(args).output().await
         && response.status.success()
     {
-        return Ok(String::from_utf8_lossy(&response.stdout).trim().into());
+        let catalog = String::from_utf8_lossy(&response.stdout).trim().to_owned();
+        if catalog != "[]" {
+            return Ok(catalog);
+        }
+        // An inaccessible root-owned 0600 catalog is filtered by the CLI's
+        // nofollow scanner and returns []. Fall back ONLY when files exist.
     }
     // Some root-owned catalogs are mode 0600; elevate only if needed.
     let response = Command::new("/usr/bin/pkexec")

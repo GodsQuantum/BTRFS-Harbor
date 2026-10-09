@@ -218,6 +218,7 @@
 				entries = [];
 				await tick();
 				await refresh();
+				await refreshMachineSets();
 			}
 		} catch (reason) {
 			error = String(reason);
@@ -294,7 +295,6 @@
 		void refreshMachineSets();
 		const interval = setInterval(() => {
 			if (!busy) void refresh();
-			if (!running) void refreshMachineSets();
 		}, 12000);
 		return () => clearInterval(interval);
 	});

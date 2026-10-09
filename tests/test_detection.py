@@ -2482,3 +2482,34 @@ path = "/backup"
         content = save_path.read_text()
         assert 'path = "/home"' in content
         assert 'snapshot_prefix = "home"' in content
+
+
+def test_btrfs_scan_errors_cannot_masquerade_as_complete(monkeypatch):
+    """Unscanned persistent subvolumes must never be silently declared covered."""
+    from btrfs_backup_ng.detection.scanner import DetectionError, scan_system
+
+    mount = BtrfsMountInfo(
+        device="/dev/disk/by-uuid/test",
+        mount_point="/home",
+        subvol_path="/@home",
+        subvol_id=256,
+    )
+    monkeypatch.setattr(
+        "btrfs_backup_ng.detection.scanner.parse_proc_mounts",
+        lambda: [mount],
+    )
+
+    def cannot_list(_):
+        raise DetectionError("injected Btrfs EIO")
+
+    monkeypatch.setattr(
+        "btrfs_backup_ng.detection.scanner.list_subvolumes",
+        cannot_list,
+    )
+    with pytest.raises(DetectionError, match="injected Btrfs EIO"):
+        scan_system(allow_partial=False)
+    partial = scan_system(allow_partial=True)
+    assert partial.is_partial is True
+    assert "injected Btrfs EIO" in partial.error_message
+    assert "/home" in partial.error_message
+    assert any(sub.mount_point == "/home" for sub in partial.subvolumes)

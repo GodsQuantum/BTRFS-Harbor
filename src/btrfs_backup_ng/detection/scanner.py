@@ -432,7 +432,19 @@ def scan_system(
             else:
                 raise
         except DetectionError as e:
-            logger.warning("Could not list subvolumes on %s: %s", mount.mount_point, e)
+            # Never advertise a complete machine backup when an entire Btrfs
+            # filesystem could not be enumerated (I/O error, absent tool, etc.).
+            # Without this flag the caller silently omits persistent volumes.
+            if not allow_partial:
+                raise
+            result.is_partial = True
+            problem = f"Could not scan {mount.mount_point}: {e}"
+            result.error_message = (
+                f"{result.error_message}; {problem}"
+                if result.error_message
+                else problem
+            )
+            logger.warning("%s", problem)
 
     # Step 3: Correlate mount points
     result.subvolumes = correlate_mounts_and_subvolumes(

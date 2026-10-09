@@ -721,6 +721,15 @@ def _list_v2(root: Path) -> list[dict[str, object]]:
 
 def _execute(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
+    if action in ("set-start", "set-resume", "set-status", "set-restore"):
+        from .machine_set_v2 import execute_machine_set
+
+        return execute_machine_set(args)
+    if action == "machine-inventory":
+        from ..core.machine_inventory_v2 import inspect_live_machine
+
+        print(json.dumps(inspect_live_machine(), sort_keys=True))
+        return 0
     if action == "native-list":
         items = list_native_snapshots(Path(args.source))
         print(

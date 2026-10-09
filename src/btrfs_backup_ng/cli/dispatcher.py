@@ -517,6 +517,27 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
     start_v2.add_argument("--snapper-config")
     start_v2.add_argument("--snapper-number", type=int)
     start_v2.add_argument("--native-name")
+    v2_actions.add_parser(
+        "machine-inventory",
+        help="Read-only persistent Btrfs and EFI coverage inventory",
+    )
+    # Opt-in multi-subvolume set shares the v2 streaming/checkpoint engine.
+    for set_action in ("set-start", "set-resume", "set-status", "set-restore"):
+        set_parser = v2_actions.add_parser(
+            set_action, help="Portable Btrfs-only multi-subvolume backup set"
+        )
+        set_parser.add_argument("--target", required=True)
+        set_parser.add_argument("--allow-local", action="store_true")
+        set_parser.add_argument("--state-dir")
+        set_parser.add_argument("--experimental", action="store_true")
+        if set_action == "set-start":
+            set_parser.add_argument("--profile-id", required=True)
+            set_parser.add_argument("--source", action="append")
+        else:
+            set_parser.add_argument("--set-id", required=True)
+        if set_action == "set-restore":
+            set_parser.add_argument("--staging", required=True)
+            set_parser.add_argument("--confirm", action="store_true")
     native_list_v2 = v2_actions.add_parser(
         "native-list", help="Read-only inventory of Harbor-owned native Btrfs snapshots"
     )

@@ -371,6 +371,8 @@ def correlate_mounts_and_subvolumes(
 
 def scan_system(
     allow_partial: bool = False,
+    *,
+    include_removable: bool = False,
 ) -> DetectionResult:
     """Scan the system for btrfs subvolumes.
 
@@ -394,7 +396,11 @@ def scan_system(
     result = DetectionResult()
 
     # Step 1: Parse mounted btrfs filesystems
-    result.filesystems = parse_proc_mounts()
+    result.filesystems = (
+        parse_proc_mounts(exclude_removable=False)
+        if include_removable
+        else parse_proc_mounts()
+    )
 
     if not result.filesystems:
         result.error_message = "No btrfs filesystems found."

@@ -32,6 +32,10 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.6 — restauration des archives historiques
+
+La restauration sans profil reconnaît les noms originaux d'archives contenant des points, des espaces ou des caractères accentués, sans autoriser la traversée de dossiers. Un nouveau test Btrfs privilégié vérifie le vrai moteur de sauvegarde Harbor, les incrémentaux et la restauration à partir de la destination seule. La restauration système amorçable et les coupures réseau restent à qualifier.
+
 ## v0.2.6-rc.5 — sauvegarde simple, Btrfs natif et restauration sans profil (préversion supervisée)
 
 - Accueil simplifié : snapshot récent, précis ou nouveau ; dossier de destination local/NFS/SMB choisi directement ; bouton Envoyer. Diagnostics et profils restent accessibles ailleurs.

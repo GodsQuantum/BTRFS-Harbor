@@ -1366,11 +1366,15 @@ async fn archive_restore_staged(
 }
 
 fn validate_name_for_restore(name: &str) -> Result<(), String> {
+    // Match the inherited raw engine's basename rules, not the narrower
+    // checkpoint archive creation rules. Historical backup names such as
+    // root.20261009T120000 are valid and must remain recoverable.
     if name.is_empty()
-        || name.len() > 120
-        || !name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || name == "."
+        || name == ".."
+        || name.as_bytes().len() > 200
+        || name.contains('/')
+        || name.contains('\0')
     {
         Err("Unsafe archive name".into())
     } else {
@@ -2265,8 +2269,16 @@ mod tests {
         assert!(checked_recovery_folder("../backups").is_err());
         assert!(checked_recovery_folder("/backups/../etc").is_err());
         assert!(validate_name_for_restore("root_20261009").is_ok());
+        assert!(validate_name_for_restore("root.20261009T153000").is_ok());
+        assert!(validate_name_for_restore("user data 20261009").is_ok());
+        assert!(validate_name_for_restore("home-école.20261009").is_ok());
+        assert!(validate_name_for_restore(".").is_err());
+        assert!(validate_name_for_restore("..").is_err());
+        assert!(validate_name_for_restore(&"a".repeat(201)).is_err());
         assert!(validate_name_for_restore("../../etc").is_err());
-        assert!(validate_name_for_restore("root;rm").is_err());
+        // There is no shell interpolation: punctuation is passed as one argv.
+        assert!(validate_name_for_restore("root;rm").is_ok());
+        assert!(validate_name_for_restore("a\\0b").is_err());
     }
 
     #[test]

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.6] — historical raw archive recovery compatibility
+
+- Restore from destination now permits the same secure archive basenames accepted by the engine (e.g. root.20261009T120000), preserving original user snapshots instead of rejecting punctuation.
+- Add privileged, disposable Btrfs integration test driving the actual checkpoint-v2 CLI, native full/incremental backup, raw catalog and profile-free staged recovery; deployment and live NAS interruption remain separate acceptance gates.
+
 ## [0.2.6-rc.5] — simple UX and native Btrfs checkpoint sources (supervised prerelease)
 
 - Inline folder chooser on main backup screen: verify mounted destination and its identity, create only required subdirectory via fd-relative operations and persist the chosen path without altering other profiles.

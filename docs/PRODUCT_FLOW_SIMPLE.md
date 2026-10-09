@@ -27,7 +27,7 @@ pages, without removing useful capabilities.
    permit file-only staged recovery separately. **Fresh-machine independent import
    for complete bootability remains pending acceptance.**
 
-## What is implemented in preview source at rc.5
+## What is implemented in preview source at rc.6
 
 - Overview reduced to primary backup and restore actions; technical panels collapsed.
 - Actual Snapper snapshot numbers/date/description read through the bundled engine

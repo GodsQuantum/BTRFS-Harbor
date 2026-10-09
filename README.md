@@ -32,6 +32,10 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.6 — portable recovery of historical archive names
+
+The profile-free recovery screen accepts original raw archive names with dots, spaces or Unicode (within the engine's safe filename rules) and retains path-traversal protection. An additional privileged Btrfs integration test now exercises the **actual Harbor checkpointed backup engine**, durable raw catalog, incremental parent and recovery from a destination alone. This prerelease remains supervised; fully bootable disaster recovery and NAS power-loss Resume are not yet qualified.
+
 ## v0.2.6-rc.5 — simpler backup, native Btrfs sources, direct recovery (supervised prerelease)
 
 - Main page: choose source and latest/specific/new snapshot, browse an existing local/NFS/SMB destination directly, and send. Original profile configuration and technical diagnostics stay on separate pages.

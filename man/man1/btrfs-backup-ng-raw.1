@@ -351,3 +351,8 @@ requires \fB\-\-set-id\fR, \fB\-\-target\fR and
 Without \fB\-\-confirm\fR it only shows the non-destructive staging plan.
 With \fB\-\-confirm\fR it verifies all streams and stages subvolumes.
 It never overwrites a running OS or partitions or repairs EFI/bootloaders.
+
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-list
+lists durable machine-level Btrfs backup catalogs in an existing
+\fB\-\-target\fR without starting a backup or loading a former profile.

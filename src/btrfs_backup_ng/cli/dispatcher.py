@@ -522,7 +522,13 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         help="Read-only persistent Btrfs and EFI coverage inventory",
     )
     # Opt-in multi-subvolume set shares the v2 streaming/checkpoint engine.
-    for set_action in ("set-start", "set-resume", "set-status", "set-restore"):
+    for set_action in (
+        "set-start",
+        "set-resume",
+        "set-status",
+        "set-restore",
+        "set-list",
+    ):
         set_parser = v2_actions.add_parser(
             set_action, help="Portable Btrfs-only multi-subvolume backup set"
         )
@@ -533,7 +539,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         if set_action == "set-start":
             set_parser.add_argument("--profile-id", required=True)
             set_parser.add_argument("--source", action="append")
-        else:
+        elif set_action != "set-list":
             set_parser.add_argument("--set-id", required=True)
         if set_action == "set-restore":
             set_parser.add_argument("--staging", required=True)

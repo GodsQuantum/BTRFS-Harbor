@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invoke, isTauri } from '@tauri-apps/api/core';
-	import { chooseDestinationDirectory, chooseStagingDirectory } from './agent';
+	import { chooseDestinationDirectory, chooseStagingDirectory, runCheckpointAction } from './agent';
 	import type { Locale } from './i18n';
 	export let locale: Locale;
 
@@ -15,6 +15,15 @@
 
 	let backupFolder = '';
 	let staging = '';
+	interface MachineSetRecord {
+		set_id: string;
+		status: string;
+		members: number;
+	}
+	let machineSets: MachineSetRecord[] = [];
+	let selectedSet = '';
+	let machinePlan = '';
+	let machineResult = '';
 	let points: ArchiveRecord[] = [];
 	let selected = '';
 	let plan = '';
@@ -44,7 +53,74 @@
 			points.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
 			backupFolder = chosen;
 			selected = points[0]?.name ?? '';
+			const groupJSON = await runCheckpointAction({
+				action: 'set-list',
+				target: chosen,
+				allow_local: true
+			});
+			const groupData: unknown = JSON.parse(groupJSON);
+			if (!Array.isArray(groupData)) throw new Error('Invalid machine-set catalog');
+			machineSets = groupData.filter(
+				(value): value is MachineSetRecord =>
+					value !== null &&
+					typeof value === 'object' &&
+					typeof value.set_id === 'string' &&
+					typeof value.status === 'string' &&
+					typeof value.members === 'number'
+			);
+			selectedSet = machineSets.find((set) => set.status === 'completed_btrfs_only')?.set_id ?? '';
+			machinePlan = '';
+			machineResult = '';
 		} catch (reason) {
+			error = String(reason);
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function recoverMachineSet(dryRun: boolean) {
+		if (
+			!isTauri() ||
+			busy ||
+			!backupFolder ||
+			!staging ||
+			!selectedSet ||
+			(!dryRun && !machinePlan)
+		)
+			return;
+		if (
+			!dryRun &&
+			!window.confirm(
+				label(
+					'Stage every Btrfs volume in this backup set? This does not make the disk bootable.',
+					'Restaurer tous les volumes Btrfs dans le dossier de préparation ? Le disque ne sera pas amorçable.',
+					'要恢复所有 Btrfs 卷到暂存目录吗？不会使磁盘可启动。'
+				)
+			)
+		)
+			return;
+		busy = true;
+		error = '';
+		try {
+			const output = await runCheckpointAction({
+				action: 'set-restore',
+				target: backupFolder,
+				allow_local: true,
+				set_id: selectedSet,
+				staging,
+				confirm: !dryRun
+			});
+			if (dryRun) machinePlan = output;
+			else {
+				machineResult = label(
+					'All Btrfs volumes staged; EFI/bootloader recovery not included.',
+					'Volumes Btrfs restaurés ; EFI et chargeur d’amorçage non inclus.',
+					'Btrfs 卷恢复到暂存目录，未恢复 EFI 与引导程序。'
+				);
+				machinePlan = '';
+			}
+		} catch (reason) {
+			machinePlan = '';
 			error = String(reason);
 		} finally {
 			busy = false;
@@ -119,6 +195,60 @@
 		{#if backupFolder}<code>{backupFolder}</code>{/if}
 	</div>
 	{#if backupFolder}
+		{#if machineSets.some((item) => item.status === 'completed_btrfs_only')}
+			<div class="recovery-section">
+				<label class="field">
+					{label('Complete Btrfs volume set', 'Ensemble de volumes Btrfs', '完整的 Btrfs 卷组')}
+					<select
+						bind:value={selectedSet}
+						disabled={busy}
+						onchange={() => {
+							machinePlan = '';
+							machineResult = '';
+						}}
+					>
+						{#each machineSets.filter((item) => item.status === 'completed_btrfs_only') as item (item.set_id)}
+							<option value={item.set_id}>
+								{item.members} Btrfs · {item.set_id.slice(0, 8)}
+							</option>
+						{/each}
+					</select>
+				</label>
+				<p class="warning">
+					{label(
+						'Data recovery only: EFI, bootloader and other filesystems are not included.',
+						'Récupération de données seulement : EFI, chargeur de démarrage et autres systèmes de fichiers non inclus.',
+						'仅恢复数据；不包含 EFI、引导程序及其他文件系统。'
+					)}
+				</p>
+				<button class="secondary" disabled={busy} onclick={() => void browseStaging()}>
+					{label(
+						'Choose empty Btrfs staging folder…',
+						'Choisir un dossier Btrfs vide…',
+						'选择空的 Btrfs 暂存目录…'
+					)}
+				</button>
+				{#if staging}<code>{staging}</code>{/if}
+				{#if staging}
+					<button
+						class="secondary"
+						disabled={busy || !selectedSet}
+						onclick={() => void recoverMachineSet(true)}
+					>
+						{label('Check all volumes', 'Vérifier tous les volumes', '检查所有卷')}
+					</button>
+					<button
+						class="primary"
+						disabled={busy || !machinePlan}
+						onclick={() => void recoverMachineSet(false)}
+					>
+						{label('Restore Btrfs volumes', 'Restaurer les volumes Btrfs', '恢复 Btrfs 卷')}
+					</button>
+				{/if}
+				{#if machinePlan}<pre class="plan">{machinePlan}</pre>{/if}
+				{#if machineResult}<p role="status">{machineResult}</p>{/if}
+			</div>
+		{/if}
 		{#if points.length > 0}
 			<label class="field">
 				{label('Recovery point', 'Point de restauration', '恢复点')}

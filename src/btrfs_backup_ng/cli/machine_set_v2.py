@@ -264,15 +264,39 @@ def _sources_from_inventory() -> tuple[list[str], dict]:
 
 
 def execute_machine_set(args: argparse.Namespace) -> int:
-    if (
-        not getattr(args, "experimental", False)
-        and args.checkpoint_action != "set-status"
+    if not getattr(args, "experimental", False) and args.checkpoint_action not in (
+        "set-status",
+        "set-list",
     ):
         raise ValueError(
             "--experimental required; full machine boot restore is not supported"
         )
     root = _target_root(args.target)
     action = args.checkpoint_action
+    if action == "set-list":
+        rows: list[dict[str, object]] = []
+        for name in sorted(os.listdir(root))[:4096]:
+            if not (name.startswith(".harbor-machine-set-") and name.endswith(".json")):
+                continue
+            identifier = name[len(".harbor-machine-set-") : -len(".json")]
+            try:
+                data = _read(root, _canonical_uuid(identifier))
+            except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
+                continue
+            rows.append(
+                {
+                    "set_id": data["set_id"],
+                    "status": data["status"],
+                    "coverage": data["coverage"],
+                    "bootable": False,
+                    "created_utc": data.get("created_utc"),
+                    "members": len(data["members"]),
+                }
+            )
+            if len(rows) >= 100:
+                break
+        print(json.dumps(rows, sort_keys=True))
+        return 0
     if action == "set-start":
         requested = getattr(args, "source", None) or []
         sources, inventory = (

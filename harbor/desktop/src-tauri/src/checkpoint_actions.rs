@@ -21,10 +21,18 @@ pub struct CheckpointRequest {
     pub native_name: Option<String>,
     pub allow_local: bool,
     pub performance: Option<String>,
+    pub set_id: Option<String>,
+    pub sources: Option<Vec<String>>,
+    pub staging: Option<String>,
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> {
     let action = req.action.as_str();
+    if action.starts_with("set-") {
+        return set_action_arguments(req);
+    }
     if !matches!(action, "start" | "resume" | "pause" | "stop" | "discard") {
         return Err("Unsupported checkpoint control action".into());
     }
@@ -167,6 +175,86 @@ pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
     Ok(args)
 }
 
+fn set_action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> {
+    let action = req.action.as_str();
+    if !matches!(
+        action,
+        "set-start" | "set-resume" | "set-status" | "set-restore" | "set-list"
+    ) {
+        return Err("Unsupported machine-set action".into());
+    }
+    let target = Path::new(&req.target);
+    if !target.is_absolute()
+        || req.target.contains('\0')
+        || target.is_symlink()
+        || !target.is_dir()
+        || target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Existing real absolute machine-set destination required".into());
+    }
+    let mut args: Vec<String> = ["raw", "checkpoint-v2", action, "--target", &req.target]
+        .iter()
+        .map(|v| (*v).to_owned())
+        .collect();
+    if req.allow_local {
+        args.push("--allow-local".into());
+    }
+    if !matches!(action, "set-status" | "set-list") {
+        args.push("--experimental".into());
+        args.extend(["--state-dir".into(), CONTROL_STATE_DIR.into()]);
+    }
+    if action == "set-start" {
+        let profile = req.profile_id.as_deref().ok_or("Missing profile ID")?;
+        Uuid::parse_str(profile).map_err(|_| "Invalid profile ID")?;
+        args.extend(["--profile-id".into(), profile.into()]);
+        if let Some(sources) = &req.sources {
+            if sources.len() > 1024 {
+                return Err("Too many selected Btrfs subvolumes".into());
+            }
+            for source in sources {
+                let path = Path::new(source);
+                if !path.is_absolute()
+                    || source.contains('\0')
+                    || path.is_symlink()
+                    || path
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    return Err("Invalid machine-set source".into());
+                }
+                args.extend(["--source".into(), source.clone()]);
+            }
+        }
+    } else if action != "set-list" {
+        let set_id = req.set_id.as_deref().ok_or("Missing machine-set ID")?;
+        let parsed = Uuid::parse_str(set_id).map_err(|_| "Invalid machine-set ID")?;
+        if parsed.to_string() != set_id {
+            return Err("Noncanonical machine-set ID".into());
+        }
+        args.extend(["--set-id".into(), set_id.into()]);
+    }
+    if action == "set-restore" {
+        let staging = req.staging.as_deref().ok_or("Missing restore staging")?;
+        let path = Path::new(staging);
+        if !path.is_absolute()
+            || path.is_symlink()
+            || !path.is_dir()
+            || path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err("Restore staging must be an existing absolute directory".into());
+        }
+        args.extend(["--staging".into(), staging.into()]);
+        if req.confirm {
+            args.push("--confirm".into());
+        }
+    }
+    Ok(args)
+}
+
 fn valid_native_snapshot_name(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("harbor-") else {
         return false;
@@ -249,7 +337,48 @@ mod tests {
             native_name: None,
             allow_local: true,
             performance: None,
+            set_id: Some("3b88e8c1-5cb8-4f67-aa10-f9544b6228f0".into()),
+            sources: None,
+            staging: None,
+            confirm: false,
         }
+    }
+    #[test]
+    fn machine_set_argument_validation_and_explicit_guards() {
+        let mut req = base("set-start");
+        req.sources = Some(vec!["/home".into(), "/srv".into()]);
+        let cmd = action_arguments(&req).unwrap();
+        assert!(cmd.contains(&"--experimental".into()));
+        assert_eq!(cmd.iter().filter(|arg| *arg == "--source").count(), 2);
+        req.sources = Some(vec!["/home/../etc".into()]);
+        assert!(action_arguments(&req).is_err());
+
+        let mut resume = base("set-resume");
+        let cmd = action_arguments(&resume).unwrap();
+        assert!(cmd.contains(&"--set-id".into()));
+        resume.set_id = Some("../../etc/passwd".into());
+        assert!(action_arguments(&resume).is_err());
+
+        let mut restore = base("set-restore");
+        restore.staging = Some("/tmp".into());
+        restore.confirm = false;
+        assert!(
+            !action_arguments(&restore)
+                .unwrap()
+                .contains(&"--confirm".into())
+        );
+        restore.confirm = true;
+        assert!(
+            action_arguments(&restore)
+                .unwrap()
+                .contains(&"--confirm".into())
+        );
+
+        assert!(
+            !action_arguments(&base("set-list"))
+                .unwrap()
+                .contains(&"--experimental".into())
+        );
     }
     #[test]
     fn latest_snapper_requires_experimental_flag_and_fixed_state_dir() {

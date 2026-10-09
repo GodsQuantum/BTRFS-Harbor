@@ -137,6 +137,74 @@
 		...entries.filter((item) => item.resumable),
 		...entries.filter((item) => !item.resumable).slice(0, 1)
 	];
+	interface MachineSetEntry {
+		set_id: string;
+		status: string;
+		members: number;
+	}
+	let machineSets: MachineSetEntry[] = [];
+	$: machineTarget = destination.path ?? '';
+	$: unfinishedMachine = machineSets.some((item) => item.status !== 'completed_btrfs_only');
+	async function refreshMachineSets() {
+		if (!isTauri() || !machineTarget || !machineTarget.startsWith('/')) {
+			machineSets = [];
+			return;
+		}
+		try {
+			const json = await runCheckpointAction({
+				action: 'set-list',
+				target: machineTarget,
+				allow_local: allowLocal
+			});
+			const parsed: unknown = JSON.parse(json);
+			if (!Array.isArray(parsed)) throw new Error('Invalid Btrfs machine catalog');
+			machineSets = parsed.filter(
+				(value): value is MachineSetEntry =>
+					value !== null &&
+					typeof value === 'object' &&
+					typeof value.set_id === 'string' &&
+					typeof value.status === 'string' &&
+					typeof value.members === 'number'
+			);
+		} catch (reason) {
+			error = String(reason);
+		}
+	}
+	async function machineTransfer(action: 'set-start' | 'set-resume', setId?: string) {
+		if (running || !machineTarget || destination.kind === 'ssh') return;
+		if (action === 'set-start' && (unfinishedMachine || unfinished)) return;
+		running = true;
+		error = '';
+		info = '';
+		try {
+			const response = await runCheckpointAction({
+				action,
+				target: machineTarget,
+				allow_local: allowLocal,
+				profile_id: action === 'set-start' ? profile.id : null,
+				set_id: action === 'set-resume' ? setId : null
+			});
+			const lines = response.trim().split('\n');
+			const summary = JSON.parse(lines[lines.length - 1]) as {
+				members: unknown[];
+				status: string;
+			};
+			info =
+				summary.status === 'completed_btrfs_only'
+					? locale === 'fr'
+						? 'Volumes Btrfs sauvegardés : ' + summary.members.length + '. EFI exclu.'
+						: locale === 'zh-CN'
+							? '已备份 ' + summary.members.length + ' 个 Btrfs 卷。EFI 未包含。'
+							: 'Saved ' + summary.members.length + ' Btrfs volumes. EFI excluded.'
+					: response;
+		} catch (reason) {
+			error = String(reason);
+		} finally {
+			running = false;
+			await refreshMachineSets();
+			await refresh();
+		}
+	}
 	let running = false;
 	let busy = false;
 	let error = '';
@@ -226,8 +294,10 @@
 	onMount(() => {
 		if (!source?.snapper_config) mode = 'latest-native';
 		void refresh();
+		void refreshMachineSets();
 		const interval = setInterval(() => {
 			if (!busy) void refresh();
+			if (!running) void refreshMachineSets();
 		}, 12000);
 		return () => clearInterval(interval);
 	});
@@ -424,6 +494,36 @@
 				</select>
 			</label>
 		</details>
+		<div class="machine-set">
+			<button
+				class="secondary compact"
+				disabled={!isTauri() || running || unfinished || unfinishedMachine || !machineTarget}
+				onclick={() => void machineTransfer('set-start')}
+			>
+				{locale === 'fr'
+					? 'Sauvegarder tous les volumes Btrfs'
+					: locale === 'zh-CN'
+						? '备份全部 Btrfs 卷'
+						: 'Back up all Btrfs volumes'}
+			</button>
+			<p class="source-warning">
+				{locale === 'fr'
+					? 'Volumes Btrfs uniquement. EFI et les autres partitions sont exclus ; restauration amorçable non disponible.'
+					: locale === 'zh-CN'
+						? '仅包含 Btrfs 卷；EFI 等其他分区未包含，暂不支持可启动恢复。'
+						: 'Btrfs volumes only. EFI and other partitions are excluded; bootable recovery unavailable.'}
+			</p>
+			{#each machineSets.filter((item) => item.status !== 'completed_btrfs_only') as item (item.set_id)}
+				<div class="actions">
+					<span>{item.members} Btrfs · {item.status}</span>
+					<button
+						class="secondary compact"
+						disabled={running}
+						onclick={() => void machineTransfer('set-resume', item.set_id)}>{t[4]}</button
+					>
+				</div>
+			{/each}
+		</div>
 		<div class="actions">
 			<button
 				class="primary compact"

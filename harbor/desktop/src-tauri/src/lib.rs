@@ -1426,7 +1426,10 @@ async fn checkpoint_action(
     let args = checkpoint_actions::action_arguments(&request)?;
     let executable = bundled_engine_candidate(&app)
         .ok_or("The bundled v2 engine is unavailable; install the v0.2.6 package")?;
-    let long_running = matches!(request.action.as_str(), "start" | "resume");
+    let long_running = matches!(
+        request.action.as_str(),
+        "start" | "resume" | "set-start" | "set-resume" | "set-restore"
+    );
     if long_running {
         // Existing backup runtime prevents closing the only controlling UI
         // when no tray-based, durable v2 worker supervisor is available.

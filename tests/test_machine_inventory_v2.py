@@ -128,3 +128,48 @@ def test_scan_opt_in_removable_media_is_not_global(monkeypatch):
     scanner.scan_system(allow_partial=True)
     scanner.scan_system(allow_partial=True, include_removable=True)
     assert recorded == [True, False]
+
+
+def test_machine_set_list_only_shows_valid_catalogs(tmp_path, capsys):
+    """Read-only listing ignores corrupted files and never claims bootable restore."""
+    from btrfs_backup_ng.cli.machine_set_v2 import execute_machine_set
+
+    import uuid
+
+    valid_id = str(uuid.uuid4())
+    invalid_id = str(uuid.uuid4())
+    profile_id = str(uuid.uuid4())
+    from btrfs_backup_ng.core.native_snapshots import NATIVE_FOLDER
+
+    catalog = {
+        "schema_version": 1,
+        "set_id": valid_id,
+        "profile_id": profile_id,
+        "coverage": "btrfs-only",
+        "status": "completed_btrfs_only",
+        "created_utc": "2026-10-09T21:00:00+00:00",
+        "members": [
+            {
+                "archive": f"machine20261009T210000-{valid_id[:8]}-000",
+                "original_mount": "/home",
+                "snapshot_path": f"/home/{NATIVE_FOLDER}/harbor-20261009T120000Z-012345abcdef",
+                "status": "completed",
+            }
+        ],
+    }
+    (tmp_path / f".harbor-machine-set-{valid_id}.json").write_text(json.dumps(catalog))
+    (tmp_path / f".harbor-machine-set-{invalid_id}.json").write_text("{broken")
+    outside = tmp_path / "outside"
+    outside.write_text("unsafe")
+    (tmp_path / f".harbor-machine-set-{uuid.uuid4()}.json").symlink_to(outside)
+    args = argparse.Namespace(
+        checkpoint_action="set-list",
+        target=str(tmp_path),
+        allow_local=True,
+        experimental=False,
+    )
+    assert execute_machine_set(args) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert len(found) == 1
+    assert found[0]["set_id"] == valid_id
+    assert found[0]["bootable"] is False

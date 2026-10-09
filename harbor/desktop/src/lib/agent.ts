@@ -37,7 +37,17 @@ function integrationUnavailable(message: string): boolean {
 }
 
 export interface CheckpointActionRequest {
-	action: 'start' | 'resume' | 'pause' | 'stop' | 'discard';
+	action:
+		| 'start'
+		| 'resume'
+		| 'pause'
+		| 'stop'
+		| 'discard'
+		| 'set-start'
+		| 'set-resume'
+		| 'set-status'
+		| 'set-restore'
+		| 'set-list';
 	target: string;
 	name?: string | null;
 	profile_id?: string | null;
@@ -56,6 +66,10 @@ export interface CheckpointActionRequest {
 	native_name?: string | null;
 	allow_local: boolean;
 	performance?: 'balanced' | 'fast' | null;
+	set_id?: string | null;
+	sources?: string[] | null;
+	staging?: string | null;
+	confirm?: boolean;
 }
 
 export type { SnapperSnapshotChoice } from './checkpoint';

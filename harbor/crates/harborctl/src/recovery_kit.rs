@@ -1,3 +1,4 @@
+use crate::{checked_directory_fd, create_target_below_pinned, ensure_live_destination};
 use anyhow::{Context, Result, bail};
 use harbor_core::{BackupProfile, DestinationKind, DestinationSpec};
 use harbor_recovery::{
@@ -5,10 +6,11 @@ use harbor_recovery::{
     recovery_kit_relative_dir,
 };
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::ffi::CString;
+use std::fs::{self, File};
 use std::io::Write;
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
@@ -114,22 +116,30 @@ pub fn write_documents_to_destinations(
             continue;
         }
 
-        if !destination.path.is_dir() {
-            bail!(
-                "recovery kit destination base {} does not exist",
-                destination.path.display()
-            );
-        }
-
-        let kit_dir = destination.path.join(recovery_kit_relative_dir(profile_id));
-        fs::create_dir_all(&kit_dir)
-            .with_context(|| format!("cannot create recovery kit {}", kit_dir.display()))?;
+        let pinned_root = checked_directory_fd(destination)?;
+        ensure_live_destination(destination, &pinned_root)?;
+        let relative_kit = recovery_kit_relative_dir(profile_id);
+        let kit_dir = destination.path.join(&relative_kit);
+        let leaf_fd = create_target_below_pinned(
+            destination,
+            &pinned_root,
+            relative_kit
+                .to_str()
+                .context("invalid recovery kit directory path")?,
+        )?;
 
         for (name, content) in documents {
-            if name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+            if name.is_empty()
+                || name.contains('/')
+                || name.contains('\\')
+                || name == "."
+                || name == ".."
+            {
                 bail!("unsafe recovery kit document name {name:?}");
             }
-            atomic_write_mode(&kit_dir.join(name), content.as_bytes(), 0o644)?;
+            ensure_live_destination(destination, &pinned_root)?;
+            atomic_write_pinned(&leaf_fd, name, content.as_bytes(), 0o600)?;
+            ensure_live_destination(destination, &pinned_root)?;
         }
 
         report.written_directories.push(kit_dir);
@@ -220,45 +230,57 @@ fn normalize_text(value: &str) -> String {
     }
 }
 
-fn atomic_write_mode(path: &Path, content: &[u8], mode: u32) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("{} has no parent directory", path.display()))?;
-    fs::create_dir_all(parent)?;
-
-    let tmp = parent.join(format!(
-        ".{}.tmp-{}-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("recovery-kit"),
-        std::process::id(),
-        Uuid::new_v4()
-    ));
-
-    {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(mode);
-
-        let mut file = options
-            .open(&tmp)
-            .with_context(|| format!("cannot create temporary file {}", tmp.display()))?;
+fn atomic_write_pinned(
+    directory_fd: &OwnedFd,
+    name: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<()> {
+    // All writes and the atomic publish target the verified directory FD.
+    // If an NFS mount disappears, this never falls back to an underlay path.
+    let temp = format!(".{name}.tmp-{}", Uuid::new_v4());
+    let temp_c = CString::new(temp.as_bytes()).context("invalid temporary document name")?;
+    let name_c = CString::new(name.as_bytes()).context("invalid document name")?;
+    // SAFETY: the file name is a single validated component; directory_fd is owned.
+    let raw = unsafe {
+        libc::openat(
+            directory_fd.as_raw_fd(),
+            temp_c.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            mode,
+        )
+    };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error()).context("cannot create pinned kit temp file");
+    }
+    // SAFETY: successful openat returns an exclusively owned descriptor.
+    let mut file = unsafe { File::from_raw_fd(raw) };
+    let published = (|| -> Result<()> {
         file.write_all(content)?;
         file.sync_all()?;
+        // renameat replaces a final-component symlink, never follows it.
+        // SAFETY: both C strings are NUL terminated and dir FD stays open.
+        let code = unsafe {
+            libc::renameat(
+                directory_fd.as_raw_fd(),
+                temp_c.as_ptr(),
+                directory_fd.as_raw_fd(),
+                name_c.as_ptr(),
+            )
+        };
+        if code != 0 {
+            return Err(std::io::Error::last_os_error())
+                .context("cannot atomically publish pinned recovery kit document");
+        }
+        let dir = directory_fd.try_clone()?;
+        File::from(dir).sync_all()?;
+        Ok(())
+    })();
+    if published.is_err() {
+        // SAFETY: temp exists only inside the pinned leaf directory.
+        unsafe { libc::unlinkat(directory_fd.as_raw_fd(), temp_c.as_ptr(), 0) };
     }
-
-    #[cfg(unix)]
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(mode))?;
-
-    fs::rename(&tmp, path)
-        .with_context(|| format!("cannot atomically replace {}", path.display()))?;
-
-    if let Ok(dir) = fs::File::open(parent) {
-        let _ = dir.sync_all();
-    }
-
-    Ok(())
+    published
 }
 
 #[cfg(test)]
@@ -332,6 +354,74 @@ mod tests {
         .to_string();
 
         assert!(err.contains("local/raw/NFS/SMB"), "{err}");
+    }
+
+    #[test]
+    fn recovery_kit_refuses_symlinked_intermediate_directory() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("harbor-kit-symlink-{}", Uuid::new_v4()));
+        let backup = base.join("backup");
+        let outside = base.join("outside");
+        fs::create_dir_all(&backup).unwrap();
+        fs::create_dir(&outside).unwrap();
+        symlink(&outside, backup.join("_recovery-kit")).unwrap();
+        let spec = DestinationSpec {
+            id: Uuid::new_v4(),
+            name: "Private test".into(),
+            kind: DestinationKind::Local,
+            path: backup,
+            mount_point: None,
+            expected_mount_source: None,
+            compression: "zstd".into(),
+            optional: false,
+        };
+        assert!(
+            write_documents_to_destinations(
+                Uuid::new_v4(),
+                &[&spec],
+                &BTreeMap::from([("manifest.json".into(), "{}".into())]),
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn recovery_kit_atomic_update_never_follows_previous_document_symlink() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("harbor-kit-file-{}", Uuid::new_v4()));
+        let backup = base.join("backup");
+        fs::create_dir_all(&backup).unwrap();
+        let profile = Uuid::new_v4();
+        let kit = backup.join(recovery_kit_relative_dir(profile));
+        fs::create_dir_all(&kit).unwrap();
+        let outside = base.join("outside.conf");
+        fs::write(&outside, b"DO NOT OVERWRITE").unwrap();
+        symlink(&outside, kit.join("manifest.json")).unwrap();
+        let spec = DestinationSpec {
+            id: Uuid::new_v4(),
+            name: "Private test".into(),
+            kind: DestinationKind::Local,
+            path: backup,
+            mount_point: None,
+            expected_mount_source: None,
+            compression: "zstd".into(),
+            optional: false,
+        };
+        write_documents_to_destinations(
+            profile,
+            &[&spec],
+            &BTreeMap::from([("manifest.json".into(), "SAFE DATA".into())]),
+        )
+        .unwrap();
+        assert_eq!(fs::read(&outside).unwrap(), b"DO NOT OVERWRITE");
+        assert_eq!(
+            fs::read_to_string(kit.join("manifest.json")).unwrap(),
+            "SAFE DATA"
+        );
+        assert!(!kit.join("manifest.json").is_symlink());
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

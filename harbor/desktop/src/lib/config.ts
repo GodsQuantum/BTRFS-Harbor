@@ -47,6 +47,7 @@ export interface BackupProfile {
 	on_calendar: string;
 	retention: RetentionPolicy;
 	verify_after_backup: boolean;
+	resumable_v2?: boolean;
 }
 
 export type EnginePolicy = 'auto' | 'system' | 'bundled';
@@ -235,7 +236,8 @@ export function createDefaultConfiguration(
 					monthly: 3,
 					yearly: 0
 				},
-				verify_after_backup: true
+				verify_after_backup: true,
+				resumable_v2: false
 			}
 		]
 	};
@@ -267,7 +269,8 @@ export function appendDefaultBackupJob(
 		destination_ids: [destinationId],
 		on_calendar: '*-*-* 02:00:00',
 		retention: { hourly: 0, daily: 7, weekly: 4, monthly: 3, yearly: 0 },
-		verify_after_backup: true
+		verify_after_backup: true,
+		resumable_v2: false
 	});
 	return next;
 }

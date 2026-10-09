@@ -655,6 +655,40 @@
 			<label class="toggle-row">
 				<input
 					type="checkbox"
+					checked={Boolean(profile.resumable_v2)}
+					disabled={destinationIsSsh}
+					onchange={(event) =>
+						updateProfile(
+							(current) =>
+								(current.resumable_v2 = (event.currentTarget as HTMLInputElement).checked)
+						)}
+				/>
+				<span>
+					<strong
+						>{locale === 'fr'
+							? 'Reprise automatique par checkpoints (v2)'
+							: locale === 'zh-CN'
+								? '自动检查点续传（v2）'
+								: 'Automatic checkpoint resume (v2)'}</strong
+					>
+					<small
+						>{destinationIsSsh
+							? locale === 'fr'
+								? 'SSH non pris en charge pour le moment : moteur existant conservé.'
+								: locale === 'zh-CN'
+									? '暂不支持 SSH：保留原来的传输引擎。'
+									: 'Not yet supported on SSH; existing engine is retained.'
+							: locale === 'fr'
+								? 'Option avancée. V2 est validé sur Btrfs/NFS mais n’applique pas encore la politique de rétention. Restauration amorçable non certifiée.'
+								: locale === 'zh-CN'
+									? '高级选项。已验证 Btrfs/NFS，暂不自动执行保留策略，尚未认证整机引导恢复。'
+									: 'Advanced option. Btrfs/NFS validated. Automatic retention is not yet applied; bootable machine recovery not certified.'}</small
+					>
+				</span>
+			</label>
+			<label class="toggle-row">
+				<input
+					type="checkbox"
 					checked={profile.verify_after_backup}
 					onchange={(event) =>
 						updateProfile(

@@ -493,6 +493,21 @@ fn parse_config_json(raw: &str) -> Result<HarborConfig> {
     Ok(config)
 }
 
+fn validate_profile_checkpoint_mode(config: &HarborConfig, profile: &BackupProfile) -> Result<()> {
+    if profile.resumable_v2 {
+        let selected = selected_destinations(config, profile)?;
+        if selected
+            .iter()
+            .any(|d| matches!(d.kind, DestinationKind::Ssh))
+        {
+            bail!(
+                "SSH checkpoint-v2 is not available; keep this profile on the existing SSH engine"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn render_apply_artifacts(config: &HarborConfig, id: Uuid) -> Result<ApplyArtifacts> {
     config
         .validate()
@@ -501,11 +516,12 @@ fn render_apply_artifacts(config: &HarborConfig, id: Uuid) -> Result<ApplyArtifa
         .profile(id)
         .with_context(|| format!("profile {id} not found"))?;
 
+    validate_profile_checkpoint_mode(config, profile)?;
     let snapshot_trigger = profile.on_calendar.trim() == SNAPSHOT_TRIGGER;
     Ok(ApplyArtifacts {
         main_config: config.to_toml()?,
         engine_config: render_engine_config(profile, &config.destinations)?,
-        service: render_service(id),
+        service: render_service(profile),
         timer: (!snapshot_trigger).then(|| render_timer(profile)),
         path: snapshot_trigger
             .then(|| render_snapshot_path(profile))
@@ -600,6 +616,7 @@ fn install_profile(id: Uuid) -> Result<()> {
     ensure_root()?;
     let (config, profile) = load_profile(id)?;
     validate_schedule(&profile)?;
+    validate_profile_checkpoint_mode(&config, &profile)?;
 
     fs::create_dir_all(generated_dir())?;
     let generated = render_engine_config(&profile, &config.destinations)?;
@@ -610,7 +627,7 @@ fn install_profile(id: Uuid) -> Result<()> {
     let stem = profile_unit_stem(id);
     atomic_write(
         &systemd.join(format!("{stem}.service")),
-        render_service(id).as_bytes(),
+        render_service(&profile).as_bytes(),
     )?;
     let active_unit = if profile.on_calendar.trim() == SNAPSHOT_TRIGGER {
         let unit = format!("{stem}.path");
@@ -1582,7 +1599,7 @@ fn create_target_below_pinned(
     destination: &DestinationSpec,
     root_fd: &OwnedFd,
     target_subdir: &str,
-) -> Result<()> {
+) -> Result<OwnedFd> {
     let mut current = root_fd.try_clone()?;
     let mut components = 0usize;
     for part in Path::new(target_subdir).components() {
@@ -1626,7 +1643,7 @@ fn create_target_below_pinned(
     if components == 0 {
         bail!("backup target subdirectory cannot be empty");
     }
-    Ok(())
+    Ok(current)
 }
 
 fn prepare_local_target_dirs(profile: &BackupProfile, destination: &DestinationSpec) -> Result<()> {
@@ -1667,9 +1684,15 @@ fn verify_profile_targets(
     Ok(())
 }
 
-fn render_service(id: Uuid) -> String {
+fn render_service(profile: &BackupProfile) -> String {
+    let id = profile.id;
+    let action = if profile.resumable_v2 {
+        "run-profile-v2"
+    } else {
+        "run-profile"
+    };
     format!(
-        "[Unit]\nDescription=Btrfs Harbor backup profile {id}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/btrfs-harborctl run-profile {id}\nUser=root\nGroup=root\nUMask=0077\nNice=10\nIOSchedulingClass=best-effort\nIOSchedulingPriority=6\n"
+        "[Unit]\nDescription=Btrfs Harbor backup profile {id}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/btrfs-harborctl {action} {id}\nUser=root\nGroup=root\nUMask=0077\nNice=10\nIOSchedulingClass=best-effort\nIOSchedulingPriority=6\n"
     )
 }
 
@@ -1857,6 +1880,7 @@ mod tests {
                 yearly: 0,
             },
             verify_after_backup: true,
+            resumable_v2: false,
         }
     }
 
@@ -1949,6 +1973,31 @@ mod tests {
             ..destination
         };
         assert!(checkpoint_schedule_arguments(&p, source, &ssh).is_err());
+    }
+
+    #[test]
+    fn schedule_mode_opt_in_is_persisted_and_legacy_is_unchanged() {
+        let mut config = configuration();
+        let id = config.profiles[0].id;
+        let legacy = render_apply_artifacts(&config, id).unwrap();
+        assert!(legacy.service.contains(&format!("run-profile {id}")));
+        assert!(!legacy.service.contains("run-profile-v2"));
+        let mut old_json = serde_json::to_value(&config).unwrap();
+        old_json["profiles"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("resumable_v2");
+        let old_config: HarborConfig = serde_json::from_value(old_json).unwrap();
+        assert!(!old_config.profiles[0].resumable_v2);
+        config.profiles[0].resumable_v2 = true;
+        let enabled = render_apply_artifacts(&config, id).unwrap();
+        assert!(enabled.service.contains(&format!("run-profile-v2 {id}")));
+        let serialized = config.to_toml().unwrap();
+        let roundtrip: HarborConfig = toml::from_str(&serialized).unwrap();
+        assert!(roundtrip.profiles[0].resumable_v2);
+        config.destinations[0].kind = DestinationKind::Ssh;
+        let err = render_apply_artifacts(&config, id).unwrap_err().to_string();
+        assert!(err.contains("SSH checkpoint-v2"), "{err}");
     }
 
     fn configuration() -> HarborConfig {
@@ -2460,7 +2509,7 @@ line two"
     #[test]
     fn service_runs_exact_profile_as_root() {
         let p = profile();
-        let service = render_service(p.id);
+        let service = render_service(&p);
         assert!(service.contains(&format!("run-profile {}", p.id)));
         assert!(service.contains("User=root"));
         assert!(service.contains("UMask=0077"));

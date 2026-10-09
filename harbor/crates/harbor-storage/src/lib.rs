@@ -680,6 +680,7 @@ mod tests {
                     yearly: 0,
                 },
                 verify_after_backup: true,
+                resumable_v2: false,
             }],
         };
 
@@ -722,6 +723,7 @@ mod tests {
                     yearly: 0,
                 },
                 verify_after_backup: true,
+                resumable_v2: false,
             }],
         }
     }
@@ -816,6 +818,7 @@ mod tests {
                 yearly: 0,
             },
             verify_after_backup: true,
+            resumable_v2: false,
         };
 
         let rendered = render_engine_config(&profile, &[destination]).unwrap();

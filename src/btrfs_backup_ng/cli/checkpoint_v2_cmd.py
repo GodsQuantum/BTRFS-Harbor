@@ -835,8 +835,8 @@ def _execute(args: argparse.Namespace) -> int:
         raise ValueError("unknown checkpoint action")
     if not args.experimental:
         print(
-            "checkpoint-v2: explicit --experimental required; real Btrfs/NFS restore "
-            "validation not yet completed",
+            "checkpoint-v2: explicit --experimental required; bootable recovery and "
+            "checkpointed SSH are not yet certified",
             file=sys.stderr,
         )
         return 2

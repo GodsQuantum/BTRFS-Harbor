@@ -42,6 +42,15 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
   exercised SIGKILL, NFS unmount/remount, checksum-preserving checkpoint Resume
   and restored-content SHA-256 verification.
 - Separate tests cover disposable mount detachment and target ENOSPC recovery.
+- Scheduled profiles can explicitly opt into the same v2 resume engine in Advanced
+  options; previously installed profiles keep their existing engine by default.
+- Recovery Kit documents are now written atomically under mount-pinned,
+  no-symlink directory handles; an absent NAS cannot receive fallback writes.
+- Privileged acceptance includes actual NFS server outage during
+  send, 101 real Btrfs tests, multivolume crash replay and ENOSPC recovery.
+- The v2 scheduling mode does **not** yet enforce configured retention.
+  SSH-v2 and bootable bare-metal recovery remain unsupported features.
+  See docs/RESEARCH_BOOT_REAR_2026-10-10.md for the recovery design gates.
 
 **Not yet stable:** bootable UEFI disk reconstruction, SSH/scheduler migration
 to checkpoint v2, and network-server failure *during* an active write remain

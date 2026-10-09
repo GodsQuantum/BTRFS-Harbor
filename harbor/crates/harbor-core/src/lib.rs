@@ -163,6 +163,8 @@ pub struct BackupProfile {
     pub on_calendar: String,
     pub retention: RetentionPolicy,
     pub verify_after_backup: bool,
+    #[serde(default)]
+    pub resumable_v2: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

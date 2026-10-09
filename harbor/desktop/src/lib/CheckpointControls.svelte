@@ -26,7 +26,7 @@
 	const translation: Record<Locale, string[]> = {
 		en: [
 			'Resumable Btrfs backup',
-			'This feature is experimental; keep verified backups. Full Btrfs/NFS restore tests are pending.',
+			'Btrfs and NFS interruption/recovery tests passed. Bootable recovery and checkpointed SSH are not yet certified.',
 			'Send latest',
 			'Refresh',
 			'Resume',
@@ -45,7 +45,7 @@
 		],
 		fr: [
 			'Sauvegarde Btrfs reprenable',
-			'Conservez vos sauvegardes validées. Les essais Btrfs/NFS complets restent à faire.',
+			'Tests d’interruption et de restauration Btrfs/NFS réussis. Restauration amorçable et SSH reprenable non certifiés.',
 			'Envoyer le dernier',
 			'Actualiser',
 			'Reprendre',
@@ -64,7 +64,7 @@
 		],
 		'zh-CN': [
 			'可续传 Btrfs 备份',
-			'请保留已验证的备份。完整 Btrfs/NFS 恢复测试仍待完成。',
+			'已通过 Btrfs/NFS 中断及恢复测试。完整可启动恢复与 SSH 续传尚未认证。',
 			'发送最新快照',
 			'刷新',
 			'继续',

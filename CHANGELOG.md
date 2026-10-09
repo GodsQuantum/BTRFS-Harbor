@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — crash-safe snapshot reservation and mounted-target checks
 
+- Optional per-profile scheduled v2 engine in native UI; legacy default kept
+  on upgrade, and unsupported SSH checkpoint v2 blocked at config time.
+- Descriptor-pinned Recovery Kit writes with nofollow traversal, fsync,
+  atomic rename; symlink escape tests.
+- 101 privileged real Btrfs tests and two actual NFSv4 server fault tests pass.
+- v2 automatic retention and bootable disk recovery NOT yet implemented;
+  ReaR bare-metal bridge requires EFI-content backup and QEMU boot tests.
+
 - Persist each Btrfs subvolume snapshot reservation before creation; on
   SIGKILL recover the exact intended readonly source.
 - Installed schedules refuse detached mount, symlinks and path traversal

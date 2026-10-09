@@ -43,6 +43,15 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
   a réussi : SIGKILL, démontage/remontage, reprise sans perdre les checkpoints
   validés et comparaison SHA-256 des données restaurées.
 - Des tests séparés couvrent le démontage à chaud et le manque d'espace.
+- Chaque profil planifié peut activer explicitement le moteur de reprise v2
+  dans les options avancées. Les profils déjà installés ne changent pas par défaut.
+- Le Recovery Kit écrit ses documents atomiquement à travers des descripteurs
+  contrôlés : aucun repli sur le disque local si le NAS disparaît.
+- Les tests réels comprennent l'arrêt du serveur NFS en plein transfert,
+  101 essais Btrfs privilégiés, les coupures multivolumes et le manque d'espace.
+- Attention : le mode planifié v2 **n'applique pas encore la rétention**
+  configurée. SSH-v2 et restauration amorçable restent non certifiés.
+  Voir docs/RESEARCH_BOOT_REAR_2026-10-10.md.
 
 **Non stabilisé :** reconstruction amorçable UEFI, migration SSH et tâches
 planifiées vers les checkpoints v2, et coupure du serveur pendant une écriture.

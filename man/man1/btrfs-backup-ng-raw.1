@@ -321,3 +321,33 @@ Snapper native cleanup pinning is released after deletion and UUID check.
 with an existing destination path enumerates read-only checkpoint summaries,
 including transaction IDs, archive names and committed bytes. Private manifests
 remain mode 0600 and can be inspected via the native polkit-authorized engine.
+
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 machine-inventory
+prints a read-only JSON inventory of discoverable Btrfs subvolumes and
+separately mounted EFI or other non-Btrfs filesystems. It does not claim
+that unmounted/disconnected devices can be identified.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-start
+starts an experimental Btrfs-only multi-subvolume point with
+\fB\-\-target\fR, \fB\-\-profile-id\fR and
+\fB\-\-experimental\fR. Repeat \fB\-\-source\fR for
+an explicit set, or omit it to discover mounted persistent Btrfs sources.
+The \fB\-\-state-dir\fR and \fB\-\-allow-local\fR options
+match single-source checkpoint v2.
+A portable set catalog records each independently committed backup.
+The command does NOT back up non-Btrfs EFI or create a bootable system image.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-resume
+uses \fB\-\-set-id\fR and the original \fB\-\-target\fR
+to continue unfinished members via the EXISTING checkpoint-v2 engine.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-status
+uses \fB\-\-set-id\fR to show completed and unfinished members.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 set-restore
+requires \fB\-\-set-id\fR, \fB\-\-target\fR and
+\fB\-\-staging\fR pointing to an EXISTING EMPTY Btrfs directory.
+Without \fB\-\-confirm\fR it only shows the non-destructive staging plan.
+With \fB\-\-confirm\fR it verifies all streams and stages subvolumes.
+It never overwrites a running OS or partitions or repairs EFI/bootloaders.

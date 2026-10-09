@@ -20,11 +20,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from .. import __util__
 from ..core.machine_inventory_v2 import inspect_live_machine
 from ..core.native_snapshots import NATIVE_FOLDER, NAME_PATTERN, create_native_snapshot
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
 from ..core.verify_v2 import verify_checkpoint_index
-from ..endpoint.mount_guard_v2 import capture_mount_identity
 from .checkpoint_v2_cmd import (
     _list_v2,
     _open_guard,
@@ -386,7 +386,17 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
         raise ValueError("staging must be an existing real absolute directory")
     if any(staging.iterdir()):
         raise ValueError("staging must be empty, never overwrite existing user data")
-    if capture_mount_identity(staging).fstype != "btrfs":
+    # Btrfs subvolumes may expose synthetic st_dev values distinct from
+    # mountinfo's device; ask the mount utility for the filesystem type
+    # rather than treating the destination write guard as a source probe.
+    probe = subprocess.run(
+        ["findmnt", "-n", "-o", "FSTYPE", "-T", str(staging)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if probe.returncode or probe.stdout.strip() != "btrfs":
         raise ValueError("staging filesystem must be Btrfs")
     for member in data["members"]:
         if not _archive_valid(root, member["archive"]):
@@ -404,7 +414,9 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
         return 0
     for entry in plan:
         destination = Path(entry["staging"])
-        destination.mkdir(mode=0o700)
+        destination = __util__.create_below(
+            staging, destination.name, mode=0o700, what="Restore staging"
+        )
         outcome = subprocess.run(
             [
                 sys.executable,

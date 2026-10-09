@@ -287,6 +287,39 @@ _btrfs_backup_ng() {
                                     '--native-name[]:native_name:' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--profile-id[]:file:_files' \
+                                    '--source[]:file:_files' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--set-id[]:set_id:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--set-id[]:set_id:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--set-id[]:set_id:' \
+                                    '--staging[]:staging:' \
+                                    '--confirm[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
                                     '--source[]:file:_files' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \

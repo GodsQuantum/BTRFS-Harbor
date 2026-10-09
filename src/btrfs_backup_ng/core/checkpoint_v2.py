@@ -66,6 +66,7 @@ OPTIONAL_IDENTITY = frozenset(
         "snapper_pre_number",
         "parent_path",
         "parent_backup_name",
+        "parent_snapper_number",
     }
 )
 CHECKPOINT_FIELDS = frozenset(
@@ -142,6 +143,14 @@ def _validate_identity(identity: dict[str, str | int | None]) -> None:
         raise ValueError("incremental parent path is required and must be absolute")
     if parent is None and parent_path is not None:
         raise ValueError("incremental parent path without UUID is not allowed")
+    parent_snapper_number = identity.get("parent_snapper_number")
+    if parent_snapper_number is not None and (
+        parent is None
+        or type(parent_snapper_number) is not int
+        or parent_snapper_number <= 0
+        or not isinstance(identity.get("snapper_config"), str)
+    ):
+        raise ValueError("invalid incremental Snapper parent pin identity")
     parent_name = identity.get("parent_backup_name")
     if parent_name is not None and (
         parent is None

@@ -94,3 +94,28 @@ def test_unverifiable_legacy_parent_is_not_a_safe_incremental_base(
     monkeypatch.setattr(cmd, "discover_raw_snapshots", lambda root: [snap])
     with pytest.raises(ValueError, match="parent"):
         cmd._new_manifest(args_for(tmp_path), "nfs:source")
+
+
+def test_explicit_parent_refuses_missing_ancestor_despite_valid_child_sidecar(
+    tmp_path, monkeypatch
+):
+    prepare(monkeypatch)
+    stored = tmp_path / "parent.btrfs.zst"
+    stored.write_bytes(b"fixture")
+    metadata = tmp_path / "parent.btrfs.zst.meta"
+    metadata.write_text("{}")
+    entry = SimpleNamespace(
+        source_uuid=PARENT,
+        name="parent-archive",
+        stream_path=stored,
+        metadata_path=metadata,
+        checksum_value="a" * 64,
+        checksum_algorithm="sha256",
+        stream_completeness="complete",
+        provenance_origin="native-write",
+        parent_uuid="20000000-0000-4000-8000-000000000001",
+        parent_name="missing-ancestor",
+    )
+    monkeypatch.setattr(cmd, "discover_raw_snapshots", lambda root: [entry])
+    with pytest.raises(ValueError, match="parent"):
+        cmd._new_manifest(args_for(tmp_path), "nfs:source")

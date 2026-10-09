@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.2] — unified manual Resume preview
+
+- The Overview now exposes one main manual backup action and durable checkpoint status. Removed competing classic manual buttons from Overview and ProtectionEditor, collapsed secondary technical overview panels and enlarged the primary card.
+- Added **automatic full/incremental choice** for Snapper sources: first backup is a complete standalone latest-stable base; later sends require an authoritative complete parent chain plus the matching local read-only parent, otherwise send a full base again.
+- Pin both Snapper source and incremental parent for transfer durability, release both only on verified completion or explicitly confirmed discard.
+- Display incomplete transfer checkpoints on app reopening and periodically refresh from the durable destination manifests. Prevent starting another transfer in the same directory before resolving an unfinished transaction.
+- Warn clearly that sources without Snapper are excluded. Existing independent scheduled/legacy SSH jobs remain on their current proven engine while native v2 migration is incomplete.
+- This is a **release candidate, not production-stable**; real NFS outage and disposable Btrfs restore testing are still pending. No automatic poweroff in this build.
+
 ## [0.2.6-rc.1] — supervised experimental preview
 
 - Added an **explicitly experimental** `raw checkpoint-v2` CLI path for

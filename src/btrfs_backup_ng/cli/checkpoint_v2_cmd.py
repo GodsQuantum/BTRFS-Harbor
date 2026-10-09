@@ -50,7 +50,7 @@ from ..snapper.source_policy import (
     resolve_source_identity,
     select_source,
 )
-from ..endpoint.raw_metadata import discover_raw_snapshots
+from ..endpoint.raw_metadata import RawSnapshot, discover_raw_snapshots
 
 STATES_RESUMABLE = frozenset(
     {
@@ -245,24 +245,119 @@ def _resolve_source_choice(args: argparse.Namespace, target_root: Path) -> None:
     args.snapper_number = selected.snapshot.number
 
 
+def _valid_saved_chain(
+    item: RawSnapshot, by_name: dict[str, RawSnapshot], visited: set[str]
+) -> bool:
+    name = getattr(item, "name", None)
+    if not isinstance(name, str) or name in visited or len(visited) > 256:
+        return False
+    if not (
+        getattr(item, "provenance_origin", None) == "native-write"
+        and getattr(item, "stream_completeness", None) == "complete"
+        and isinstance(getattr(item, "checksum_value", None), str)
+        and re.fullmatch("[0-9a-f]{64}", str(item.checksum_value))
+        and getattr(item, "checksum_algorithm", "sha256") == "sha256"
+        and item.stream_path.is_file()
+        and not item.stream_path.is_symlink()
+        and item.metadata_path.is_file()
+        and not item.metadata_path.is_symlink()
+    ):
+        return False
+    parent_uuid = getattr(item, "parent_uuid", None)
+    parent_name = getattr(item, "parent_name", None)
+    if not parent_uuid:
+        return not parent_name
+    ancestor = by_name.get(parent_name) if parent_name else None
+    if ancestor is None or getattr(ancestor, "source_uuid", None) != parent_uuid:
+        return False
+    return _valid_saved_chain(ancestor, by_name, visited | {name})
+
+
+def _select_automatic_incremental_parent(
+    args: argparse.Namespace, target_root: Path
+) -> None:
+    """Use the latest *restorable* remote base backed by a local readonly Snapper source.
+
+    First transfer of a selected snapshot is FULL (one self-contained base).
+    Never invent a differential against an absent snapshot or a broken chain.
+    Explicit --parent retains the existing strict validation path.
+    """
+    if args.parent is not None or args.source_mode == "path" or not args.snapper_config:
+        return
+    snapshots = SnapperScanner().get_snapshots(args.snapper_config)
+    saved = discover_raw_snapshots(target_root)
+    by_name = {item.name: item for item in saved}
+
+    # Match UUIDs, not filename/creation time: no unrelated parent can qualify.
+    remote = {
+        item.source_uuid: item
+        for item in saved
+        if isinstance(getattr(item, "source_uuid", None), str)
+        and item.source_uuid
+        and _valid_saved_chain(item, by_name, set())
+    }
+    if not remote:
+        return
+    selected_path = Path(args.source)
+    chosen = next(
+        (snap for snap in snapshots if snap.subvolume_path == selected_path),
+        None,
+    )
+    if chosen is None:
+        return
+    candidates = sorted(
+        (
+            snap
+            for snap in snapshots
+            if snap.subvolume_path != selected_path
+            and snap.config_name == args.snapper_config
+            and (snap.date, snap.number) < (chosen.date, chosen.number)
+        ),
+        key=lambda snap: (snap.date, snap.number),
+        reverse=True,
+    )
+    for candidate in candidates:
+        path = candidate.subvolume_path
+        if not isinstance(path, Path) or not path.is_dir() or path.is_symlink():
+            continue
+        resolved = resolve_source_identity(candidate)
+        if resolved.exists and resolved.readonly and resolved.uuid in remote:
+            args.parent = str(path)
+            args.parent_snapper_number = candidate.number
+            return
+
+
 def _saved_parent_name(root: Path, uuid_string: str) -> str:
-    """Require a completed authoritative incremental base on this same target."""
-    for snapshot in discover_raw_snapshots(root):
-        if (
-            snapshot.source_uuid == uuid_string
-            and snapshot.provenance_origin != "filename-inferred"
-            and snapshot.stream_completeness == "complete"
-            and isinstance(snapshot.checksum_value, str)
-            and len(snapshot.checksum_value) == 64
-            and all(ch in "0123456789abcdef" for ch in snapshot.checksum_value)
-            and snapshot.stream_path.is_file()
-            and snapshot.metadata_path.is_file()
+    """Refuse an absent/corrupt parent or an otherwise broken restore chain."""
+    saved = discover_raw_snapshots(root)
+    by_name = {item.name: item for item in saved}
+    for snapshot in saved:
+        if snapshot.source_uuid == uuid_string and _valid_saved_chain(
+            snapshot, by_name, set()
         ):
             return snapshot.name
     raise ValueError(
-        "incremental parent is not an authoritative complete backup at this destination; "
-        "save the parent or send a full backup"
+        "incremental parent chain is not authoritative and complete at this "
+        "destination; save a full base before using an incremental send"
     )
+
+
+def _release_snapper_pins(state: Path, manifest: ResumeManifest) -> None:
+    config = manifest.identity.get("snapper_config")
+    source_number = manifest.identity.get("snapper_number")
+    if not isinstance(config, str) or type(source_number) is not int:
+        return
+    pins = _pin_manager(state)
+    pins.release(
+        config,
+        source_number,
+        str(manifest.identity["source_uuid"]),
+        manifest.transfer_id,
+    )
+    parent_number = manifest.identity.get("parent_snapper_number")
+    parent_uuid = manifest.identity.get("parent_uuid")
+    if type(parent_number) is int and isinstance(parent_uuid, str):
+        pins.release(config, parent_number, parent_uuid, manifest.transfer_id)
 
 
 def _new_manifest(
@@ -306,6 +401,9 @@ def _new_manifest(
     if parent_path is not None:
         identity["parent_path"] = str(parent_path)
         identity["parent_backup_name"] = saved_parent_name
+        parent_snapper = getattr(args, "parent_snapper_number", None)
+        if type(parent_snapper) is int:
+            identity["parent_snapper_number"] = parent_snapper
     if args.snapper_config is not None:
         identity["snapper_config"] = args.snapper_config
         identity["snapper_number"] = args.snapper_number
@@ -600,19 +698,8 @@ def _execute(args: argparse.Namespace) -> int:
             )
             with sink:
                 sink.discard(confirmed=True)
-        config = manifest.identity.get("snapper_config")
-        number = manifest.identity.get("snapper_number")
-        if isinstance(config, str) and type(number) is int:
-            # Never unpin before durable part deletion; otherwise a cleanup
-            # timer could delete the source while an unfinished transfer still
-            # exists. Failure here leaves a conservative orphan pin that can
-            # be reconciled, never an unprotected source with a partial.
-            _pin_manager(_state_root(args.state_dir)).release(
-                config,
-                number,
-                str(manifest.identity["source_uuid"]),
-                manifest.transfer_id,
-            )
+        # Unpin both the source and any automatically selected readonly parent.
+        _release_snapper_pins(_state_root(args.state_dir), manifest)
         print(json.dumps({"discarded": args.transfer_id}))
         return 0
     if action not in ("start", "resume"):
@@ -630,6 +717,7 @@ def _execute(args: argparse.Namespace) -> int:
     state = _state_root(args.state_dir)
     if action == "start":
         _resolve_source_choice(args, root)
+        _select_automatic_incremental_parent(args, root)
         manifest, source, parent = _new_manifest(args, stable)
         _validate_requested_snapper(
             snapshot_path=Path(str(manifest.identity["source_path"])),
@@ -639,7 +727,8 @@ def _execute(args: argparse.Namespace) -> int:
         )
         pinned = args.snapper_config is not None
         if pinned:
-            _pin_manager(state).acquire(
+            pins = _pin_manager(state)
+            pins.acquire(
                 args.snapper_config,
                 args.snapper_number,
                 source.uuid,
@@ -648,6 +737,26 @@ def _execute(args: argparse.Namespace) -> int:
                     "number" if args.source_mode == "create-snapper" else None
                 ),
             )
+            parent_number = manifest.identity.get("parent_snapper_number")
+            if parent is not None and type(parent_number) is int:
+                try:
+                    pins.acquire(
+                        args.snapper_config,
+                        parent_number,
+                        str(manifest.identity["parent_uuid"]),
+                        manifest.transfer_id,
+                    )
+                except BaseException:
+                    # No send has started: safe to unwind only the just-acquired
+                    # source pin. Never unlock a parent while an active transfer
+                    # uses it; no v2 partial can exist yet.
+                    pins.release(
+                        args.snapper_config,
+                        args.snapper_number,
+                        source.uuid,
+                        manifest.transfer_id,
+                    )
+                    raise
         try:
             result = _send_worker(
                 root=root,
@@ -688,15 +797,7 @@ def _execute(args: argparse.Namespace) -> int:
                     completed,
                     validate_destination=lambda: guard.validate_fd(guard.directory_fd),
                 )
-                config = manifest.identity.get("snapper_config")
-                number = manifest.identity.get("snapper_number")
-                if isinstance(config, str) and type(number) is int:
-                    _pin_manager(state).release(
-                        config,
-                        number,
-                        str(manifest.identity["source_uuid"]),
-                        manifest.transfer_id,
-                    )
+                _release_snapper_pins(state, manifest)
             print(
                 json.dumps(
                     {
@@ -735,14 +836,6 @@ def _execute(args: argparse.Namespace) -> int:
             resume=True,
         )
     if result["status"] == "completed":
-        config = manifest.identity.get("snapper_config")
-        number = manifest.identity.get("snapper_number")
-        if isinstance(config, str) and isinstance(number, int):
-            _pin_manager(state).release(
-                config,
-                number,
-                str(manifest.identity["source_uuid"]),
-                manifest.transfer_id,
-            )
+        _release_snapper_pins(state, manifest)
     print(json.dumps(result, sort_keys=True))
     return 0

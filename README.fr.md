@@ -32,6 +32,12 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.2 — préversion de sauvegarde Btrfs reprenable
+
+**Une seule commande manuelle principale** dans l’Overview : envoyer le dernier snapshot Snapper stable, mettre en pause, arrêter et reprendre. Le bouton manuel historique concurrent a été supprimé. **Le premier envoi est une sauvegarde complète autonome** ; ensuite Harbor choisit automatiquement l’incrémental si une base distante fiable et son snapshot parent local protégé existent, sinon il effectue un nouveau complet. Les deux snapshots source et parent sont protégés contre le nettoyage Snapper jusqu’à la fin. La progression est relue depuis les manifests après réouverture de l’application ; les diagnostics et réglages techniques sont repliés par défaut. Les sources sans Snapper sont explicitement indiquées comme **non incluses**, jamais présentées à tort comme sauvegardées.
+
+**Limites actuelles :** la commande manuelle unifiée ne traite encore que les sources raw locales/NFS/SMB configurées dans Snapper. Les sources sans Snapper, les timers systemd existants et les anciens transferts SSH ne sont **pas encore migrés** au moteur reprenable. La restauration Btrfs complète et la coupure NFS réelle restent à qualifier : préversion à tester, pas une unique sauvegarde de secours. L’extinction automatique après sauvegarde **n’est pas activée** dans cette version. La v0.2.6-rc.1 reste disponible en repli.
+
 ## v0.2.6-rc.1 — préversion avec reprise par checkpoints
 
 **Commandes desktop expérimentales :** envoyer le dernier snapshot Snapper stable, choisir un numéro, créer un snapshot, mettre en pause, arrêter, reprendre ou abandonner explicitement un partiel. Historique lit les vrais manifests, y compris privés via polkit. Les protections Snapper préservent les sources inachevées. Le bouton classique Sauvegarder maintenant et les timers systemd existants utilisent toujours le moteur historique ; ils ne déclenchent PAS un envoi v2.

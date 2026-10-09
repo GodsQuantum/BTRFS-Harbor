@@ -3,7 +3,6 @@
 	import Check from 'lucide-svelte/icons/check';
 	import ChevronDown from 'lucide-svelte/icons/chevron-down';
 	import FolderOpen from 'lucide-svelte/icons/folder-open';
-	import Play from 'lucide-svelte/icons/play';
 	import Save from 'lucide-svelte/icons/save';
 	import Server from 'lucide-svelte/icons/server';
 	import LifeBuoy from 'lucide-svelte/icons/life-buoy';
@@ -14,7 +13,6 @@
 		inspectDestinationMount,
 		installFullHarbor,
 		loadInstallationState,
-		runDraftBackup,
 		type InstallationState
 	} from './agent';
 	import {
@@ -36,16 +34,9 @@
 		type HarborConfig,
 		type SshDestinationFields
 	} from './config';
-	import BackupProgress from './BackupProgress.svelte';
-	import TransferProgress from './TransferProgress.svelte';
 	import CheckpointControls from './CheckpointControls.svelte';
 	import { translate, type Locale, type TranslationKey } from './i18n';
-	import {
-		upsertTransferProgress,
-		type BackupProgressEvent,
-		type ProfileRuntime,
-		type TransferProgressEvent
-	} from './status';
+	import { type ProfileRuntime } from './status';
 
 	export let config: HarborConfig;
 	export let profileId: string | undefined = undefined;
@@ -55,17 +46,12 @@
 	export let onRecover: () => Promise<void> | void = () => {};
 
 	let applying = false;
-	let backingUp = false;
 	let installation: InstallationState | null = null;
 	let message = '';
 	let error = '';
 	let discoveryError = '';
 	let destinationValidated = false;
 	let validatingDestination = false;
-	let backupProgress: BackupProgressEvent | null = null;
-	let transferProgress: TransferProgressEvent[] = [];
-	let backupDetail = '';
-	let backupEngine = '';
 	let discoveredSources: DiscoveredSource[] = [];
 	let sshFields: SshDestinationFields = { user: '', host: '', port: 22, path: '/backups' };
 
@@ -309,40 +295,6 @@
 		}
 		config = next;
 		return { config: next, profile: nextProfile };
-	}
-
-	async function backupNow() {
-		error = '';
-		message = '';
-		backupProgress = null;
-		transferProgress = [];
-		backupDetail = '';
-		backupEngine = '';
-		backingUp = true;
-		try {
-			const draft = await validatedDraft();
-			if (!draft) return;
-			await runDraftBackup(draft.config, draft.profile.id, (event) => {
-				if (event.event === 'transfer_progress') {
-					transferProgress = upsertTransferProgress(transferProgress, event);
-					return;
-				}
-				if (event.phase === 'engine') backupEngine = event.message;
-				if (event.event === 'output') {
-					backupDetail = event.message;
-				} else {
-					backupProgress = event;
-					message = event.message;
-				}
-			});
-			await onApplied();
-		} catch (cause) {
-			const failure = cause instanceof Error ? cause.message : String(cause);
-			error = failure;
-			backupProgress ??= { event: 'failed', phase: 'error', message: failure };
-		} finally {
-			backingUp = false;
-		}
 	}
 
 	async function apply() {
@@ -714,13 +666,6 @@
 		</details>
 	</section>
 
-	<BackupProgress
-		progress={backupProgress}
-		detail={backupDetail}
-		engineLabel={backupEngine}
-		{locale}
-	/>
-	<TransferProgress events={transferProgress} {locale} />
 	<CheckpointControls {profile} {destination} {locale} />
 
 	<div class="editor-actions">
@@ -732,15 +677,11 @@
 			{/if}
 		</div>
 		<div class="editor-action-buttons">
-			<button class="secondary" type="button" onclick={onRecover} disabled={backingUp || applying}>
+			<button class="secondary" type="button" onclick={onRecover} disabled={applying}>
 				<LifeBuoy size={16} />
 				{t('recoverFromSnapshot')}
 			</button>
-			<button class="secondary" type="button" onclick={backupNow} disabled={backingUp || applying}>
-				<Play size={16} />
-				{backingUp ? t('sending') : t('backupNow')}
-			</button>
-			<button class="primary" type="button" onclick={apply} disabled={applying || backingUp}>
+			<button class="primary" type="button" onclick={apply} disabled={applying}>
 				<Save size={17} />
 				{applying
 					? t('savingConfiguration')

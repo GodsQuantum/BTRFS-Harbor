@@ -21,10 +21,8 @@
 	import MonitorCog from 'lucide-svelte/icons/monitor-cog';
 	import Moon from 'lucide-svelte/icons/moon';
 	import Network from 'lucide-svelte/icons/network';
-	import Play from 'lucide-svelte/icons/play';
 	import Plus from 'lucide-svelte/icons/plus';
 	import Pencil from 'lucide-svelte/icons/pencil';
-	import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
 	import Server from 'lucide-svelte/icons/server';
 	import Settings from 'lucide-svelte/icons/settings';
 	import ShieldCheck from 'lucide-svelte/icons/shield-check';
@@ -44,7 +42,6 @@
 		loadSystemIdentity,
 		openHarborReleasePage,
 		persistEnginePolicy,
-		sendProfileNow,
 		updateActiveSystemEngine,
 		type InstallationState,
 		type SystemIdentity
@@ -65,8 +62,6 @@
 		type Locale,
 		type TranslationKey
 	} from '#lib/i18n.ts';
-	import BackupProgress from '#lib/BackupProgress.svelte';
-	import TransferProgress from '#lib/TransferProgress.svelte';
 	import CheckpointTimeline from '#lib/CheckpointTimeline.svelte';
 	import CheckpointControls from '#lib/CheckpointControls.svelte';
 	import EngineManager from '#lib/EngineManager.svelte';
@@ -79,9 +74,6 @@
 		demoStatus,
 		protectionState,
 		runtimeRepresentsScheduledJob,
-		upsertTransferProgress,
-		type BackupProgressEvent,
-		type TransferProgressEvent,
 		type DashboardStatus,
 		type ProfileRuntime
 	} from '#lib/status.ts';
@@ -99,12 +91,6 @@
 	let locale: Locale = 'en';
 	let active: Page = 'overview';
 	let dark = false;
-	let loading = true;
-	let sending = false;
-	let backupProgress: BackupProgressEvent | null = null;
-	let transferProgress: TransferProgressEvent[] = [];
-	let backupDetail = '';
-	let backupEngine = '';
 	let dashboard: DashboardStatus = demoStatus;
 	let harborConfig: HarborConfig | null = null;
 	let configWarning = '';
@@ -167,7 +153,6 @@
 			configWarning = error instanceof Error ? error.message : String(error);
 			await refreshEngineState(savedEnginePolicy ?? 'auto').catch(() => undefined);
 		}
-		loading = false;
 	});
 
 	function setLocale(next: Locale) {
@@ -279,36 +264,6 @@
 			scheduleError = error instanceof Error ? error.message : String(error);
 		} finally {
 			scheduleSaving = false;
-		}
-	}
-
-	async function sendSnapshot() {
-		if (!dashboard.profileId) {
-			dashboard.warning = t('noLiveProfile');
-			return;
-		}
-		sending = true;
-		backupProgress = null;
-		transferProgress = [];
-		backupDetail = '';
-		backupEngine = '';
-		try {
-			await sendProfileNow(dashboard.profileId, (event) => {
-				if (event.event === 'transfer_progress') {
-					transferProgress = upsertTransferProgress(transferProgress, event);
-					return;
-				}
-				if (event.phase === 'engine') backupEngine = event.message;
-				if (event.event === 'output') backupDetail = event.message;
-				else backupProgress = event;
-			});
-			dashboard = await loadDashboardStatus();
-		} catch (error) {
-			const failure = error instanceof Error ? error.message : String(error);
-			dashboard.warning = failure;
-			backupProgress ??= { event: 'failed', phase: 'error', message: failure };
-		} finally {
-			sending = false;
 		}
 	}
 
@@ -586,28 +541,10 @@
 							</p>
 						</div>
 					</div>
-					<div class="hero-action-stack">
-						<div class="hero-buttons">
-							<button class="secondary" onclick={() => (active = 'recover')} disabled={sending}>
-								<LifeBuoy size={16} />
-								{t('recoverFromSnapshot')}
-							</button>
-							<button class="primary" onclick={sendSnapshot} disabled={sending || loading}>
-								{#if sending}
-									<RotateCcw class="spin" size={17} /> {t('sending')}
-								{:else}
-									<Play size={17} fill="currentColor" /> {t('sendNow')}
-								{/if}
-							</button>
-						</div>
-						<BackupProgress
-							progress={backupProgress}
-							detail={backupDetail}
-							engineLabel={backupEngine}
-							{locale}
-						/>
-						<TransferProgress events={transferProgress} {locale} />
-					</div>
+					<button class="secondary" onclick={() => (active = 'recover')}>
+						<LifeBuoy size={18} />
+						{t('recoverFromSnapshot')}
+					</button>
 				</article>
 
 				{#if dashboard.source === 'live' && harborConfig && activeProfile}
@@ -620,150 +557,165 @@
 					</div>
 				{/if}
 
-				{#if dashboard.source === 'live' && harborConfig && activeProfile}
-					<article class="panel overview-schedule">
-						<div class="overview-schedule-copy">
-							<span>{t('schedule')}</span>
-							<strong>{readableSchedule(activeSchedule)}</strong>
-							<small>{t('simpleScheduleHelp')}</small>
-						</div>
-						<div class="schedule-options compact-options">
-							{#each overviewSchedules as [spec, key] (spec)}
-								<button
-									type="button"
-									class:active={activeSchedule === spec}
-									disabled={scheduleSaving || (spec === '@snapshots' && !activeProfileHasSnapper)}
-									title={spec === '@snapshots' && !activeProfileHasSnapper
-										? t('snapshotScheduleNeedsSnapper')
-										: ''}
-									onclick={() => updateOverviewSchedule(spec)}
-								>
-									{t(key)}
-								</button>
-							{/each}
-						</div>
-						{#if scheduleFeedback}<small class="good-status">{scheduleFeedback}</small>{/if}
-						{#if scheduleError}<small class="error-text">{scheduleError}</small>{/if}
-					</article>
-				{/if}
-
-				<div class="metric-grid">
-					<article class="metric">
-						<div class="metric-icon"><DatabaseBackup size={19} /></div>
-						<div>
-							<span>{t('lastOffHostBackup')}</span>
-							<strong>{dashboard.lastBackup}</strong>
-							<small><Check size={13} /> {t('verified')}</small>
-						</div>
-					</article>
-					<article class="metric">
-						<div class="metric-icon"><ShieldCheck size={19} /></div>
-						<div>
-							<span>{t('lastVerification')}</span>
-							<strong>{dashboard.lastVerify}</strong>
-							<small><Check size={13} /> SHA-256</small>
-						</div>
-					</article>
-					<article class="metric">
-						<div class="metric-icon"><Clock3 size={19} /></div>
-						<div>
-							<span>{t('nextRun')}</span>
-							<strong
-								>{activeSchedule === '@snapshots'
-									? t('snapshotSchedule')
-									: dashboard.nextRun}</strong
-							>
-							<small>{t('backgroundProtection')}</small>
-						</div>
-					</article>
-					<article class="metric">
-						<div class="metric-icon"><Network size={19} /></div>
-						<div>
-							<span>{t('destination')}</span>
-							<strong>{dashboard.destinationName}</strong>
-							<small class:warn={!dashboard.destinationOnline}>
-								{#if dashboard.destinationOnline}<Wifi size={13} />{:else}<WifiOff size={13} />{/if}
-								{dashboard.destinationOnline ? t('online') : t('offline')}
-							</small>
-						</div>
-					</article>
-				</div>
-
-				<article class="panel volumes-panel">
-					<div class="panel-head">
-						<div>
-							<p class="eyebrow">{t('volumesProtected')}</p>
-							<h3>{dashboard.engine.volumes.length}</h3>
-						</div>
-						<div class="chain-pill">
-							<Layers3 size={15} />
-							<span>{t('chainHealth')}</span>
-							<strong>{dashboard.chainHealthy ? t('healthy') : t('attention')}</strong>
-						</div>
-					</div>
-					<div class="volume-table">
-						<div class="table-header">
-							<span>{t('source')}</span>
-							<span>{t('latestSnapshot')}</span>
-							<span>{t('sourceSnapshots')}</span>
-							<span>{t('remoteBackups')}</span>
-							<span>{t('status')}</span>
-						</div>
-						{#each dashboard.engine.volumes as volume (volume.path)}
-							<div class="table-row">
-								<strong>{volume.path}</strong>
-								<code>{volume.source.latest_snapshot ?? '—'}</code>
-								<span>{volume.source.snapshot_count}</span>
-								<span>{volume.targets[0]?.backup_count ?? 0}</span>
-								<span class="good-status"><Check size={14} /> {t('backedUp')}</span>
-							</div>
-						{/each}
-					</div>
-				</article>
-
-				<article class="panel activity-panel">
-					<div class="panel-head">
-						<div>
-							<p class="eyebrow">{t('recentActivity')}</p>
-							<h3>{t('activity')}</h3>
-						</div>
-						<button class="text-button" onclick={() => (active = 'activity')}>
-							{t('viewAll')}
-							<ChevronRight size={15} />
-						</button>
-					</div>
-					<div class="activity-list">
-						{#if dashboard.source === 'demo'}
-							<div>
-								<span class="event-dot ok"><Check size={12} /></span>
-								<p>
-									<strong>{t('backupCompleted')}</strong><small
-										>02:13 · {dashboard.transferred} · {dashboard.duration}</small
-									>
-								</p>
-								<span>{t('incremental')}</span>
-							</div>
-							<div>
-								<span class="event-dot ok"><ShieldCheck size={12} /></span>
-								<p>
-									<strong>{t('verificationCompleted')}</strong><small
-										>02:29 · 4 streams · SHA-256</small
-									>
-								</p>
-								<span>{t('verified')}</span>
-							</div>
-							<div>
-								<span class="event-dot neutral"><Clock3 size={12} /></span>
-								<p>
-									<strong>{t('scheduleCreated')}</strong><small>Yesterday · systemd timer</small>
-								</p>
-								<span>{t('everyDay')}</span>
-							</div>
-						{:else}
-							<p class="empty-state">{t('noActivityYet')}</p>
+				<details class="overview-extra" style="grid-column: 1 / -1; min-width: 0">
+					<summary style="cursor: pointer; font-size: 14px; font-weight: 700; padding: 12px 4px">
+						{locale === 'fr'
+							? 'Planification, volumes et diagnostic'
+							: locale === 'zh-CN'
+								? '计划、卷和诊断'
+								: 'Schedules, volumes and diagnostics'}
+					</summary>
+					<div class="overview-grid">
+						{#if dashboard.source === 'live' && harborConfig && activeProfile}
+							<article class="panel overview-schedule">
+								<div class="overview-schedule-copy">
+									<span>{t('schedule')}</span>
+									<strong>{readableSchedule(activeSchedule)}</strong>
+									<small>{t('simpleScheduleHelp')}</small>
+								</div>
+								<div class="schedule-options compact-options">
+									{#each overviewSchedules as [spec, key] (spec)}
+										<button
+											type="button"
+											class:active={activeSchedule === spec}
+											disabled={scheduleSaving ||
+												(spec === '@snapshots' && !activeProfileHasSnapper)}
+											title={spec === '@snapshots' && !activeProfileHasSnapper
+												? t('snapshotScheduleNeedsSnapper')
+												: ''}
+											onclick={() => updateOverviewSchedule(spec)}
+										>
+											{t(key)}
+										</button>
+									{/each}
+								</div>
+								{#if scheduleFeedback}<small class="good-status">{scheduleFeedback}</small>{/if}
+								{#if scheduleError}<small class="error-text">{scheduleError}</small>{/if}
+							</article>
 						{/if}
+
+						<div class="metric-grid">
+							<article class="metric">
+								<div class="metric-icon"><DatabaseBackup size={19} /></div>
+								<div>
+									<span>{t('lastOffHostBackup')}</span>
+									<strong>{dashboard.lastBackup}</strong>
+									<small><Check size={13} /> {t('verified')}</small>
+								</div>
+							</article>
+							<article class="metric">
+								<div class="metric-icon"><ShieldCheck size={19} /></div>
+								<div>
+									<span>{t('lastVerification')}</span>
+									<strong>{dashboard.lastVerify}</strong>
+									<small><Check size={13} /> SHA-256</small>
+								</div>
+							</article>
+							<article class="metric">
+								<div class="metric-icon"><Clock3 size={19} /></div>
+								<div>
+									<span>{t('nextRun')}</span>
+									<strong
+										>{activeSchedule === '@snapshots'
+											? t('snapshotSchedule')
+											: dashboard.nextRun}</strong
+									>
+									<small>{t('backgroundProtection')}</small>
+								</div>
+							</article>
+							<article class="metric">
+								<div class="metric-icon"><Network size={19} /></div>
+								<div>
+									<span>{t('destination')}</span>
+									<strong>{dashboard.destinationName}</strong>
+									<small class:warn={!dashboard.destinationOnline}>
+										{#if dashboard.destinationOnline}<Wifi size={13} />{:else}<WifiOff
+												size={13}
+											/>{/if}
+										{dashboard.destinationOnline ? t('online') : t('offline')}
+									</small>
+								</div>
+							</article>
+						</div>
+
+						<article class="panel volumes-panel">
+							<div class="panel-head">
+								<div>
+									<p class="eyebrow">{t('volumesProtected')}</p>
+									<h3>{dashboard.engine.volumes.length}</h3>
+								</div>
+								<div class="chain-pill">
+									<Layers3 size={15} />
+									<span>{t('chainHealth')}</span>
+									<strong>{dashboard.chainHealthy ? t('healthy') : t('attention')}</strong>
+								</div>
+							</div>
+							<div class="volume-table">
+								<div class="table-header">
+									<span>{t('source')}</span>
+									<span>{t('latestSnapshot')}</span>
+									<span>{t('sourceSnapshots')}</span>
+									<span>{t('remoteBackups')}</span>
+									<span>{t('status')}</span>
+								</div>
+								{#each dashboard.engine.volumes as volume (volume.path)}
+									<div class="table-row">
+										<strong>{volume.path}</strong>
+										<code>{volume.source.latest_snapshot ?? '—'}</code>
+										<span>{volume.source.snapshot_count}</span>
+										<span>{volume.targets[0]?.backup_count ?? 0}</span>
+										<span class="good-status"><Check size={14} /> {t('backedUp')}</span>
+									</div>
+								{/each}
+							</div>
+						</article>
+
+						<article class="panel activity-panel">
+							<div class="panel-head">
+								<div>
+									<p class="eyebrow">{t('recentActivity')}</p>
+									<h3>{t('activity')}</h3>
+								</div>
+								<button class="text-button" onclick={() => (active = 'activity')}>
+									{t('viewAll')}
+									<ChevronRight size={15} />
+								</button>
+							</div>
+							<div class="activity-list">
+								{#if dashboard.source === 'demo'}
+									<div>
+										<span class="event-dot ok"><Check size={12} /></span>
+										<p>
+											<strong>{t('backupCompleted')}</strong><small
+												>02:13 · {dashboard.transferred} · {dashboard.duration}</small
+											>
+										</p>
+										<span>{t('incremental')}</span>
+									</div>
+									<div>
+										<span class="event-dot ok"><ShieldCheck size={12} /></span>
+										<p>
+											<strong>{t('verificationCompleted')}</strong><small
+												>02:29 · 4 streams · SHA-256</small
+											>
+										</p>
+										<span>{t('verified')}</span>
+									</div>
+									<div>
+										<span class="event-dot neutral"><Clock3 size={12} /></span>
+										<p>
+											<strong>{t('scheduleCreated')}</strong><small>Yesterday · systemd timer</small
+											>
+										</p>
+										<span>{t('everyDay')}</span>
+									</div>
+								{:else}
+									<p class="empty-state">{t('noActivityYet')}</p>
+								{/if}
+							</div>
+						</article>
 					</div>
-				</article>
+				</details>
 			</section>
 		{:else if active === 'protection'}
 			<section class="content-stack scheduled-jobs-page">

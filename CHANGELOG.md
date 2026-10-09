@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — crash-safe snapshot reservation and mounted-target checks
+## [0.2.6-rc.8] — supervised checkpoint resilience and safety previews
 
 - Independent full Btrfs anchors after maximum seven incremental links by default;
   dependency-safe read-only machine-set retention plan with strict unknown-chain refusal.

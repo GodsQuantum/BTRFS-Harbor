@@ -1539,6 +1539,61 @@ async fn checkpoint_transfers(app: tauri::AppHandle, target: String) -> Result<S
         .to_owned())
 }
 
+#[tauri::command]
+async fn machine_set_catalog(app: tauri::AppHandle, target: String) -> Result<String, String> {
+    // A read-only operation: avoid a polkit prompt on every status refresh.
+    let root = Path::new(&target);
+    if !root.is_absolute()
+        || target.contains('\0')
+        || root.is_symlink()
+        || !root.is_dir()
+        || root
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Existing real absolute backup destination required".into());
+    }
+    let mut found = false;
+    for entry in std::fs::read_dir(root)
+        .map_err(|e| e.to_string())?
+        .take(4096)
+    {
+        let name = entry.map_err(|e| e.to_string())?.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(".harbor-machine-set-") && name.ends_with(".json") {
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return Ok("[]".into());
+    }
+    let engine = bundled_engine_candidate(&app).ok_or("Bundled v2 engine unavailable")?;
+    let args = [
+        "raw",
+        "checkpoint-v2",
+        "set-list",
+        "--target",
+        target.as_str(),
+    ];
+    if let Ok(response) = Command::new(&engine).args(args).output().await
+        && response.status.success()
+    {
+        return Ok(String::from_utf8_lossy(&response.stdout).trim().into());
+    }
+    // Some root-owned catalogs are mode 0600; elevate only if needed.
+    let response = Command::new("/usr/bin/pkexec")
+        .arg(engine)
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| format!("Cannot inspect protected machine sets: {e}"))?;
+    if !response.status.success() {
+        return Err(String::from_utf8_lossy(&response.stderr).trim().into());
+    }
+    Ok(String::from_utf8_lossy(&response.stdout).trim().into())
+}
+
 async fn run_privileged_profile_command(
     app: &tauri::AppHandle,
     command: &str,
@@ -2194,6 +2249,7 @@ pub fn run() {
             discover_sources,
             backup_status,
             checkpoint_transfers,
+            machine_set_catalog,
             checkpoint_action,
             snapper_snapshot_choices,
             native_snapshot_choices,

@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { invoke, isTauri } from '@tauri-apps/api/core';
-	import { chooseDestinationDirectory, chooseStagingDirectory, runCheckpointAction } from './agent';
+	import {
+		chooseDestinationDirectory,
+		chooseStagingDirectory,
+		loadMachineSetCatalog,
+		runCheckpointAction
+	} from './agent';
 	import type { Locale } from './i18n';
 	export let locale: Locale;
 
@@ -53,11 +58,7 @@
 			points.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
 			backupFolder = chosen;
 			selected = points[0]?.name ?? '';
-			const groupJSON = await runCheckpointAction({
-				action: 'set-list',
-				target: chosen,
-				allow_local: true
-			});
+			const groupJSON = await loadMachineSetCatalog(chosen);
 			const groupData: unknown = JSON.parse(groupJSON);
 			if (!Array.isArray(groupData)) throw new Error('Invalid machine-set catalog');
 			machineSets = groupData.filter(

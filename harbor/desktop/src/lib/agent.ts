@@ -105,6 +105,12 @@ export async function listHostNativeSnapshots(source: string): Promise<NativeSna
 	);
 }
 
+/** Read-only machine-set inventory; avoids repeated authorization prompts. */
+export async function loadMachineSetCatalog(target: string): Promise<string> {
+	if (!isTauri() || !target.startsWith('/')) return '[]';
+	return invoke<string>('machine_set_catalog', { target });
+}
+
 export async function runCheckpointAction(request: CheckpointActionRequest): Promise<string> {
 	if (!isTauri()) throw new Error('Checkpoint controls require the native application');
 	return invoke<string>('checkpoint_action', { request });

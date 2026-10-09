@@ -8,6 +8,7 @@
 		listHostSnapperSnapshots,
 		listHostNativeSnapshots,
 		loadCheckpointTransfers,
+		loadMachineSetCatalog,
 		runCheckpointAction,
 		type NativeSnapshotChoice,
 		type SnapperSnapshotChoice
@@ -151,11 +152,7 @@
 			return;
 		}
 		try {
-			const json = await runCheckpointAction({
-				action: 'set-list',
-				target: machineTarget,
-				allow_local: allowLocal
-			});
+			const json = await loadMachineSetCatalog(machineTarget);
 			const parsed: unknown = JSON.parse(json);
 			if (!Array.isArray(parsed)) throw new Error('Invalid Btrfs machine catalog');
 			machineSets = parsed.filter(

@@ -44,7 +44,7 @@ _btrfs_backup_ng() {
         --source)
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --source-mode)
-            COMPREPLY=($(compgen -W "path latest-snapper selected-snapper create-snapper" -- "$cur")); return ;;
+            COMPREPLY=($(compgen -W "path latest-snapper selected-snapper create-snapper latest-native selected-native create-native" -- "$cur")); return ;;
         --profile-id)
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --performance)
@@ -134,7 +134,7 @@ _btrfs_backup_ng() {
                 backfill-metadata)
                     COMPREPLY=($(compgen -W "-h --help --dry-run --json --ssh-sudo -h --help $global_opts" -- "$cur")) ;;
                 checkpoint-v2)
-                    COMPREPLY=($(compgen -W "-h --help -h --help --target --source --source-mode --name --profile-id --parent --checkpoint-size-mib --performance --allow-local --experimental --state-dir --snapper-config --snapper-number -h --help --target -h --help --target --name --transfer-id --allow-local --experimental --state-dir -h --help --target --transfer-id -h --help --transfer-id --state-dir -h --help --transfer-id --state-dir -h --help --target --name --transfer-id --confirm --allow-local --state-dir -h --help $global_opts" -- "$cur")) ;;
+                    COMPREPLY=($(compgen -W "-h --help -h --help --target --source --source-mode --name --profile-id --parent --checkpoint-size-mib --performance --allow-local --experimental --state-dir --snapper-config --snapper-number --native-name -h --help --source -h --help --target -h --help --target --name --transfer-id --allow-local --experimental --state-dir -h --help --target --transfer-id -h --help --transfer-id --state-dir -h --help --transfer-id --state-dir -h --help --target --name --transfer-id --confirm --allow-local --state-dir -h --help $global_opts" -- "$cur")) ;;
                 encrypt)
                     COMPREPLY=($(compgen -W "-h --help --encrypt --gpg-recipient --gpg-keyring --openssl-cipher --shred --yes --dry-run --json -h --help $global_opts" -- "$cur")) ;;
                 list)

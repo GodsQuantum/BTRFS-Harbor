@@ -1627,3 +1627,21 @@ Retention durations use a number with suffix:
 | `w` | Weeks |
 
 Examples: `30m`, `6h`, `1d`, `2w`
+
+## Raw checkpoint-v2 Btrfs snapshots without Snapper (0.2.6-rc.5 preview)
+
+Snapper remains optional for manual v2 backups. If an actual Btrfs subvolume
+has no Snapper configuration, the user can list Harbor-owned native readonly
+snapshots with raw checkpoint-v2 native-list --source /path/to/subvolume.
+Starting in latest-native mode with --source /path/to/subvolume uses the newest
+Harbor native snapshot, or creates one when none exists. create-native always
+takes a new readonly snapshot; selected-native --native-name requires an
+already-listed, managed snapshot. None reconfigures mounts or Snapper.
+Native snapshots are kept after transfers: deleting an incremental parent
+may destroy resumability. Never delete an active resume source or an
+incremental parent still in use.
+
+This remains an experimental v2 workflow requiring --experimental to start.
+Use --allow-local for non-network destinations. The target folder must
+already exist. The GUI prepares the selected source subdirectory under an
+existing destination after checking the live mount identity.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	appendDefaultBackupJob,
 	checkpointTargetPath,
+	profileWithDestination,
 	backupSourceFromDiscovery,
 	createDefaultConfiguration,
 	describeDraftIssue,
@@ -18,6 +19,35 @@ const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-22
 const uuidFactory = () => ids.shift() ?? '33333333-3333-4333-8333-333333333333';
 
 describe('Harbor profile editor model', () => {
+	it('changes only the requested profile when destinations are shared', () => {
+		const config = createDefaultConfiguration(() => '11111111-1111-4111-8111-111111111111');
+		const originalProfile = config.profiles[0];
+		const other = {
+			...structuredClone(originalProfile),
+			id: '22222222-2222-4222-8222-222222222222'
+		};
+		config.profiles.push(other);
+		const previousId = originalProfile.destination_ids[0];
+		const changed = profileWithDestination(
+			config,
+			originalProfile.id,
+			'/mnt/backup',
+			'nfs',
+			'/mnt',
+			'server:/backups',
+			() => '33333333-3333-4333-8333-333333333333'
+		);
+		expect(changed.profiles[0].destination_ids[0]).not.toBe(previousId);
+		expect(changed.profiles[1].destination_ids[0]).toBe(previousId);
+		expect(changed.destinations.find((d) => d.id === previousId)?.path).toBe(
+			config.destinations.find((d) => d.id === previousId)?.path
+		);
+		expect(changed.destinations.at(-1)?.expected_mount_source).toBe('server:/backups');
+		expect(() =>
+			profileWithDestination(config, originalProfile.id, '/', 'local', '/', '/dev/sda')
+		).toThrow();
+	});
+
 	it('never turns a missing portable destination into //root', () => {
 		expect(checkpointTargetPath('', 'root')).toBeNull();
 		expect(checkpointTargetPath('/', 'root')).toBeNull();

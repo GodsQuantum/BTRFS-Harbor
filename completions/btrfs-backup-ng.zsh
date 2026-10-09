@@ -273,7 +273,7 @@ _btrfs_backup_ng() {
                                     '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \
                                     '--source[]:file:_files' \
-                                    '--source-mode[]:value:(path latest-snapper selected-snapper create-snapper)' \
+                                    '--source-mode[]:value:(path latest-snapper selected-snapper create-snapper latest-native selected-native create-native)' \
                                     '--name[]:name:' \
                                     '--profile-id[]:file:_files' \
                                     '--parent[]:parent:' \
@@ -284,6 +284,10 @@ _btrfs_backup_ng() {
                                     '--state-dir[]:file:_files' \
                                     '--snapper-config[]:snapper_config:' \
                                     '--snapper-number[]:snapper_number:' \
+                                    '--native-name[]:native_name:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--source[]:file:_files' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \

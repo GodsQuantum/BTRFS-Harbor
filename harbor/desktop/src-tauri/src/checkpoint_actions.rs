@@ -17,6 +17,8 @@ pub struct CheckpointRequest {
     pub source_mode: Option<String>,
     pub snapper_config: Option<String>,
     pub snapper_number: Option<u64>,
+    pub source: Option<String>,
+    pub native_name: Option<String>,
     pub allow_local: bool,
     pub performance: Option<String>,
 }
@@ -53,26 +55,14 @@ pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
         let mode = req.source_mode.as_deref().ok_or("Missing source mode")?;
         if !matches!(
             mode,
-            "latest-snapper" | "selected-snapper" | "create-snapper"
+            "latest-snapper"
+                | "selected-snapper"
+                | "create-snapper"
+                | "latest-native"
+                | "selected-native"
+                | "create-native"
         ) {
-            return Err(
-                "GUI checkpoint starts require an explicitly managed Snapper source".into(),
-            );
-        }
-        let config = req
-            .snapper_config
-            .as_deref()
-            .ok_or("Missing Snapper configuration")?;
-        if config.is_empty()
-            || config.len() > 80
-            || !config
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        {
-            return Err("Invalid Snapper configuration name".into());
-        }
-        if mode == "selected-snapper" && req.snapper_number.unwrap_or(0) == 0 {
-            return Err("Selected Snapper snapshot number required".into());
+            return Err("Unknown readonly snapshot provider/mode".into());
         }
         let name = req.name.as_deref().ok_or("Missing archive name")?;
         validate_name(name)?;
@@ -82,17 +72,68 @@ pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
             "--profile-id".into(),
             id.to_owned(),
         ]);
-        args.extend([
-            "--source-mode".into(),
-            mode.into(),
-            "--snapper-config".into(),
-            config.into(),
-        ]);
-        if mode == "selected-snapper" {
+        if mode.ends_with("-snapper") {
+            let config = req
+                .snapper_config
+                .as_deref()
+                .ok_or("Missing Snapper configuration")?;
+            if config.is_empty()
+                || config.len() > 80
+                || !config
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            {
+                return Err("Invalid Snapper configuration name".into());
+            }
+            if mode == "selected-snapper" && req.snapper_number.unwrap_or(0) == 0 {
+                return Err("Selected Snapper snapshot number required".into());
+            }
             args.extend([
-                "--snapper-number".into(),
-                req.snapper_number.unwrap().to_string(),
+                "--source-mode".into(),
+                mode.into(),
+                "--snapper-config".into(),
+                config.into(),
             ]);
+            if mode == "selected-snapper" {
+                args.extend([
+                    "--snapper-number".into(),
+                    req.snapper_number.unwrap().to_string(),
+                ]);
+            }
+        } else {
+            if req.snapper_config.is_some() || req.snapper_number.is_some() {
+                return Err("Native snapshot mode cannot use Snapper identifiers".into());
+            }
+            let source = req
+                .source
+                .as_deref()
+                .ok_or("Missing native Btrfs subvolume")?;
+            if !Path::new(source).is_absolute()
+                || source.contains('\0')
+                || source.contains("//")
+                || Path::new(source)
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+                || Path::new(source).is_symlink()
+            {
+                return Err("Native source must be a real absolute Btrfs subvolume".into());
+            }
+            args.extend([
+                "--source-mode".into(),
+                mode.into(),
+                "--source".into(),
+                source.into(),
+            ]);
+            if mode == "selected-native" {
+                let name = req
+                    .native_name
+                    .as_deref()
+                    .ok_or("Missing native snapshot name")?;
+                if !valid_native_snapshot_name(name) {
+                    return Err("Invalid native snapshot identifier".into());
+                }
+                args.extend(["--native-name".into(), name.into()]);
+            }
         }
         let perf = req.performance.as_deref().unwrap_or("balanced");
         if !matches!(perf, "balanced" | "fast") {
@@ -126,6 +167,25 @@ pub fn action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
     Ok(args)
 }
 
+fn valid_native_snapshot_name(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("harbor-") else {
+        return false;
+    };
+    let Some((date, uid)) = rest.split_once('-') else {
+        return false;
+    };
+    date.len() == 16
+        && date.is_ascii()
+        && date.ends_with('Z')
+        && date.as_bytes()[..8].iter().all(u8::is_ascii_digit)
+        && date.as_bytes()[8] == b'T'
+        && date.as_bytes()[9..15].iter().all(u8::is_ascii_digit)
+        && uid.len() == 12
+        && uid
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
 fn validate_name(name: &str) -> Result<(), String> {
     if name.is_empty()
         || name.len() > 120
@@ -142,6 +202,28 @@ fn validate_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_source_modes_require_safe_paths_and_names() {
+        let mut req = base("start");
+        req.source_mode = Some("create-native".into());
+        req.snapper_config = None;
+        req.source = Some("/home".into());
+        assert!(
+            action_arguments(&req)
+                .unwrap()
+                .windows(2)
+                .any(|v| v == ["--source", "/home"])
+        );
+        req.source = Some("../home".into());
+        assert!(action_arguments(&req).is_err());
+        req.source = Some("/home".into());
+        req.source_mode = Some("selected-native".into());
+        req.native_name = Some("harbor-20261009T120000Z-abcdef012345".into());
+        assert!(action_arguments(&req).is_ok());
+        req.native_name = Some("../../etc/passwd".into());
+        assert!(action_arguments(&req).is_err());
+    }
+
     fn base(action: &str) -> CheckpointRequest {
         CheckpointRequest {
             action: action.into(),
@@ -152,6 +234,8 @@ mod tests {
             source_mode: Some("latest-snapper".into()),
             snapper_config: Some("root".into()),
             snapper_number: None,
+            source: None,
+            native_name: None,
             allow_local: true,
             performance: None,
         }

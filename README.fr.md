@@ -32,6 +32,14 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.5 — sauvegarde simple, Btrfs natif et restauration sans profil (préversion supervisée)
+
+- Accueil simplifié : snapshot récent, précis ou nouveau ; dossier de destination local/NFS/SMB choisi directement ; bouton Envoyer. Diagnostics et profils restent accessibles ailleurs.
+- Lecture native des snapshots Snapper sur l'hôte. Sans Snapper, Harbor sait lister/créer ses propres snapshots Btrfs en lecture seule sur les **racines de sous-volumes Btrfs**. Aucun montage ou réglage Snapper modifié.
+- Destination protégée par une identité de montage persistante, y compris pour les disques amovibles ; création par descripteur de dossier ; systray et reprise par checkpoints, sans faux pourcentage.
+- Sur une installation Linux neuve, sélection d'un dossier d'archives Harbor et restauration dans un **dossier Btrfs de préparation**, sans ancien profil. Cela ne remplace pas encore automatiquement un disque système amorçable.
+- **Limites :** sous-volumes à sélectionner séparément, SSH/planification encore historiques, tests réels de coupure NFS/reprise à terminer, EFI/chargeur de démarrage non restaurés automatiquement. Conserver les sauvegardes validées.
+
 ## v0.2.6-rc.4 — destinations persistantes en mode portable
 
 - Le mode AppImage mémorise et recharge son profil de sauvegarde **sans installer de service système**. La configuration est validée et écrite atomiquement dans le dossier standard de configuration utilisateur avec des permissions privées.
@@ -71,7 +79,7 @@ Corrige **le bouton « Envoyer le dernier » qui ne démarrait pas sur certains 
 - **English / Français / 简体中文** — UI et documentation complètes.
 - **Aucun runtime Docker** — Harbor s’installe comme une application Linux native.
 
-La préversion à tester **v0.2.6-rc.4** est disponible dans les [préreleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.4). La sauvegarde reprenable requiert actuellement une source configurée dans Snapper. La couverture de toutes les dispositions Btrfs et distributions n’est pas encore qualifiée.
+La candidate en cours **v0.2.6-rc.5** (publication après validation) sait utiliser Snapper ou les snapshots Btrfs natifs de Harbor sur une racine de sous-volume vérifiée. **Les sous-volumes multiples, la reprise après vraie coupure NFS, la restauration système complète et la compatibilité de toutes les distributions ne sont pas encore qualifiés.**
 
 ## 📦 Télécharger et installer
 

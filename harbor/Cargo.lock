@@ -341,12 +341,13 @@ dependencies = [
 
 [[package]]
 name = "btrfs-harbor-desktop"
-version = "0.2.6-rc.4"
+version = "0.2.6-rc.5"
 dependencies = [
  "harbor-agent",
  "harbor-core",
  "harbor-engine",
  "harbor-storage",
+ "libc",
  "log",
  "serde",
  "serde_json",

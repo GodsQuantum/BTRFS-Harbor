@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.5] — simple UX and native Btrfs checkpoint sources (supervised prerelease)
+
+- Inline folder chooser on main backup screen: verify mounted destination and its identity, create only required subdirectory via fd-relative operations and persist the chosen path without altering other profiles.
+- Snapper latest/specific/create plus native Btrfs readonly snapshot provider for hosts without Snapper, native full/incremental parent matching from authoritative local/remote state and crash-retained native snapshots.
+- One v2 worker is controlled by Tauri systray and persisted checkpoint state; no percentage/ETA inferred from unknown stream length.
+- Recovery screen can import an existing raw backup catalog and stage a verified Btrfs receive without this machine's old Harbor profile.
+- Still requires real interrupted/NFS fault acceptance and bootable cross-hardware restore validation, and is not yet full all-distro/architecture parity.
+
 ## [0.2.6-rc.4] — portable profile persistence and invalid destination guard
 
 - Fix portable AppImages losing their backup destination after restart. Load and atomically save the validated manual backup configuration in the user-specific application config directory (0600), without installing the system agent, an arbitrary service or timer.

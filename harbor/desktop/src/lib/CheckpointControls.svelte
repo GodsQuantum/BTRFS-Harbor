@@ -2,9 +2,14 @@
 	import { onMount, tick } from 'svelte';
 	import { isTauri } from '@tauri-apps/api/core';
 	import {
+		chooseDestinationDirectory,
+		inspectDestinationMount,
+		prepareCheckpointDirectory,
 		listHostSnapperSnapshots,
+		listHostNativeSnapshots,
 		loadCheckpointTransfers,
 		runCheckpointAction,
+		type NativeSnapshotChoice,
 		type SnapperSnapshotChoice
 	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
@@ -15,6 +20,7 @@
 	export let profile: BackupProfile;
 	export let destination: DestinationSpec;
 	export let locale: Locale = 'en';
+	export let onChooseDestination: (path: string, subdir: string) => Promise<void>;
 
 	const translation: Record<Locale, string[]> = {
 		en: [
@@ -76,42 +82,54 @@
 		]
 	};
 	$: t = translation[locale];
-	$: sources = profile.sources.filter((s) => Boolean(s.snapper_config));
-	$: unavailableSources = profile.sources.filter((s) => !s.snapper_config);
+	$: sources = profile.sources;
+	$: unavailableSources = profile.sources.filter((s) => s.path !== source?.path);
 	let sourcePath = '';
 	$: source = sources.find((s) => s.path === sourcePath) ?? sources[0];
 	$: target = source ? (checkpointTargetPath(destination.path, source.target_subdir) ?? '') : '';
 	$: allowLocal = destination.kind !== 'nfs' && destination.kind !== 'smb';
-	$: ready =
-		isTauri() &&
-		Boolean(source?.snapper_config) &&
-		target.startsWith('/') &&
-		destination.kind !== 'ssh';
-	let mode: 'latest-snapper' | 'selected-snapper' | 'create-snapper' = 'latest-snapper';
+	$: ready = isTauri() && Boolean(source) && target.startsWith('/') && destination.kind !== 'ssh';
+	let mode:
+		| 'latest-snapper'
+		| 'selected-snapper'
+		| 'create-snapper'
+		| 'latest-native'
+		| 'selected-native'
+		| 'create-native' = 'latest-snapper';
 	let number = 0;
 	let snapshotChoices: SnapperSnapshotChoice[] = [];
+	let nativeChoices: NativeSnapshotChoice[] = [];
+	let nativeName = '';
 	let snapshotListError = '';
 	let snapshotLoading = false;
 	async function loadSnapshots() {
-		if (!source?.snapper_config) return;
-		const requested = source.snapper_config;
+		if (!source) return;
+		const requested = source.path;
 		snapshotLoading = true;
 		snapshotListError = '';
 		try {
-			const found = await listHostSnapperSnapshots(requested);
-			if (source?.snapper_config !== requested) return;
-			snapshotChoices = found;
-			if (!snapshotChoices.some((item) => item.number === number)) {
-				number = snapshotChoices[0]?.number ?? 0;
+			if (source.snapper_config) {
+				const found = await listHostSnapperSnapshots(source.snapper_config);
+				if (source?.path !== requested) return;
+				snapshotChoices = found;
+				if (!found.some((item) => item.number === number)) number = found[0]?.number ?? 0;
+			} else {
+				const found = await listHostNativeSnapshots(requested);
+				if (source?.path !== requested) return;
+				nativeChoices = found;
+				if (!found.some((item) => item.name === nativeName)) nativeName = found[0]?.name ?? '';
 			}
 		} catch (reason) {
 			snapshotChoices = [];
+			nativeChoices = [];
 			number = 0;
+			nativeName = '';
 			snapshotListError = String(reason);
 		} finally {
 			snapshotLoading = false;
 		}
 	}
+
 	let performance: 'balanced' | 'fast' = 'balanced';
 	let entries: CheckpointTransfer[] = [];
 	$: unfinished = entries.some((item) => item.resumable);
@@ -123,6 +141,49 @@
 	let busy = false;
 	let error = '';
 	let info = '';
+	let choosingDestination = false;
+	async function chooseDestination() {
+		if (running || choosingDestination || !source) return;
+		choosingDestination = true;
+		error = '';
+		try {
+			const selected = await chooseDestinationDirectory(destination.path || undefined);
+			if (selected) {
+				await onChooseDestination(selected, source.target_subdir);
+				entries = [];
+				await tick();
+				await refresh();
+			}
+		} catch (reason) {
+			error = String(reason);
+		} finally {
+			choosingDestination = false;
+		}
+	}
+	async function prepareSelectedTarget() {
+		const probe = await inspectDestinationMount(destination.path);
+		if (!probe) throw new Error('Cannot inspect destination mount');
+		if (!destination.mount_point || !destination.expected_mount_source) {
+			throw new Error('Destination mount is not pinned. Choose the destination again.');
+		}
+		if (
+			(destination.kind !== 'local' &&
+				destination.kind !== 'raw' &&
+				probe.kind !== destination.kind) ||
+			destination.mount_point !== probe.mount_point ||
+			destination.expected_mount_source !== probe.source
+		) {
+			throw new Error('Backup destination disconnected or changed. No transfer started.');
+		}
+		if (!source) throw new Error('Missing Btrfs snapshot source');
+		const prepared = await prepareCheckpointDirectory(
+			destination.path,
+			source.target_subdir,
+			probe
+		);
+		if (prepared !== target) throw new Error('Destination changed while preparing transfer');
+	}
+
 	function backupName() {
 		const name = (source?.snapshot_prefix || 'harbor').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 45);
 		return (
@@ -138,11 +199,12 @@
 		entries = [];
 		snapshotChoices = [];
 		number = 0;
+		nativeName = '';
 		// Svelte recalculates source/target after updating the binding.
 		// Do not query the previous source's destination or show its progress.
 		await tick();
+		mode = source?.snapper_config ? 'latest-snapper' : 'latest-native';
 		await refresh();
-		if (mode === 'selected-snapper') await loadSnapshots();
 	}
 
 	async function refresh() {
@@ -162,6 +224,7 @@
 		}
 	}
 	onMount(() => {
+		if (!source?.snapper_config) mode = 'latest-native';
 		void refresh();
 		const interval = setInterval(() => {
 			if (!busy) void refresh();
@@ -169,11 +232,12 @@
 		return () => clearInterval(interval);
 	});
 	async function start() {
-		if (!ready || !source?.snapper_config || running || unfinished) return;
+		if (!ready || !source || running || unfinished) return;
 		running = true;
 		error = '';
 		info = t[14];
 		try {
+			await prepareSelectedTarget();
 			info = await runCheckpointAction({
 				action: 'start',
 				target,
@@ -182,6 +246,8 @@
 				source_mode: mode,
 				snapper_config: source.snapper_config,
 				snapper_number: mode === 'selected-snapper' ? number : null,
+				source: source.snapper_config ? null : source.path,
+				native_name: mode === 'selected-native' ? nativeName : null,
 				allow_local: allowLocal,
 				performance
 			});
@@ -241,27 +307,47 @@
 					bind:value={mode}
 					disabled={running}
 					onchange={() => {
-						if (mode === 'selected-snapper') void loadSnapshots();
+						if (mode === 'selected-snapper' || mode === 'selected-native') void loadSnapshots();
 					}}
 				>
-					<option value="latest-snapper">{t[10]}</option>
-					<option value="selected-snapper">{t[11]}</option>
-					<option value="create-snapper">{t[12]}</option>
+					{#if source?.snapper_config}
+						<option value="latest-snapper">{t[10]}</option>
+						<option value="selected-snapper">{t[11]}</option>
+						<option value="create-snapper">{t[12]}</option>
+					{:else}
+						<option value="latest-native"
+							>{locale === 'fr'
+								? 'Dernier (ou créer)'
+								: locale === 'zh-CN'
+									? '最新（或创建）'
+									: 'Latest (or create)'}</option
+						>
+						<option value="selected-native">{t[11]}</option>
+						<option value="create-native">{t[12]}</option>
+					{/if}
 				</select>
 			</label>
-			{#if mode === 'selected-snapper'}
+			{#if mode === 'selected-snapper' || mode === 'selected-native'}
 				<label>
 					{t[13]}
 					{#if snapshotLoading}
 						<span
 							>{locale === 'fr' ? 'Chargement…' : locale === 'zh-CN' ? '加载中…' : 'Loading…'}</span
 						>
-					{:else if snapshotChoices.length > 0}
+					{:else if mode === 'selected-snapper' && snapshotChoices.length > 0}
 						<select bind:value={number} disabled={running}>
 							{#each snapshotChoices as choice (choice.number)}
 								<option value={choice.number}
 									>#{choice.number} · {new Date(choice.date).toLocaleDateString(locale)}
 									{choice.description}</option
+								>
+							{/each}
+						</select>
+					{:else if mode === 'selected-native' && nativeChoices.length > 0}
+						<select bind:value={nativeName} disabled={running}>
+							{#each nativeChoices as item (item.name)}
+								<option value={item.name}
+									>{new Date(item.date).toLocaleString(locale)} · {item.name}</option
 								>
 							{/each}
 						</select>
@@ -282,7 +368,22 @@
 			<strong
 				>{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}</strong
 			>
-			<code>{target || '—'}</code>
+			<div class="destination-picker">
+				<code>{target || '—'}</code>
+				<button
+					class="secondary compact"
+					disabled={running || choosingDestination}
+					onclick={() => void chooseDestination()}
+				>
+					{choosingDestination
+						? '…'
+						: locale === 'fr'
+							? 'Parcourir…'
+							: locale === 'zh-CN'
+								? '浏览…'
+								: 'Browse…'}
+				</button>
+			</div>
 		</div>
 		{#if source && !target}
 			<p class="source-warning" role="alert">
@@ -327,7 +428,11 @@
 			<button
 				class="primary compact"
 				onclick={start}
-				disabled={!ready || running || unfinished || (mode === 'selected-snapper' && number < 1)}
+				disabled={!ready ||
+					running ||
+					unfinished ||
+					(mode === 'selected-snapper' && number < 1) ||
+					(mode === 'selected-native' && !nativeName)}
 				>{mode === 'latest-snapper'
 					? t[2]
 					: locale === 'fr'
@@ -458,6 +563,15 @@
 		color: var(--text);
 		background: var(--surface);
 		font-size: 15px;
+	}
+	.destination-picker {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.destination-picker code {
+		flex: 1 1 240px;
 	}
 	.destination-summary {
 		display: grid;

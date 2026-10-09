@@ -6,8 +6,9 @@ use harbor_engine::{EngineOrigin, EngineSelectionStatus};
 use harbor_storage::MountTable;
 use serde::Serialize;
 use serde_json::Value;
-use std::ffi::OsStr;
+use std::ffi::{CString, OsStr};
 use std::io::Write;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -1101,6 +1102,96 @@ async fn inspect_mount(path: String) -> Result<String, String> {
     .map_err(|err| format!("Cannot encode mount probe: {err}"))
 }
 
+fn create_checkpoint_subdir_by_fd(root: &Path, name: &str) -> Result<(), String> {
+    // All writes are relative to an already-open directory FD, so a removable
+    // drive or NAS mount disappearing mid-mkdir cannot redirect into the
+    // underlying host mountpoint path.
+    let fd = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(root)
+        .map_err(|e| format!("Cannot open selected destination: {e}"))?;
+    let child = CString::new(name).map_err(|_| "Invalid checkpoint subdirectory")?;
+    // SAFETY: fd is a valid opened directory, name has been validated as one
+    // simple non-NUL component and CString stays alive for both calls.
+    let created = unsafe { libc::mkdirat(fd.as_raw_fd(), child.as_ptr(), 0o700) };
+    if created != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::AlreadyExists {
+            return Err(format!("Cannot prepare backup folder: {error}"));
+        }
+    }
+    // SAFETY: openat confines this lookup to fd's filesystem and refuses
+    // symlinks; O_DIRECTORY requires a directory, not an existing file.
+    let opened = unsafe {
+        libc::openat(
+            fd.as_raw_fd(),
+            child.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if opened < 0 {
+        return Err(format!(
+            "Backup folder is not a real directory: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: opened was returned as an owned fd by openat above.
+    let child_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(opened) };
+    drop(child_fd);
+    Ok(())
+}
+
+/// Prepare a single user-selected directory, never a mount or an arbitrary
+/// path beneath it. Mount identity is checked on both sides of mkdir.
+#[tauri::command]
+async fn prepare_checkpoint_directory(
+    root: String,
+    subdir: String,
+    expected_mount_point: String,
+    expected_mount_source: String,
+) -> Result<String, String> {
+    let base = Path::new(&root);
+    if root.starts_with("//")
+        || root.contains('\0')
+        || root == "/"
+        || !base.is_absolute()
+        || subdir.is_empty()
+        || !subdir
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || subdir.len() > 100
+    {
+        return Err("Choose an existing absolute destination and a simple subdirectory".into());
+    }
+    let meta = tokio::fs::symlink_metadata(base)
+        .await
+        .map_err(|e| format!("Selected destination unavailable: {e}"))?;
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return Err("Selected destination must be an existing real directory".into());
+    }
+    let actual = tokio::fs::canonicalize(base)
+        .await
+        .map_err(|e| format!("Cannot resolve destination: {e}"))?;
+    let target = actual.join(&subdir);
+    for _ in 0..2 {
+        let mountinfo = tokio::fs::read_to_string("/proc/self/mountinfo")
+            .await
+            .map_err(|e| format!("Cannot check live mounts: {e}"))?;
+        let mounts = MountTable::from_mountinfo(&mountinfo);
+        let entry = mounts
+            .find_for_path(&actual)
+            .ok_or("Destination is not on a known mounted filesystem")?;
+        if entry.mount_point.to_string_lossy() != expected_mount_point
+            || entry.source != expected_mount_source
+        {
+            return Err("Destination mount changed or disconnected. No files were written.".into());
+        }
+        create_checkpoint_subdir_by_fd(&actual, &subdir)?;
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 async fn profile_runtime(profile_id: String) -> Result<String, String> {
     call_agent("ProfileRuntime", &profile_id).await
@@ -1125,6 +1216,166 @@ fn valid_snapper_config_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+#[tauri::command]
+async fn native_snapshot_choices(app: tauri::AppHandle, source: String) -> Result<String, String> {
+    let path = Path::new(&source);
+    if !path.is_absolute()
+        || source.contains('\0')
+        || source.contains("//")
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        || path.is_symlink()
+    {
+        return Err("Invalid native source subvolume".into());
+    }
+    let engine =
+        bundled_engine_candidate(&app).ok_or("Bundled Btrfs snapshot reader is unavailable")?;
+    let output = Command::new("/usr/bin/pkexec")
+        .arg(engine)
+        .args(["raw", "checkpoint-v2", "native-list", "--source", &source])
+        .output()
+        .await
+        .map_err(|err| format!("Cannot query native snapshots: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Cannot list native snapshots: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if output.stdout.len() > 2_000_000 {
+        return Err("Native snapshot list too large".into());
+    }
+    let parsed: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("Invalid native snapshot list: {err}"))?;
+    if !parsed.is_array() {
+        return Err("Expected native snapshot array".into());
+    }
+    serde_json::to_string(&parsed).map_err(|err| format!("Cannot encode native snapshots: {err}"))
+}
+
+/// Recovery from an existing raw archive does not require this machine's
+/// profile: it is intentionally usable after a clean OS reinstall.
+fn checked_recovery_folder(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || value == "/"
+        || value.starts_with("//")
+        || value.contains('\0')
+        || !path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        || path.is_symlink()
+        || !path.is_dir()
+    {
+        return Err("Select an existing absolute directory without symlinks".into());
+    }
+    path.canonicalize()
+        .map_err(|err| format!("Cannot resolve recovery folder: {err}"))
+}
+
+#[tauri::command]
+async fn archive_restore_catalog(app: tauri::AppHandle, source: String) -> Result<String, String> {
+    let source = checked_recovery_folder(&source)?;
+    let engine = bundled_engine_candidate(&app).ok_or("Bundled recovery engine unavailable")?;
+    let output = Command::new(engine)
+        .arg("raw")
+        .arg("list")
+        .arg(&source)
+        .arg("--json")
+        .output()
+        .await
+        .map_err(|e| format!("Cannot inspect backup catalog: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Cannot read backups: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if output.stdout.len() > 4_000_000 {
+        return Err("Too many backup records in this directory".into());
+    }
+    let parsed: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Backup catalog was not valid JSON: {e}"))?;
+    if !parsed.is_array() {
+        return Err("Backup directory did not return a backup list".into());
+    }
+    serde_json::to_string(&parsed).map_err(|e| format!("Cannot encode backup list: {e}"))
+}
+
+#[tauri::command]
+async fn archive_restore_staged(
+    app: tauri::AppHandle,
+    source: String,
+    staging: String,
+    snapshot_name: String,
+    dry_run: bool,
+) -> Result<String, String> {
+    let source = checked_recovery_folder(&source)?;
+    let staging = checked_recovery_folder(&staging)?;
+    if source == staging || source.starts_with(&staging) || staging.starts_with(&source) {
+        return Err("Choose a distinct Btrfs staging location, not the backup directory".into());
+    }
+    if validate_name_for_restore(&snapshot_name).is_err() {
+        return Err("Unsafe backup name".into());
+    }
+    let mounts = MountTable::from_mountinfo(
+        &tokio::fs::read_to_string("/proc/self/mountinfo")
+            .await
+            .map_err(|e| format!("Cannot inspect staging mount: {e}"))?,
+    );
+    if mounts
+        .find_for_path(&staging)
+        .is_none_or(|entry| entry.fs_type != "btrfs")
+    {
+        return Err("The staging destination must be an existing Btrfs directory".into());
+    }
+    let engine = bundled_engine_candidate(&app).ok_or("Bundled recovery engine unavailable")?;
+    let raw = format!("raw://{}", source.to_string_lossy());
+    // The engine's existing restore planner validates parent chains, stream
+    // SHA-256 and collision safety. Never use --in-place/--overwrite/--skip-verify.
+    let mut command = Command::new("/usr/bin/pkexec");
+    command
+        .arg(engine)
+        .arg("restore")
+        .arg(raw)
+        .arg(staging)
+        .arg("--snapshot")
+        .arg(snapshot_name);
+    if dry_run {
+        command.arg("--dry-run");
+    }
+    let output = command
+        .output()
+        .await
+        .map_err(|e| format!("Cannot launch safe staged recovery: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Staged recovery refused: {} {}",
+            String::from_utf8_lossy(&output.stderr).trim(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+        ));
+    }
+    if output.stdout.len() > 2_000_000 {
+        return Err("Recovery output exceeded the status limit".into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn validate_name_for_restore(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.len() > 120
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        Err("Unsafe archive name".into())
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -1938,7 +2189,11 @@ pub fn run() {
             checkpoint_transfers,
             checkpoint_action,
             snapper_snapshot_choices,
+            native_snapshot_choices,
+            archive_restore_catalog,
+            archive_restore_staged,
             inspect_mount,
+            prepare_checkpoint_directory,
             apply_configuration,
             send_snapshot_now_stream,
             send_draft_now_stream,
@@ -1959,6 +2214,60 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn chosen_destination_creates_only_expected_source_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let table =
+            MountTable::from_mountinfo(&std::fs::read_to_string("/proc/self/mountinfo").unwrap());
+        let mount = table.find_for_path(root).unwrap();
+        let mounted = mount.mount_point.to_string_lossy().to_string();
+        let source = mount.source.clone();
+        let folder = root.join("rootfs");
+        assert!(!folder.exists());
+        let outcome = prepare_checkpoint_directory(
+            root.to_string_lossy().to_string(),
+            "rootfs".into(),
+            mounted.clone(),
+            source.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, folder.to_string_lossy());
+        assert!(folder.is_dir());
+        assert!(
+            prepare_checkpoint_directory(
+                root.to_string_lossy().to_string(),
+                "../escape".into(),
+                mounted.clone(),
+                source.clone()
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            prepare_checkpoint_directory(
+                root.to_string_lossy().to_string(),
+                "home".into(),
+                mounted,
+                "unexpected-source".into()
+            )
+            .await
+            .is_err()
+        );
+        assert!(!root.join("home").exists());
+    }
+
+    #[test]
+    fn portable_restore_without_original_profile_rejects_traversal_and_unsafe_archives() {
+        assert!(checked_recovery_folder("/").is_err());
+        assert!(checked_recovery_folder("../backups").is_err());
+        assert!(checked_recovery_folder("/backups/../etc").is_err());
+        assert!(validate_name_for_restore("root_20261009").is_ok());
+        assert!(validate_name_for_restore("../../etc").is_err());
+        assert!(validate_name_for_restore("root;rm").is_err());
+    }
 
     #[test]
     fn snapper_snapshot_read_only_api_rejects_invalid_config_names() {

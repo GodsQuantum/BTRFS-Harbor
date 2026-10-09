@@ -11,7 +11,7 @@ pages, without removing useful capabilities.
    Use Snapper if available; otherwise Btrfs native readonly snapshots (provider pending).
 2. **Destination** — Choose local folder, NFS, SMB or SSH as supported and verified. Validate
    the actual mount identity/free space; never auto-remount, invent aliases or silently change
-   a mount. Destination should be chosen inline (not yet implemented in this preview).
+   a mount. Destination can now be chosen inline; it is mounted and stored with identity.
 3. **Send** — A single primary button. First send is a full standalone base. Later sends are
    incremental only with the complete parent chain and matching readonly local parent.
    One durable transaction and no duplicate sends.
@@ -22,12 +22,12 @@ pages, without removing useful capabilities.
    so a later Resume replays locally but never reuploads committed destination blocks.
 5. **Restore** — Choose destination, backup point, target disk/filesystem, and staged receive.
    This must work on the original system, a clean reinstall or different computer
-   **without requiring the original Harbor profile**. Detect original OS, identity,
+   **without requiring the original Harbor profile**. A staging-only receive is implemented; bootable recovery must still detect original OS, identity,
    EFI/bootloader and missing non-Btrfs partitions before offering bootable recovery;
    permit file-only staged recovery separately. **Fresh-machine independent import
-   is still pending acceptance.**
+   for complete bootability remains pending acceptance.**
 
-## What is implemented in preview source after rc.4
+## What is implemented in preview source at rc.5
 
 - Overview reduced to primary backup and restore actions; technical panels collapsed.
 - Actual Snapper snapshot numbers/date/description read through the bundled engine
@@ -43,12 +43,12 @@ pages, without removing useful capabilities.
 
 ## Must be completed before a general, all-distro claim
 
-- Native Btrfs snapshot adapter when Snapper is missing; comprehensive multi-subvolume
-  coverage, including /home and separately mounted persistent subvolumes.
+- Native Btrfs readonly snapshot provider is available for genuine subvolume roots;
+  automatic complete multi-subvolume coverage, including separately mounted persistent subvolumes, remains pending.
 - One engine for installed timers/SSH and portable local/NFS/SMB; no legacy fallback
   without Resume while claiming full Resume support.
-- Inline destination chooser with safe persist/validation of user-chosen location.
-- Destination-only recovery on a fresh machine without local profile. End-to-end
+- Inline destination picker is implemented; validate removable/NFS mount loss and adversarial symlink changes on real hardware.
+- Destination-only staged recovery UI is implemented, but verified fresh-machine full restore / bootability and end-to-end
   disposable full/incremental receive and file/system restore, and bootability tests
   across different hardware/layouts.
 - Actual systray close and force-stop/relaunch Resume test while sending a stream.

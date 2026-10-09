@@ -42,9 +42,18 @@ export interface CheckpointActionRequest {
 	name?: string | null;
 	profile_id?: string | null;
 	transfer_id?: string | null;
-	source_mode?: 'latest-snapper' | 'selected-snapper' | 'create-snapper' | null;
+	source_mode?:
+		| 'latest-snapper'
+		| 'selected-snapper'
+		| 'create-snapper'
+		| 'latest-native'
+		| 'selected-native'
+		| 'create-native'
+		| null;
 	snapper_config?: string | null;
 	snapper_number?: number | null;
+	source?: string | null;
+	native_name?: string | null;
 	allow_local: boolean;
 	performance?: 'balanced' | 'fast' | null;
 }
@@ -57,6 +66,29 @@ export async function listHostSnapperSnapshots(
 	if (!isTauri()) return [];
 	const result = await invoke<string>('snapper_snapshot_choices', { configName });
 	return parseHostSnapperChoices(result, configName);
+}
+
+export interface NativeSnapshotChoice {
+	name: string;
+	path: string;
+	uuid: string;
+	date: string;
+}
+export async function listHostNativeSnapshots(source: string): Promise<NativeSnapshotChoice[]> {
+	if (!isTauri()) return [];
+	const json = await invoke<string>('native_snapshot_choices', { source });
+	const items: unknown = JSON.parse(json);
+	if (!Array.isArray(items)) throw new Error('Invalid Btrfs snapshot catalog');
+	return items.filter(
+		(item): item is NativeSnapshotChoice =>
+			!!item &&
+			typeof item === 'object' &&
+			typeof item.name === 'string' &&
+			typeof item.path === 'string' &&
+			typeof item.uuid === 'string' &&
+			typeof item.date === 'string' &&
+			/^harbor-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$/.test(item.name)
+	);
 }
 
 export async function runCheckpointAction(request: CheckpointActionRequest): Promise<string> {
@@ -240,6 +272,20 @@ export async function loadSystemIdentity(): Promise<SystemIdentity> {
 export async function installFullHarbor(): Promise<string> {
 	if (!isTauri()) return 'demo';
 	return invoke<string>('install_full_package');
+}
+
+export async function prepareCheckpointDirectory(
+	root: string,
+	subdir: string,
+	probe: MountProbe
+): Promise<string> {
+	if (!isTauri()) throw new Error('Preparing a destination requires the native application');
+	return invoke<string>('prepare_checkpoint_directory', {
+		root,
+		subdir,
+		expectedMountPoint: probe.mount_point,
+		expectedMountSource: probe.source
+	});
 }
 
 export async function inspectDestinationMount(path: string): Promise<MountProbe | null> {

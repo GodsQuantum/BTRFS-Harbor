@@ -263,9 +263,19 @@ and \fB\-\-experimental\fR. For direct sources, supply
 \fB\-\-source\fR \fIPATH\fR.
 .PP
 \fB\-\-source-mode\fR
-\fIpath|latest-snapper|selected-snapper|create-snapper\fR
+\fIpath|latest-snapper|selected-snapper|create-snapper|latest-native|selected-native|create-native\fR
 selects the source policy. For Snapper policies provide
 \fB\-\-snapper-config\fR \fICONFIG\fR, plus
+\fB\-\-native-name\fR \fIIDENTIFIER\fR chooses a specific Harbor-owned
+readonly Btrfs snapshot in \fBselected-native\fR mode; only snapshots
+under the validated source subvolume's
+\fB.btrfs-harbor-snapshots\fR directory are eligible.
+The \fBlatest-native\fR mode chooses the newest managed snapshot, or
+creates one if none exists. \fBcreate-native\fR always takes a new
+readonly Btrfs snapshot of the explicit subvolume root passed as
+\fB\-\-source\fR. This never configures Snapper or alters mounts.
+\fBraw checkpoint-v2 native-list \-\-source\fR inspects those
+managed snapshots without creating or transferring data.
 \fB\-\-snapper-number\fR \fINUMBER\fR when selecting a specific
 snapshot. Creating a new snapshot uses the native Snapper command.
 Snapper cleaning is pinned until completion or explicit discard.

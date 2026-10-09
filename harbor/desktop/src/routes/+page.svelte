@@ -32,6 +32,9 @@
 	import WifiOff from 'lucide-svelte/icons/wifi-off';
 	import {
 		applyHarborConfiguration,
+		savePortableHarborConfiguration,
+		inspectDestinationMount,
+		prepareCheckpointDirectory,
 		loadDashboardStatus,
 		loadEngineSelectionStatus,
 		loadEngineUpdateOptions,
@@ -47,6 +50,7 @@
 	} from '#lib/agent.ts';
 	import {
 		appendDefaultBackupJob,
+		profileWithDestination,
 		cloneConfiguration,
 		resolveDestination,
 		resolveProfile,
@@ -67,6 +71,7 @@
 	import EngineStatusRow from '#lib/EngineStatusRow.svelte';
 	import ProtectionEditor from '#lib/ProtectionEditor.svelte';
 	import RecoveryEditor from '#lib/RecoveryEditor.svelte';
+	import PortableRecovery from '#lib/PortableRecovery.svelte';
 	import ReplicaEditor from '#lib/ReplicaEditor.svelte';
 	import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from '#lib/engine.ts';
 	import {
@@ -113,6 +118,39 @@
 				runtimeRepresentsScheduledJob(jobRuntimes[profile.id]) || profile.id === editingJobId
 		) ?? [];
 	const t = (key: TranslationKey) => translate(locale, key);
+	async function saveChosenCheckpointDestination(path: string, subdir: string) {
+		if (!harborConfig || !activeProfile) throw new Error('No active backup profile');
+		const previous = resolveDestination(harborConfig, activeProfile);
+		const probe = await inspectDestinationMount(path);
+		if (!probe) throw new Error('No active filesystem at the chosen destination');
+		// Never reinterpret a disconnected network share as an ordinary local
+		// folder merely because its former mountpoint still exists.
+		if (
+			(previous.kind === 'nfs' || previous.kind === 'smb') &&
+			previous.mount_point &&
+			(path === previous.mount_point || path.startsWith(previous.mount_point + '/')) &&
+			(previous.mount_point !== probe.mount_point ||
+				previous.expected_mount_source !== probe.source)
+		) {
+			throw new Error('Previous network destination is disconnected or changed');
+		}
+		await prepareCheckpointDirectory(path, subdir, probe);
+		const kind = probe.kind === 'nfs' || probe.kind === 'smb' ? probe.kind : 'local';
+		const next = profileWithDestination(
+			harborConfig,
+			activeProfile.id,
+			path,
+			kind,
+			probe.mount_point,
+			probe.source
+		);
+		if (installationState?.helper_installed) {
+			await applyHarborConfiguration(next, activeProfile.id);
+		} else {
+			await savePortableHarborConfiguration(next);
+		}
+		harborConfig = next;
+	}
 
 	onMount(async () => {
 		const savedLocale = localStorage.getItem('btrfs-harbor-locale') as Locale | null;
@@ -538,6 +576,7 @@
 				{#if harborConfig && activeProfile && activeProfileHasSnapper}
 					<div style="grid-column: 1 / -1; min-width: 0">
 						<CheckpointControls
+							onChooseDestination={saveChosenCheckpointDestination}
 							profile={activeProfile}
 							destination={resolveDestination(harborConfig, activeProfile)}
 							{locale}
@@ -854,37 +893,47 @@
 						<p>{t('recoveryIntro')}</p>
 					</div>
 				</div>
-				<div class="choice-grid">
-					<article class="choice">
-						<ArchiveRestore size={25} />
-						<h3>{t('recoverFile')}</h3>
-						<p>{t('stagedRestoreDesc')}</p>
-						<ArrowRight size={18} />
-					</article>
-					<article class="choice">
-						<Layers3 size={25} />
-						<h3>{t('recoverSubvolume')}</h3>
-						<p>{t('stagedRestoreDesc')}</p>
-						<ArrowRight size={18} />
-					</article>
-					<article class="choice emphasis">
-						<MonitorCog size={25} />
-						<h3>{t('recoverSystem')}</h3>
-						<p>{t('requiresRescue')}</p>
-						<ArrowRight size={18} />
-					</article>
-				</div>
-				{#if harborConfig}
-					<RecoveryEditor config={harborConfig} profileId={dashboard.profileId} {locale} />
-				{:else}
-					<article class="callout large">
-						<CircleAlert size={22} />
-						<div>
-							<strong>{t('systemProblem')}</strong>
-							<p>{configWarning || t('noLiveProfile')}</p>
-						</div>
-					</article>
-				{/if}
+				<PortableRecovery {locale} />
+				<details class="overview-extra">
+					<summary
+						>{locale === 'fr'
+							? 'Restauration avancée depuis un profil existant'
+							: locale === 'zh-CN'
+								? '高级配置恢复'
+								: 'Advanced recovery from installed profile'}</summary
+					>
+					<div class="choice-grid">
+						<article class="choice">
+							<ArchiveRestore size={25} />
+							<h3>{t('recoverFile')}</h3>
+							<p>{t('stagedRestoreDesc')}</p>
+							<ArrowRight size={18} />
+						</article>
+						<article class="choice">
+							<Layers3 size={25} />
+							<h3>{t('recoverSubvolume')}</h3>
+							<p>{t('stagedRestoreDesc')}</p>
+							<ArrowRight size={18} />
+						</article>
+						<article class="choice emphasis">
+							<MonitorCog size={25} />
+							<h3>{t('recoverSystem')}</h3>
+							<p>{t('requiresRescue')}</p>
+							<ArrowRight size={18} />
+						</article>
+					</div>
+					{#if harborConfig}
+						<RecoveryEditor config={harborConfig} profileId={dashboard.profileId} {locale} />
+					{:else}
+						<article class="callout large">
+							<CircleAlert size={22} />
+							<div>
+								<strong>{t('systemProblem')}</strong>
+								<p>{configWarning || t('noLiveProfile')}</p>
+							</div>
+						</article>
+					{/if}
+				</details>
 			</section>
 		{:else if active === 'replicate'}
 			<section class="content-stack">

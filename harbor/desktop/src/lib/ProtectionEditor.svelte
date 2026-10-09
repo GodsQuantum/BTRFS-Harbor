@@ -34,7 +34,6 @@
 		type HarborConfig,
 		type SshDestinationFields
 	} from './config';
-	import CheckpointControls from './CheckpointControls.svelte';
 	import { translate, type Locale, type TranslationKey } from './i18n';
 	import { type ProfileRuntime } from './status';
 
@@ -670,8 +669,6 @@
 			</label>
 		</details>
 	</section>
-
-	<CheckpointControls {profile} {destination} {locale} />
 
 	<div class="editor-actions">
 		<div class="editor-feedback">

@@ -87,6 +87,10 @@ REGISTRY: dict[str, tuple[str, ...]] = {
     # The restore run marker lives under DESTINATION/.btrfs-backup-ng/, a
     # tree the local endpoint's prepare() has already created below a
     # destination that exists; the marker directory is one component under it.
+    # Harbor-owned readonly snapshots live under the already validated Btrfs
+    # subvolume root (single component, never parents=True); they are source
+    # artifacts, not an inferred destination/mount created from a typo.
+    "core/native_snapshots.py::_snapshot_directory": (BELOW,),
     "core/layout.py::PlainLayout._write_marker": (BELOW,),
     # The writer lock lives in .snapshots below a target that must already
     # exist; .snapshots itself is made when missing, as the first slot would.

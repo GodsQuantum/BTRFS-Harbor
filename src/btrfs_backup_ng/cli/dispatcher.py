@@ -493,7 +493,15 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
     start_v2.add_argument("--source")
     start_v2.add_argument(
         "--source-mode",
-        choices=("path", "latest-snapper", "selected-snapper", "create-snapper"),
+        choices=(
+            "path",
+            "latest-snapper",
+            "selected-snapper",
+            "create-snapper",
+            "latest-native",
+            "selected-native",
+            "create-native",
+        ),
         default="path",
     )
     start_v2.add_argument("--name", required=True)
@@ -508,6 +516,11 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
     start_v2.add_argument("--state-dir")
     start_v2.add_argument("--snapper-config")
     start_v2.add_argument("--snapper-number", type=int)
+    start_v2.add_argument("--native-name")
+    native_list_v2 = v2_actions.add_parser(
+        "native-list", help="Read-only inventory of Harbor-owned native Btrfs snapshots"
+    )
+    native_list_v2.add_argument("--source", required=True)
     list_v2 = v2_actions.add_parser(
         "list", help="List v2 transfers and their durable checkpoint state (read-only)"
     )

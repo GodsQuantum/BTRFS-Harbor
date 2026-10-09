@@ -32,6 +32,14 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.5 — simpler backup, native Btrfs sources, direct recovery (supervised prerelease)
+
+- Main page: choose source and latest/specific/new snapshot, browse an existing local/NFS/SMB destination directly, and send. Original profile configuration and technical diagnostics stay on separate pages.
+- Existing host Snapper snapshots appear by number/date/description. Where Snapper is absent, Harbor-owned readonly **native Btrfs** snapshots can be listed/created on actual Btrfs subvolume roots; no changes to Snapper configs or mounts.
+- Directories are prepared using directory-file-descriptor-relative writes, mount identity is pinned even for local/removable drives, and the checkpointed sender uses native systray and pause/resume metadata. It does not fabricate progress percentages.
+- A fresh Linux install can choose a directory containing Harbor raw archives and stage a restore **without the original profile**. Staging is not itself an automatic bootable disk replacement.
+- **Not a universal/general availability guarantee:** native snapshot creation requires a real writable Btrfs subvolume, other persistent nested subvolumes must be selected separately, SSH/schedules still use the legacy engine, live NFS outage/restart acceptance is pending, and unattended system/EFI/bootloader restoration is not supported yet. Keep verified backups.
+
 ## v0.2.6-rc.4 — persistent portable backup destinations
 
 - Portable AppImage profiles now save and reload without requiring the installed Harbor system agent or an unrelated systemd service. The application writes a validated, atomic, user-only configuration file in its standard per-user application configuration directory.
@@ -71,7 +79,7 @@ Fixes **NFSv4 backups that did not start after clicking Send latest**: certain L
 - **English / Français / 简体中文** — first-class UI and documentation.
 - **No Docker runtime** — Harbor installs as a native Linux desktop application.
 
-The latest supervised preview is **v0.2.6-rc.4**, available under [prereleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.4). Portable Btrfs send with Resume currently requires a Snapper-configured source; this preview does **not** yet provide complete coverage for all Btrfs layouts or distributions.
+The current supervised candidate is **v0.2.6-rc.5** (tagged release pending verification). Portable checkpoint sends support existing Snapper snapshots and Harbor-owned native Btrfs snapshots on verified subvolume roots. Comprehensive nested-volume coverage, disaster recovery, real interrupted NFS resumes, and all-distribution qualification are **not yet verified**.
 
 ## 📦 Download & install
 

@@ -31,6 +31,11 @@ from ..core.checkpoint_v2 import (
 )
 from ..core.verify_v2 import verify_checkpoint_index
 from ..core.checkpoint_v2_runner import SendProcess, execute_checkpoint_job
+from ..core.native_snapshots import (
+    list_native_snapshots,
+    find_native_snapshot,
+    create_native_snapshot,
+)
 from ..core.native_send_v2 import (
     destination_fingerprint,
     inspect_readonly_btrfs_source,
@@ -165,6 +170,31 @@ def _resolve_source_choice(args: argparse.Namespace, target_root: Path) -> None:
     command, executed solely after --experimental and destination preflight.
     """
     mode = args.source_mode
+    if mode in ("latest-native", "selected-native", "create-native"):
+        if not args.source or args.snapper_config or args.snapper_number:
+            raise ValueError(
+                "native mode requires a subvolume path but no Snapper identity"
+            )
+        live_root = Path(args.source)
+        if mode == "create-native":
+            chosen_native = create_native_snapshot(live_root)
+        elif mode == "selected-native":
+            chosen_native = find_native_snapshot(live_root, args.native_name or "")
+        else:
+            candidates = list_native_snapshots(live_root)
+            if not candidates:
+                chosen_native = create_native_snapshot(live_root)
+            else:
+                chosen_native = candidates[0]
+        if chosen_native.uuid in {
+            item.source_uuid for item in discover_raw_snapshots(target_root)
+        }:
+            raise ValueError(
+                "this native snapshot is already backed up; create a new one"
+            )
+        args.native_root = str(live_root)
+        args.source = str(chosen_native.path)
+        return
     if mode == "path":
         if not args.source:
             raise ValueError("source --source is required for source-mode path")
@@ -282,7 +312,25 @@ def _select_automatic_incremental_parent(
     Never invent a differential against an absent snapshot or a broken chain.
     Explicit --parent retains the existing strict validation path.
     """
-    if args.parent is not None or args.source_mode == "path" or not args.snapper_config:
+    if args.parent is not None:
+        return
+    if getattr(args, "native_root", None):
+        stored = discover_raw_snapshots(target_root)
+        chain = {item.name: item for item in stored}
+        remote_by_uuid = {
+            item.source_uuid
+            for item in stored
+            if item.source_uuid and _valid_saved_chain(item, chain, set())
+        }
+        selected = Path(args.source)
+        for native_candidate in list_native_snapshots(Path(args.native_root)):
+            if native_candidate.path == selected:
+                continue
+            if native_candidate.name < selected.name and native_candidate.uuid in remote_by_uuid:
+                args.parent = str(native_candidate.path)
+                return
+        return
+    if args.source_mode == "path" or not args.snapper_config:
         return
     snapshots = SnapperScanner().get_snapshots(args.snapper_config)
     saved = discover_raw_snapshots(target_root)
@@ -422,7 +470,7 @@ def _new_manifest(
     profile = resolve_performance_profile(args.performance)
     identity: dict[str, str | int | None] = {
         "profile_id": args.profile_id,
-        "source_volume": args.source,
+        "source_volume": getattr(args, "native_root", args.source),
         "source_uuid": source.uuid,
         "source_path": source.path,
         "parent_uuid": source.parent_uuid,
@@ -668,6 +716,22 @@ def _list_v2(root: Path) -> list[dict[str, object]]:
 
 def _execute(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
+    if action == "native-list":
+        items = list_native_snapshots(Path(args.source))
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": item.name,
+                        "path": str(item.path),
+                        "uuid": item.uuid,
+                        "date": item.date,
+                    }
+                    for item in items
+                ]
+            )
+        )
+        return 0
     if action == "list":
         print(json.dumps(_list_v2(_target_root(args.target)), sort_keys=True))
         return 0

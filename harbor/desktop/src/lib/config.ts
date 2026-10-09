@@ -370,3 +370,48 @@ export function checkpointTargetPath(destinationPath: string, targetSubdir: stri
 	const clean = root.replace(/\/+$/, '');
 	return clean + '/' + subdir;
 }
+
+/** Scope a changed backup destination to a single profile; preserve shared profiles. */
+export function profileWithDestination(
+	config: HarborConfig,
+	profileId: string,
+	root: string,
+	kind: 'local' | 'nfs' | 'smb',
+	mountPoint: string,
+	mountSource: string,
+	idFactory: () => string = () => crypto.randomUUID()
+): HarborConfig {
+	const chosen = root.trim();
+	if (
+		!chosen.startsWith('/') ||
+		chosen.startsWith('//') ||
+		chosen === '/' ||
+		chosen.includes('\0') ||
+		!mountPoint.startsWith('/') ||
+		!mountSource
+	) {
+		throw new Error('Choose a mounted, existing backup folder');
+	}
+	const next = cloneConfiguration(config);
+	const profile = resolveProfile(next, profileId);
+	const existing = resolveDestination(next, profile);
+	const shared = next.profiles.some(
+		(p) => p.id !== profileId && p.destination_ids.includes(existing.id)
+	);
+	const newId = shared ? idFactory() : existing.id;
+	const updated: DestinationSpec = {
+		...existing,
+		id: newId,
+		kind,
+		path: chosen.replace(/\/+$/, ''),
+		// Pin local/removable-media identity too: a disconnected drive must
+		// NEVER silently become an underlying root filesystem directory.
+		mount_point: mountPoint,
+		expected_mount_source: mountSource,
+		name: chosen.split('/').filter(Boolean).at(-1) ?? existing.name
+	};
+	if (shared) next.destinations.push(updated);
+	else next.destinations = next.destinations.map((d) => (d.id === existing.id ? updated : d));
+	profile.destination_ids = [newId, ...profile.destination_ids.filter((id) => id !== existing.id)];
+	return next;
+}

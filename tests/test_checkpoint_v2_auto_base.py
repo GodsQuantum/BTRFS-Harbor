@@ -179,3 +179,40 @@ def test_both_source_and_incremental_parent_cleanup_pins_released(monkeypatch):
     )
     cli._release_snapper_pins(Path("/ignored"), manifest)
     assert calls == [("root", 2, ROOT, ROOT), ("root", 1, BEFORE, ROOT)]
+
+
+def test_periodic_full_base_breaks_parent_chain_after_bounded_depth(
+    tmp_path, monkeypatch
+):
+    s1 = candidate(tmp_path, 1)
+    s2 = candidate(tmp_path, 2)
+    older = "00000000-0000-4000-8000-000000000003"
+    first = remote(tmp_path, 0, older)
+    second = remote(tmp_path, 1, BEFORE, parent=older)
+    setup(monkeypatch, s1, s2, [first, second])
+
+    options = arg(tmp_path)
+    options.max_incremental_depth = 1
+    cli._resolve_source_choice(options, tmp_path)
+    cli._select_automatic_incremental_parent(options, tmp_path)
+    assert options.parent is None, "depth limit must force a new independent full send"
+
+    allowed = arg(tmp_path)
+    allowed.max_incremental_depth = 2
+    cli._resolve_source_choice(allowed, tmp_path)
+    cli._select_automatic_incremental_parent(allowed, tmp_path)
+    assert allowed.parent == str(s1.subvolume_path)
+
+
+def test_incremental_depth_fails_closed_on_cycle(tmp_path):
+    older = "00000000-0000-4000-8000-000000000003"
+    first = remote(tmp_path, 0, older)
+    second = remote(tmp_path, 1, BEFORE, parent=older)
+    first.parent_name = second.name
+    first.parent_uuid = BEFORE
+    try:
+        cli._incremental_depth(second, {item.name: item for item in (first, second)})
+    except ValueError as exc:
+        assert "ancestor chain" in str(exc)
+    else:
+        raise AssertionError("cycle must never be used to choose an incremental base")

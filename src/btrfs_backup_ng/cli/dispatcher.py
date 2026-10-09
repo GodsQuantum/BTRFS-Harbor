@@ -538,6 +538,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         set_parser.add_argument("--state-dir")
         set_parser.add_argument("--experimental", action="store_true")
         if set_action == "set-start":
+            set_parser.add_argument("--max-incremental-depth", type=int, default=7)
             set_parser.add_argument("--profile-id", required=True)
             set_parser.add_argument("--source", action="append")
         elif set_action not in ("set-list", "set-retention-plan"):

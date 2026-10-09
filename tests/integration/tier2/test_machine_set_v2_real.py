@@ -195,6 +195,66 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
     }
     assert not retention["retention_eligible_sets"]
 
+    # After the configured maximum chain depth, generate independent full
+    # anchors for both Btrfs volumes. Old chains then become safely eligible.
+    (root / "system.txt").write_text("root payload v3\n")
+    (home / "user.txt").write_text("home payload v3\n")
+    third = _run(
+        "set-start",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--source",
+        str(root),
+        "--source",
+        str(home),
+        "--max-incremental-depth",
+        "1",
+        "--allow-local",
+        "--state-dir",
+        str(journal),
+        "--experimental",
+    )
+    assert third["status"] == "completed_btrfs_only"
+    third_names = [item["archive"] for item in third["members"]]
+    third_raw = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "btrfs_backup_ng",
+            "raw",
+            "list",
+            str(archive),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=90,
+    )
+    third_records = {item["name"]: item for item in json.loads(third_raw.stdout)}
+    assert all(third_records[name]["parent_name"] is None for name in third_names), (
+        "chain rotation must create new independent full recovery anchors"
+    )
+    rotated = _run(
+        "set-retention-plan",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--keep",
+        "1",
+        "--min",
+        "0d",
+        "--allow-local",
+        "--experimental",
+    )
+    assert third["set_id"] in rotated["keep_sets"]
+    assert outcome["set_id"] in rotated["retention_eligible_sets"]
+    assert incremental_machine["set_id"] in rotated["retention_eligible_sets"]
+    assert rotated["deletion_performed"] is False
+
     # Completed backup validity must not depend on retaining the original
     # snapshot; it should remain verifiable after loss of the old machine.
     saved = json.loads(

@@ -270,6 +270,7 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
                 parent=None,
                 checkpoint_size_mib=128,
                 performance="balanced",
+                max_incremental_depth=data.get("max_incremental_depth", 7),
                 snapper_config=None,
                 snapper_number=None,
                 native_name=None,
@@ -489,8 +490,12 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                     "transfer_id": None,
                 }
             )
+        max_depth = getattr(args, "max_incremental_depth", 7)
+        if type(max_depth) is not int or not 1 <= max_depth <= 256:
+            raise ValueError("max incremental depth must be 1..256")
         data = {
             "schema_version": 1,
+            "max_incremental_depth": max_depth,
             "set_id": set_id,
             "profile_id": args.profile_id,
             "destination_fingerprint": stable,

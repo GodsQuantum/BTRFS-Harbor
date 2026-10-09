@@ -304,6 +304,23 @@ def _valid_saved_chain(
     return _valid_saved_chain(ancestor, by_name, visited | {name})
 
 
+def _incremental_depth(snapshot: RawSnapshot, entries: dict[str, RawSnapshot]) -> int:
+    """Depth of an already-verified remote chain from its most recent full."""
+    current = snapshot
+    count = 0
+    visited: set[str] = set()
+    while current.parent_name:
+        if current.name in visited or count > 256:
+            raise ValueError("invalid incremental ancestor chain")
+        visited.add(current.name)
+        parent = entries.get(current.parent_name)
+        if parent is None or parent.source_uuid != current.parent_uuid:
+            raise ValueError("unrestorable incremental parent chain")
+        current = parent
+        count += 1
+    return count
+
+
 def _select_automatic_incremental_parent(
     args: argparse.Namespace, target_root: Path
 ) -> None:
@@ -315,11 +332,14 @@ def _select_automatic_incremental_parent(
     """
     if args.parent is not None:
         return
+    maximum = getattr(args, "max_incremental_depth", 7)
+    if type(maximum) is not int or not 1 <= maximum <= 256:
+        raise ValueError("max incremental depth must be between 1 and 256")
     if getattr(args, "native_root", None):
         stored = discover_raw_snapshots(target_root)
         chain = {item.name: item for item in stored}
         remote_by_uuid = {
-            item.source_uuid
+            item.source_uuid: item
             for item in stored
             if item.source_uuid and _valid_saved_chain(item, chain, set())
         }
@@ -332,6 +352,13 @@ def _select_automatic_incremental_parent(
                 < native_snapshot_sort_key(selected.name)
                 and native_candidate.uuid in remote_by_uuid
             ):
+                # Periodic independent full sends allow older incremental
+                # chains to expire without ever orphaning a kept descendant.
+                if (
+                    _incremental_depth(remote_by_uuid[native_candidate.uuid], chain)
+                    >= maximum
+                ):
+                    return
                 args.parent = str(native_candidate.path)
                 return
         return
@@ -375,6 +402,8 @@ def _select_automatic_incremental_parent(
             continue
         resolved = resolve_source_identity(candidate)
         if resolved.exists and resolved.readonly and resolved.uuid in remote:
+            if _incremental_depth(remote[resolved.uuid], by_name) >= maximum:
+                return
             args.parent = str(path)
             args.parent_snapper_number = candidate.number
             return

@@ -166,3 +166,150 @@ def test_real_nfs_sigkill_remount_resume_no_retransmit(tmp_path: Path):
             while block := source_stream.read(1024 * 1024):
                 restored.update(block)
         assert restored.hexdigest() == digest.hexdigest()
+
+
+def test_nfs_server_disappears_while_sender_active(tmp_path: Path):
+    """Real server outage mid-transfer, then recover from committed checkpoints.
+
+    This runs exclusively on the disposable localhost NFS server created
+    in nfs-fault-lab.yml; systemctl never targets Cloud9 or user machines.
+    """
+    test_mount = os.environ.get("HARBOR_TEST_NFS_TARGET")
+    if not test_mount or not test_mount.startswith("/mnt/harbor-nfs-client"):
+        pytest.fail("refusing server test outside isolated GitHub NFS mount")
+    target = Path(test_mount) / "server-outage"
+    assert not target.exists()
+    target.mkdir(mode=0o700)
+
+    with LoopbackBtrfs(
+        size_mb=768, label="harbor-server-outage", base_dir=tmp_path
+    ) as vol:
+        live = vol / "source"
+        subprocess.run(["btrfs", "subvolume", "create", str(live)], check=True)
+        wanted = hashlib.sha256()
+        with (live / "content.bin").open("wb") as output:
+            for i in range(190):
+                payload = hashlib.shake_256(i.to_bytes(4, "big")).digest(1024 * 1024)
+                output.write(payload)
+                wanted.update(payload)
+        frozen = vol / "readonly"
+        subprocess.run(
+            ["btrfs", "subvolume", "snapshot", "-r", str(live), str(frozen)],
+            check=True,
+        )
+        state = tmp_path / "control"
+        sender = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "btrfs_backup_ng",
+                "raw",
+                "checkpoint-v2",
+                "start",
+                "--source",
+                str(frozen),
+                "--target",
+                str(target),
+                "--name",
+                "server-stopped",
+                "--profile-id",
+                PROFILE_ID,
+                "--checkpoint-size-mib",
+                "1",
+                "--state-dir",
+                str(state),
+                "--experimental",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        original = None
+        manifest_path = None
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            entries = list(target.glob(".harbor-resume-*.json"))
+            if entries:
+                manifest_path = entries[0]
+                try:
+                    parsed = read_manifest(manifest_path)
+                    if len(parsed.checkpoints) >= 5 and parsed.state != "completed":
+                        original = parsed
+                        break
+                except (OSError, ValueError):
+                    pass
+            if sender.poll() is not None:
+                break
+            time.sleep(0.01)
+        assert original is not None, "sender completed before outage could be injected"
+        assert manifest_path is not None
+        # Stop the NFS server without unmounting the client. Writes on the
+        # established NFS mount must fail or wait; they must NOT fall back to
+        # local filesystem storage.
+        try:
+            subprocess.run(
+                ["systemctl", "stop", "nfs-server.service"], check=True, timeout=35
+            )
+            assert (
+                subprocess.run(
+                    ["systemctl", "is-active", "--quiet", "nfs-server.service"],
+                    check=False,
+                    timeout=5,
+                ).returncode
+                != 0
+            )
+            time.sleep(2)
+        finally:
+            if sender.poll() is None:
+                os.killpg(sender.pid, signal.SIGKILL)
+            sender.communicate(timeout=35)
+            subprocess.run(
+                ["systemctl", "start", "nfs-server.service"], check=True, timeout=50
+            )
+
+        assert (
+            subprocess.run(
+                ["findmnt", "-n", "-o", "FSTYPE", "-T", str(target)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            ).stdout.strip()
+            == "nfs4"
+        )
+
+        resumed = _run(
+            "raw",
+            "checkpoint-v2",
+            "resume",
+            "--target",
+            str(target),
+            "--name",
+            "server-stopped",
+            "--transfer-id",
+            original.transfer_id,
+            "--state-dir",
+            str(state),
+            "--experimental",
+        )
+        assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+        recovered_manifest = read_manifest(manifest_path)
+        assert recovered_manifest.state == "completed"
+        assert (
+            recovered_manifest.checkpoints[: len(original.checkpoints)]
+            == original.checkpoints
+        )
+        staging = vol / "restore-after-server-loss"
+        staging.mkdir()
+        result = _run(
+            "restore", f"raw://{target}", str(staging), "--snapshot", "server-stopped"
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        files = list(staging.rglob("content.bin"))
+        assert len(files) == 1
+        actual = hashlib.sha256()
+        with files[0].open("rb") as inp:
+            while chunk := inp.read(1024 * 1024):
+                actual.update(chunk)
+        assert actual.hexdigest() == wanted.hexdigest()

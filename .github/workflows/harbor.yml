@@ -53,16 +53,16 @@ jobs:
       matrix:
         include:
           - name: arch
-            image: archlinux:base
+            image: ghcr.io/archlinux/archlinux:base
             package_manager: pacman
           - name: debian
-            image: ubuntu:24.04
+            image: public.ecr.aws/ubuntu/ubuntu:24.04
             package_manager: apt-get
           - name: fedora
-            image: fedora:43
+            image: quay.io/fedora/fedora:43
             package_manager: dnf
           - name: opensuse
-            image: opensuse/tumbleweed:latest
+            image: registry.opensuse.org/opensuse/tumbleweed:latest
             package_manager: zypper
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

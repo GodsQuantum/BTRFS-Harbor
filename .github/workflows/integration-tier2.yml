@@ -34,7 +34,7 @@ jobs:
 
     # Run in a privileged container with btrfs support
     container:
-      image: fedora:latest
+      image: quay.io/fedora/fedora:43
       options: --privileged
 
     steps:

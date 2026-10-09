@@ -39,3 +39,36 @@ export function checkpointStatusIsVerified(record: CheckpointTransfer): boolean 
 	// intentionally unverified status view of the current manifest.
 	return record.verified;
 }
+
+export interface SnapperSnapshotChoice {
+	number: number;
+	type: string;
+	date: string;
+	description: string;
+}
+
+/** Parse existing host Snapper JSON; never synthesize a snapshot number. */
+export function parseHostSnapperChoices(json: string, configName: string): SnapperSnapshotChoice[] {
+	const payload: unknown = JSON.parse(json);
+	if (!payload || typeof payload !== 'object' || !('configs' in payload)) {
+		throw new Error('Host Snapper did not return a configuration list');
+	}
+	const configs = (payload as { configs: unknown }).configs;
+	if (!Array.isArray(configs)) throw new Error('Invalid Snapper configuration list');
+	const selected = configs.find((entry) => entry?.name === configName);
+	if (!selected) return [];
+	if (!Array.isArray(selected.snapshots)) throw new Error('Invalid host snapshot list');
+	return selected.snapshots
+		.filter((entry: unknown): entry is SnapperSnapshotChoice => {
+			if (!entry || typeof entry !== 'object') return false;
+			const item = entry as Record<string, unknown>;
+			return (
+				Number.isSafeInteger(item.number) &&
+				(item.number as number) > 0 &&
+				typeof item.date === 'string' &&
+				typeof item.description === 'string' &&
+				typeof item.type === 'string'
+			);
+		})
+		.sort((a: SnapperSnapshotChoice, b: SnapperSnapshotChoice) => b.number - a.number);
+}

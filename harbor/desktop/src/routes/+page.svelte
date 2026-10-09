@@ -26,7 +26,6 @@
 	import Server from 'lucide-svelte/icons/server';
 	import Settings from 'lucide-svelte/icons/settings';
 	import ShieldCheck from 'lucide-svelte/icons/shield-check';
-	import ShieldEllipsis from 'lucide-svelte/icons/shield-ellipsis';
 	import Sun from 'lucide-svelte/icons/sun';
 	import TerminalSquare from 'lucide-svelte/icons/terminal-square';
 	import Wifi from 'lucide-svelte/icons/wifi';
@@ -72,7 +71,6 @@
 	import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from '#lib/engine.ts';
 	import {
 		demoStatus,
-		protectionState,
 		runtimeRepresentsScheduledJob,
 		type DashboardStatus,
 		type ProfileRuntime
@@ -105,7 +103,6 @@
 	let scheduleError = '';
 	let editingJobId: string | null = null;
 	let jobRuntimes: Record<string, ProfileRuntime | null> = {};
-	$: protection = protectionState(dashboard.engine);
 	$: activeProfile = harborConfig?.profiles[0] ?? null;
 	$: activeSchedule = activeProfile?.on_calendar ?? '';
 	$: activeProfileHasSnapper =
@@ -506,46 +503,37 @@
 			</section>
 		{:else if active === 'overview'}
 			<section class="overview-grid">
-				<EngineStatusRow
-					status={engineStatus}
-					{locale}
-					loading={engineBusy}
-					onManage={() => (active = 'settings')}
-				/>
-				<article class="protection-hero {protection}">
-					<div class="hero-copy">
-						<div class="status-icon">
-							{#if protection === 'protected'}
-								<ShieldCheck size={28} />
-							{:else if protection === 'risk'}
-								<ShieldEllipsis size={28} />
-							{:else}
-								<CircleAlert size={28} />
-							{/if}
-						</div>
-						<div>
-							<p class="eyebrow">{t('protection')}</p>
-							<h2>
-								{protection === 'protected'
-									? t('systemProtected')
-									: protection === 'risk'
-										? t('systemAtRisk')
-										: t('systemUnprotected')}
-							</h2>
-							<p>
-								{protection === 'protected'
-									? t('protectedDescription')
-									: protection === 'risk'
-										? t('atRiskDescription')
-										: t('unprotectedDescription')}
-							</p>
-						</div>
+				<article
+					class="panel"
+					style="grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px;"
+				>
+					<h2 style="margin: 0; font-size: 23px;">
+						{locale === 'fr'
+							? 'Sauvegarder ou restaurer'
+							: locale === 'zh-CN'
+								? '备份或恢复'
+								: 'Backup or restore'}
+					</h2>
+					<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+						<button class="secondary" onclick={() => (active = 'destinations')}>
+							<HardDrive size={18} />
+							{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}
+						</button>
+						<button class="secondary" onclick={() => (active = 'recover')}>
+							<LifeBuoy size={18} />
+							{locale === 'fr' ? 'Restaurer' : locale === 'zh-CN' ? '恢复' : 'Restore'}
+						</button>
 					</div>
-					<button class="secondary" onclick={() => (active = 'recover')}>
-						<LifeBuoy size={18} />
-						{t('recoverFromSnapshot')}
-					</button>
 				</article>
+				{#if !harborConfig || !activeProfile || !activeProfileHasSnapper}
+					<article class="panel" style="grid-column: 1 / -1; padding: 18px;">
+						{locale === 'fr'
+							? 'Aucun snapshot Snapper configuré. Choisissez une source Btrfs dans les paramètres.'
+							: locale === 'zh-CN'
+								? '尚未配置 Snapper 快照来源。'
+								: 'No Snapper snapshot configured yet. Choose a Btrfs source in settings.'}
+					</article>
+				{/if}
 
 				{#if harborConfig && activeProfile && activeProfileHasSnapper}
 					<div style="grid-column: 1 / -1; min-width: 0">

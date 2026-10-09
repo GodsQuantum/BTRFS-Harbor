@@ -2,7 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { createDefaultConfiguration, type DiscoveredSource, type HarborConfig } from './config';
 import type { EnginePolicy, EngineSelectionStatus, EngineUpdateOptions } from './engine';
-import type { CheckpointTransfer } from './checkpoint';
+import { parseHostSnapperChoices, type CheckpointTransfer } from './checkpoint';
 import type { MachineRecoveryPlan, MachineRecoveryRequest } from './recovery';
 import {
 	demoStatus,
@@ -47,6 +47,16 @@ export interface CheckpointActionRequest {
 	snapper_number?: number | null;
 	allow_local: boolean;
 	performance?: 'balanced' | 'fast' | null;
+}
+
+export type { SnapperSnapshotChoice } from './checkpoint';
+
+export async function listHostSnapperSnapshots(
+	configName: string
+): Promise<import('./checkpoint').SnapperSnapshotChoice[]> {
+	if (!isTauri()) return [];
+	const result = await invoke<string>('snapper_snapshot_choices', { configName });
+	return parseHostSnapperChoices(result, configName);
 }
 
 export async function runCheckpointAction(request: CheckpointActionRequest): Promise<string> {

@@ -99,7 +99,7 @@ chmod +x BTRFS-Harbor-0.2.5-linux-x86_64.run
 
 Harbor **préfère un `btrfs-backup-ng` système compatible (>= 0.9.12)** s’il existe déjà. Sinon il utilise le moteur compatible embarqué. Harbor ne remplace plus et n’entre plus en conflit avec un moteur upstream installé par l’utilisateur.
 
-## 🐧 Support Linux
+**Parcours utilisateur attendu :** [Sauvegarder → reprendre → restaurer](docs/PRODUCT_FLOW_SIMPLE.md). La préversion n'a pas encore validé toutes les étapes.\n\n## 🐧 Support Linux
 
 Harbor raisonne par **capacités disponibles**, pas par nom de distribution.
 

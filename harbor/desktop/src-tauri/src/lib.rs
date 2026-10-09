@@ -44,7 +44,6 @@ enum BackupClosePolicy {
 #[derive(Debug, Clone, Copy)]
 struct BackgroundBackupText {
     title: &'static str,
-    message: &'static str,
     no_tray_message: &'static str,
     show_label: &'static str,
     stop_label: &'static str,
@@ -65,7 +64,6 @@ fn background_backup_text(locale: Option<&str>) -> BackgroundBackupText {
     if locale.starts_with("fr") {
         BackgroundBackupText {
             title: "Sauvegarde en cours",
-            message: "La sauvegarde continue en arrière-plan. Btrfs Harbor reste dans la zone de notification jusqu’à la fin. Utilisez son menu pour rouvrir l’application ou arrêter la sauvegarde.",
             no_tray_message: "Une sauvegarde est en cours. Le système de zone de notification n’est pas disponible, donc Btrfs Harbor doit rester ouvert jusqu’à la fin ou jusqu’à l’arrêt manuel de la sauvegarde.",
             show_label: "Afficher Btrfs Harbor",
             stop_label: "Arrêter la sauvegarde",
@@ -75,7 +73,6 @@ fn background_backup_text(locale: Option<&str>) -> BackgroundBackupText {
     } else if locale.starts_with("zh") {
         BackgroundBackupText {
             title: "备份正在进行",
-            message: "备份将在后台继续。Btrfs Harbor 会保留在系统托盘中，直到备份结束。可通过托盘菜单重新打开应用或停止备份。",
             no_tray_message: "备份正在进行，但系统托盘不可用。请保持 Btrfs Harbor 打开，直到备份完成或手动停止。",
             show_label: "显示 Btrfs Harbor",
             stop_label: "停止备份",
@@ -85,7 +82,6 @@ fn background_backup_text(locale: Option<&str>) -> BackgroundBackupText {
     } else {
         BackgroundBackupText {
             title: "Backup in progress",
-            message: "The backup will continue in the background. Btrfs Harbor will remain in the system tray until it finishes. Use the tray menu to reopen Harbor or stop the backup.",
             no_tray_message: "A backup is in progress, but the system tray is unavailable. Keep Btrfs Harbor open until the backup finishes or stop it manually.",
             show_label: "Show Btrfs Harbor",
             stop_label: "Stop backup",
@@ -1123,6 +1119,49 @@ async fn backup_status(profile_id: String) -> Result<String, String> {
     call_agent("BackupStatus", &profile_id).await
 }
 
+fn valid_snapper_config_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 80
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+#[tauri::command]
+async fn snapper_snapshot_choices(
+    app: tauri::AppHandle,
+    config_name: String,
+) -> Result<String, String> {
+    if !valid_snapper_config_name(&config_name) {
+        return Err("Invalid Snapper configuration name".into());
+    }
+    let engine =
+        bundled_engine_candidate(&app).ok_or("The bundled snapshot reader is unavailable")?;
+    // Reuse the existing SnapperScanner JSON output: no second parser,
+    // no Snapper settings changes and no command shell interpolation.
+    let output = Command::new("/usr/bin/pkexec")
+        .arg(engine)
+        .args(["snapper", "list", "--config", &config_name, "--json"])
+        .output()
+        .await
+        .map_err(|err| format!("Cannot list host Snapper snapshots: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Cannot list Snapper snapshots: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if output.stdout.len() > 2_000_000 {
+        return Err("The snapshot list is too large to display".into());
+    }
+    let parsed: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("Invalid Snapper snapshot list: {err}"))?;
+    if !parsed.get("configs").is_some_and(Value::is_array) {
+        return Err("Snapper snapshot response has no configuration list".into());
+    }
+    serde_json::to_string(&parsed).map_err(|err| format!("Snapshot serialization failed: {err}"))
+}
+
 #[tauri::command]
 async fn checkpoint_action(
     app: tauri::AppHandle,
@@ -1138,24 +1177,47 @@ async fn checkpoint_action(
         // when no tray-based, durable v2 worker supervisor is available.
         state.begin()?;
     }
-    let result = Command::new("/usr/bin/pkexec")
+    let mut command = Command::new("/usr/bin/pkexec");
+    command
         .arg(executable)
         .args(args)
-        .output()
-        .await
-        .map_err(|err| format!("Cannot invoke privileged checkpoint engine: {err}"))
-        .and_then(|output| {
-            if output.status.success() {
-                Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-            } else {
-                let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-                Err(if error.is_empty() {
-                    format!("Checkpoint operation failed: {}", output.status)
-                } else {
-                    error
-                })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if long_running {
+        // v2 checkpoints must have the same tray and scoped Stop behavior as
+        // classic manual backups. An isolated PGID makes Stop target this
+        // transaction alone, not unrelated processes or other backups.
+        command.process_group(0);
+    }
+    let result = match command.spawn() {
+        Ok(child) => {
+            if long_running {
+                if let Some(pid) = child.id() {
+                    state.set_process_group(pid);
+                }
+                // If the desktop cannot create a tray, the close policy keeps
+                // the controlling window open rather than killing the worker.
+                let _ = ensure_backup_tray(&app);
             }
-        });
+            child
+                .wait_with_output()
+                .await
+                .map_err(|err| format!("Cannot wait for privileged checkpoint engine: {err}"))
+                .and_then(|output| {
+                    if output.status.success() {
+                        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                    } else {
+                        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+                        Err(if error.is_empty() {
+                            format!("Checkpoint operation failed: {}", output.status)
+                        } else {
+                            error
+                        })
+                    }
+                })
+        }
+        Err(err) => Err(format!("Cannot invoke privileged checkpoint engine: {err}")),
+    };
     if long_running {
         finish_background_backup(&app, result.is_ok());
     }
@@ -1830,11 +1892,8 @@ pub fn run() {
                 BackupClosePolicy::CloseNormally => {}
                 BackupClosePolicy::HideToTray => {
                     api.prevent_close();
-                    app.dialog()
-                        .message(text.message)
-                        .kind(MessageDialogKind::Info)
-                        .title(text.title)
-                        .blocking_show();
+                    // Closing the window during a v2/legacy backup is a quiet
+                    // hide-to-tray, not a modal confirmation on every click.
                     state.hidden_for_backup.store(true, Ordering::SeqCst);
                     let _ = window.hide();
                 }
@@ -1878,6 +1937,7 @@ pub fn run() {
             backup_status,
             checkpoint_transfers,
             checkpoint_action,
+            snapper_snapshot_choices,
             inspect_mount,
             apply_configuration,
             send_snapshot_now_stream,
@@ -1899,6 +1959,17 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapper_snapshot_read_only_api_rejects_invalid_config_names() {
+        assert!(valid_snapper_config_name("root"));
+        assert!(valid_snapper_config_name("home-1"));
+        assert!(!valid_snapper_config_name(""));
+        assert!(!valid_snapper_config_name("../root"));
+        assert!(!valid_snapper_config_name("root;rm"));
+        assert!(!valid_snapper_config_name("root space"));
+        assert!(!valid_snapper_config_name(&"a".repeat(81)));
+    }
 
     #[test]
     fn portable_profile_rejects_root_directory_and_round_trips_safely() {
@@ -2168,10 +2239,10 @@ mod tests {
     }
 
     #[test]
-    fn french_background_message_explicitly_says_backup_continues() {
+    fn french_background_tray_has_clear_status_and_stop_action() {
         let text = background_backup_text(Some("fr_FR.UTF-8"));
-        assert!(text.message.contains("continue"));
-        assert!(text.message.contains("zone de notification"));
+        assert!(text.tooltip.contains("sauvegarde en cours"));
+        assert!(text.no_tray_message.contains("zone de notification"));
         assert_eq!(text.stop_label, "Arrêter la sauvegarde");
     }
 }

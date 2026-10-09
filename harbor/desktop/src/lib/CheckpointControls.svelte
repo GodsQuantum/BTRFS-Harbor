@@ -1,7 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { isTauri } from '@tauri-apps/api/core';
-	import { loadCheckpointTransfers, runCheckpointAction } from './agent';
+	import {
+		listHostSnapperSnapshots,
+		loadCheckpointTransfers,
+		runCheckpointAction,
+		type SnapperSnapshotChoice
+	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
 	import { formatBytesBinary } from './status';
 	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
@@ -27,7 +32,7 @@
 			'Specific number',
 			'Create snapshot',
 			'Snapshot number',
-			'Transfer in progress (ETA unknown)',
+			'Sending · You can close the window (system tray)',
 			'No checkpoint transfers',
 			'Confirm discarding this unfinished transfer and releasing its Snapper pin?'
 		],
@@ -46,7 +51,7 @@
 			'Numéro précis',
 			'Créer un snapshot',
 			'Numéro Snapper',
-			'Envoi en cours (durée inconnue)',
+			'Envoi en cours · Vous pouvez fermer la fenêtre (systray)',
 			'Aucun transfert par checkpoints',
 			'Abandonner ce transfert inachevé et libérer sa protection Snapper ?'
 		],
@@ -65,7 +70,7 @@
 			'指定编号',
 			'创建快照',
 			'快照编号',
-			'传输中（时间未知）',
+			'发送中 · 可关闭窗口，程序留在系统托盘',
 			'没有检查点传输',
 			'丢弃未完成传输并释放 Snapper 保护？'
 		]
@@ -84,6 +89,29 @@
 		destination.kind !== 'ssh';
 	let mode: 'latest-snapper' | 'selected-snapper' | 'create-snapper' = 'latest-snapper';
 	let number = 0;
+	let snapshotChoices: SnapperSnapshotChoice[] = [];
+	let snapshotListError = '';
+	let snapshotLoading = false;
+	async function loadSnapshots() {
+		if (!source?.snapper_config) return;
+		const requested = source.snapper_config;
+		snapshotLoading = true;
+		snapshotListError = '';
+		try {
+			const found = await listHostSnapperSnapshots(requested);
+			if (source?.snapper_config !== requested) return;
+			snapshotChoices = found;
+			if (!snapshotChoices.some((item) => item.number === number)) {
+				number = snapshotChoices[0]?.number ?? 0;
+			}
+		} catch (reason) {
+			snapshotChoices = [];
+			number = 0;
+			snapshotListError = String(reason);
+		} finally {
+			snapshotLoading = false;
+		}
+	}
 	let performance: 'balanced' | 'fast' = 'balanced';
 	let entries: CheckpointTransfer[] = [];
 	$: unfinished = entries.some((item) => item.resumable);
@@ -106,16 +134,29 @@
 				.slice(0, 14)
 		);
 	}
+	async function sourceChanged() {
+		entries = [];
+		snapshotChoices = [];
+		number = 0;
+		// Svelte recalculates source/target after updating the binding.
+		// Do not query the previous source's destination or show its progress.
+		await tick();
+		await refresh();
+		if (mode === 'selected-snapper') await loadSnapshots();
+	}
+
 	async function refresh() {
 		if (!ready || !target) {
 			entries = [];
 			return;
 		}
+		const requestedTarget = target;
 		busy = true;
 		try {
-			entries = await loadCheckpointTransfers(target);
+			const result = await loadCheckpointTransfers(requestedTarget);
+			if (target === requestedTarget) entries = result;
 		} catch (e) {
-			error = String(e);
+			if (target === requestedTarget) error = String(e);
 		} finally {
 			busy = false;
 		}
@@ -180,108 +221,147 @@
 	<article class="panel checkpoint-controls">
 		<h3>
 			{locale === 'fr'
-				? 'Sauvegarde reprenable'
+				? 'Envoyer un snapshot'
 				: locale === 'zh-CN'
-					? '可续传备份'
-					: 'Resumable backup'}
+					? '发送快照'
+					: 'Send a snapshot'}
 		</h3>
-		<p class="summary">
-			{locale === 'fr'
-				? 'Dernier snapshot Snapper · base complète, puis incrémentaux compatibles automatiquement'
-				: locale === 'zh-CN'
-					? '最新 Snapper 快照 · 首次完整备份，之后自动增量'
-					: 'Latest Snapper snapshot · first full, then compatible incrementals automatically'}
-		</p>
-		{#if unavailableSources.length > 0}
-			<p class="source-warning" role="status">
-				{locale === 'fr'
-					? 'Sources sans Snapper non comprises dans cet envoi :'
-					: locale === 'zh-CN'
-						? '此传输不包括未配置 Snapper 的来源：'
-						: 'Sources without Snapper are not included in this transfer:'}
-				{unavailableSources.map((s) => s.path).join(', ')}
-			</p>
-		{/if}
+		<div class="quick-choices">
+			<label>
+				{locale === 'fr' ? 'Source' : locale === 'zh-CN' ? '来源' : 'Source'}
+				<select bind:value={sourcePath} disabled={running} onchange={() => void sourceChanged()}>
+					{#each sources as choice (choice.path)}
+						<option value={choice.path}>{choice.path}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				{locale === 'fr' ? 'Snapshot' : locale === 'zh-CN' ? '快照' : 'Snapshot'}
+				<select
+					bind:value={mode}
+					disabled={running}
+					onchange={() => {
+						if (mode === 'selected-snapper') void loadSnapshots();
+					}}
+				>
+					<option value="latest-snapper">{t[10]}</option>
+					<option value="selected-snapper">{t[11]}</option>
+					<option value="create-snapper">{t[12]}</option>
+				</select>
+			</label>
+			{#if mode === 'selected-snapper'}
+				<label>
+					{t[13]}
+					{#if snapshotLoading}
+						<span
+							>{locale === 'fr' ? 'Chargement…' : locale === 'zh-CN' ? '加载中…' : 'Loading…'}</span
+						>
+					{:else if snapshotChoices.length > 0}
+						<select bind:value={number} disabled={running}>
+							{#each snapshotChoices as choice (choice.number)}
+								<option value={choice.number}
+									>#{choice.number} · {new Date(choice.date).toLocaleDateString(locale)}
+									{choice.description}</option
+								>
+							{/each}
+						</select>
+					{:else}
+						<span role="status"
+							>{snapshotListError ||
+								(locale === 'fr'
+									? 'Aucun snapshot disponible'
+									: locale === 'zh-CN'
+										? '没有可用快照'
+										: 'No snapshot available')}</span
+						>
+					{/if}
+				</label>
+			{/if}
+		</div>
+		<div class="destination-summary">
+			<strong
+				>{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}</strong
+			>
+			<code>{target || '—'}</code>
+		</div>
 		{#if source && !target}
 			<p class="source-warning" role="alert">
 				{locale === 'fr'
-					? 'Destination incorrecte. Choisir un dossier de sauvegarde existant dans Protection → Destination. Aucun transfert ne sera lancé.'
+					? 'Aucune destination valide. Configurez un dossier avant l’envoi.'
 					: locale === 'zh-CN'
-						? '备份目标路径无效。请在保护设置中选择现有的备份目录；不会启动传输。'
-						: 'Invalid backup destination. Choose an existing folder in Protection → Destination. No send will start.'}
+						? '目标文件夹无效，请先配置。'
+						: 'No valid destination. Configure a folder before sending.'}
+			</p>
+		{/if}
+		{#if unavailableSources.length > 0}
+			<p class="source-warning" role="status">
+				{locale === 'fr'
+					? 'Non inclus dans cet envoi :'
+					: locale === 'zh-CN'
+						? '此次未包含：'
+						: 'Not included in this send:'}
+				{unavailableSources.map((s) => s.path).join(', ')}
 			</p>
 		{/if}
 		<details class="advanced">
 			<summary
 				>{locale === 'fr'
-					? 'Options avancées'
+					? 'Réglages avancés'
 					: locale === 'zh-CN'
-						? '高级选项'
-						: 'Advanced options'}</summary
+						? '高级设置'
+						: 'Advanced settings'}</summary
 			>
-			<div class="fields">
-				<label
-					>{t[8]}
-					<select
-						bind:value={sourcePath}
-						disabled={running}
-						onchange={() => {
-							entries = [];
-							void refresh();
-						}}
+			<label class="performance-setting">
+				CPU / I/O
+				<select bind:value={performance} disabled={running}>
+					<option value="balanced"
+						>{locale === 'fr' ? 'Équilibré' : locale === 'zh-CN' ? '均衡' : 'Balanced'}</option
 					>
-						{#each sources as choice (choice.path)}<option value={choice.path}
-								>{choice.path} / {choice.snapper_config}</option
-							>{/each}
-					</select>
-				</label>
-				<label
-					>{t[9]}
-					<select bind:value={mode} disabled={running}>
-						<option value="latest-snapper">{t[10]}</option>
-						<option value="selected-snapper">{t[11]}</option>
-						<option value="create-snapper">{t[12]}</option>
-					</select>
-				</label>
-				{#if mode === 'selected-snapper'}
-					<label>{t[13]}<input type="number" min="1" bind:value={number} /></label>
-				{/if}
-				<label
-					>CPU / I/O
-					<select bind:value={performance}
-						><option value="balanced">Balanced</option><option value="fast">Fast</option></select
+					<option value="fast"
+						>{locale === 'fr' ? 'Rapide' : locale === 'zh-CN' ? '快速' : 'Fast'}</option
 					>
-				</label>
-			</div>
-			<small class="quiet">{target}</small>
+				</select>
+			</label>
 		</details>
 		<div class="actions">
 			<button
 				class="primary compact"
 				onclick={start}
 				disabled={!ready || running || unfinished || (mode === 'selected-snapper' && number < 1)}
-				>{t[2]}</button
+				>{mode === 'latest-snapper'
+					? t[2]
+					: locale === 'fr'
+						? 'Envoyer'
+						: locale === 'zh-CN'
+							? '发送'
+							: 'Send'}</button
 			>
-			<button class="secondary compact" onclick={refresh} disabled={busy}>{t[3]}</button>
 		</div>
 		{#if info}<p class="operation-status" role="status">{info}</p>{/if}
 		{#if error}<p class="error-text" role="alert">{error}</p>{/if}
-		{#if entries.length === 0 && !busy}
-			<p class="quiet">{t[15]}</p>
-		{/if}
+
 		{#each visibleEntries as item (item.transfer_id)}
-			<div class="entry">
+			<div class="entry" aria-live="polite">
 				<div class="identity">
-					<strong>{checkpointStateLabel(item.state, locale)}</strong>
-					<small>{item.name ?? item.transfer_id}</small>
-					<strong
-						>{formatBytesBinary(item.committed_raw_bytes)} · {item.checkpoint_count} checkpoints</strong
-					>
+					<strong class="transfer-state">{checkpointStateLabel(item.state, locale)}</strong>
+					<span class="transfer-bytes">
+						{formatBytesBinary(item.committed_raw_bytes)}
+						{locale === 'fr' ? 'envoyés' : locale === 'zh-CN' ? '已发送' : 'sent'}
+					</span>
+					{#if ['preparing', 'uploading', 'replaying', 'pause_requested', 'finalizing'].includes(item.state)}
+						<progress
+							aria-label={locale === 'fr'
+								? 'Transfert en cours, taille totale inconnue'
+								: locale === 'zh-CN'
+									? '传输进行中，总量未知'
+									: 'Transfer in progress, total size unknown'}
+						></progress>
+					{/if}
 				</div>
 				<div class="actions">
 					{#if item.resumable && item.name}
 						<button
-							class="secondary compact"
+							class="primary compact"
 							disabled={running}
 							onclick={() => command('resume', item)}>{t[4]}</button
 						>
@@ -291,11 +371,16 @@
 						<button class="secondary compact" onclick={() => command('stop', item)}>{t[6]}</button>
 					{/if}
 					{#if item.resumable && item.name}
-						<button
-							class="secondary compact"
-							disabled={running}
-							onclick={() => command('discard', item)}>{t[7]}</button
-						>
+						<details class="advanced">
+							<summary
+								>{locale === 'fr' ? 'Abandonner' : locale === 'zh-CN' ? '丢弃' : 'Discard'}</summary
+							>
+							<button
+								class="secondary compact"
+								disabled={running}
+								onclick={() => command('discard', item)}>{t[7]}</button
+							>
+						</details>
 					{/if}
 				</div>
 			</div>
@@ -337,12 +422,6 @@
 		font-size: 23px;
 		font-weight: 700;
 	}
-	.summary {
-		font-size: 14px;
-		color: var(--text);
-		margin: 0;
-		line-height: 1.5;
-	}
 	.source-warning {
 		font-size: 13px;
 		line-height: 1.5;
@@ -358,34 +437,50 @@
 		font-size: 13px;
 		font-weight: 650;
 	}
-	.advanced .fields {
-		padding-top: 12px;
-	}
-	.quiet {
-		font-size: 12px;
-		color: var(--muted);
-		margin: 0;
-		overflow-wrap: anywhere;
-	}
-	.fields {
+	.quick-choices {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 10px;
+		gap: 16px;
 	}
-	.fields label {
+	.quick-choices label,
+	.performance-setting {
 		display: grid;
-		gap: 4px;
-		color: var(--muted);
-		font-size: 10px;
-		min-width: 125px;
+		gap: 7px;
+		font-size: 14px;
+		font-weight: 650;
+		flex: 1 1 180px;
 	}
-	.fields input,
-	.fields select {
+	.quick-choices select,
+	.performance-setting select {
+		padding: 11px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
 		color: var(--text);
 		background: var(--surface);
-		border: 1px solid var(--border);
-		padding: 7px;
-		border-radius: 6px;
+		font-size: 15px;
+	}
+	.destination-summary {
+		display: grid;
+		gap: 5px;
+		font-size: 14px;
+	}
+	.destination-summary code {
+		font-size: 14px;
+		overflow-wrap: anywhere;
+	}
+	.advanced .performance-setting {
+		padding-top: 12px;
+	}
+	.transfer-state {
+		font-size: 17px !important;
+	}
+	.transfer-bytes {
+		font-size: 16px;
+		font-variant-numeric: tabular-nums;
+	}
+	progress {
+		width: min(440px, 100%);
+		height: 13px;
 	}
 	.actions {
 		display: flex;
@@ -409,9 +504,5 @@
 	}
 	.identity strong {
 		font-size: 11px;
-	}
-	.identity small {
-		font-size: 9px;
-		color: var(--muted);
 	}
 </style>

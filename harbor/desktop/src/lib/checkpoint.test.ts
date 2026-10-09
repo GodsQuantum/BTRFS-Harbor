@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	checkpointStateLabel,
+	parseHostSnapperChoices,
 	checkpointStatusIsVerified,
 	type CheckpointTransfer
 } from './checkpoint';
@@ -30,5 +31,29 @@ describe('Checkpoint timeline', () => {
 	it('has translations for paused, replay and interruption', () => {
 		expect(checkpointStateLabel('replaying', 'zh-CN')).toContain('重新');
 		expect(checkpointStateLabel('failed_resumable', 'fr')).toContain('reprenable');
+	});
+});
+
+describe('Native host Snapper snapshot picker', () => {
+	const json = JSON.stringify({
+		configs: [
+			{
+				name: 'root',
+				snapshots: [
+					{ number: 41, date: '2026-10-09T09:00:00Z', type: 'post', description: 'After update' },
+					{ number: 40, date: '2026-10-09T08:00:00Z', type: 'pre', description: 'Before update' },
+					{ number: 0, date: '2026-10-09T07:00:00Z', type: 'single', description: 'Current' },
+					{ number: -1, date: '2026-10-09T07:00:00Z', type: 'single', description: 'Invalid' }
+				]
+			}
+		]
+	});
+	it('uses the real host list and sorts latest-first without inventing snapshots', () => {
+		expect(parseHostSnapperChoices(json, 'root').map((s) => s.number)).toEqual([41, 40]);
+		expect(parseHostSnapperChoices(json, 'home')).toEqual([]);
+	});
+	it('rejects malformed responses instead of displaying fake numbers', () => {
+		expect(() => parseHostSnapperChoices('{}', 'root')).toThrow();
+		expect(() => parseHostSnapperChoices('{"configs":{}}', 'root')).toThrow();
 	});
 });

@@ -64,21 +64,42 @@ def _filename(value: str) -> str:
 
 
 def _rename_noreplace(directory_fd: int, old: str, new: str) -> None:
-    """Linux atomic rename without clobber; unsupported targets fail closed."""
-    if _RENAMEAT2 is None:
-        raise OSError(errno.ENOSYS, "atomic no-replace rename not available")
-    rc = _RENAMEAT2(
-        directory_fd,
-        os.fsencode(old),
-        directory_fd,
-        os.fsencode(new),
-        _RENAME_NOREPLACE,
-    )
-    if rc != 0:
+    """Publish an existing regular file without replacing another directory entry.
+
+    NFSv4 on real NAS exports may return EINVAL for renameat2(RENAME_NOREPLACE).
+    On that filesystem, an in-directory linkat is also atomic and no-clobber,
+    but works for a regular file. After linking, unlink the old entry. A crash
+    between the two calls can leave both filenames, *never* an overwritten
+    final archive. Callers fsync the directory after publication.
+    """
+    if _RENAMEAT2 is not None:
+        rc = _RENAMEAT2(
+            directory_fd,
+            os.fsencode(old),
+            directory_fd,
+            os.fsencode(new),
+            _RENAME_NOREPLACE,
+        )
+        if rc == 0:
+            return
         err = ctypes.get_errno()
         if err == errno.EEXIST:
             raise FileExistsError(err, os.strerror(err), new)
-        raise OSError(err, os.strerror(err), new)
+        if err not in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP):
+            raise OSError(err, os.strerror(err), new)
+    # Only files can be published with this fallback. It never follows a
+    # symlink at either end, never crosses directories or clobbers a target.
+    src = os.stat(old, dir_fd=directory_fd, follow_symlinks=False)
+    if not stat.S_ISREG(src.st_mode):
+        raise ValueError("atomic NFS fallback only accepts regular source files")
+    os.link(
+        old,
+        new,
+        src_dir_fd=directory_fd,
+        dst_dir_fd=directory_fd,
+        follow_symlinks=False,
+    )
+    os.unlink(old, dir_fd=directory_fd)
 
 
 def _dir_open(root: Path) -> int:

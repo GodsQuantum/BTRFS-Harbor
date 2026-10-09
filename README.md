@@ -32,6 +32,10 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.3 — NFS compatibility hotfix
+
+Fixes **NFSv4 backups that did not start after clicking Send latest**: certain Linux NFS exports reject atomic renameat2 NOREPLACE with EINVAL. Harbor now uses an **atomic, no-overwrite hard-link fallback** on the same directory when unsupported, with no mount changes. On failures before any durable part or journal exists, Snapper source/parent cleanup leases are safely released after verifying the original mount identity. The interface still reports start errors and a real send/restore acceptance test remains necessary.
+
 ## v0.2.6-rc.2 — resumable Btrfs backup preview
 
 **One primary manual backup control** on the Overview: choose the latest stable Snapper snapshot, start, pause, stop or resume. The competing legacy manual button was removed. **The initial send is a full standalone base**; subsequent sends automatically use a verified, present base and matching pinned read-only local parent, otherwise safely fall back to a full send. Source and parent Snapper cleanup pins are retained until the transaction is complete. Checkpoint status remains visible after reopening the application because it is read from durable manifests; detailed schedules, volumes and diagnostics are collapsed. Missing Snapper sources are explicitly listed as **not included**, never falsely displayed as protected.

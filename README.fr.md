@@ -32,6 +32,10 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.3 — correctif de compatibilité NFS
+
+Corrige **le bouton « Envoyer le dernier » qui ne démarrait pas sur certains partages NFSv4** : ceux-ci refusent renameat2 NOREPLACE (EINVAL). Harbor utilise désormais une **solution de repli atomique par lien physique, sans écrasement**, dans le même dossier et sans modifier le montage. Si aucun partiel ni journal n’a été créé, les protections Snapper sont libérées après vérification de l’identité du montage. Les tests Btrfs/NFS réels complets restent à effectuer.
+
 ## v0.2.6-rc.2 — préversion de sauvegarde Btrfs reprenable
 
 **Une seule commande manuelle principale** dans l’Overview : envoyer le dernier snapshot Snapper stable, mettre en pause, arrêter et reprendre. Le bouton manuel historique concurrent a été supprimé. **Le premier envoi est une sauvegarde complète autonome** ; ensuite Harbor choisit automatiquement l’incrémental si une base distante fiable et son snapshot parent local protégé existent, sinon il effectue un nouveau complet. Les deux snapshots source et parent sont protégés contre le nettoyage Snapper jusqu’à la fin. La progression est relue depuis les manifests après réouverture de l’application ; les diagnostics et réglages techniques sont repliés par défaut. Les sources sans Snapper sont explicitement indiquées comme **non incluses**, jamais présentées à tort comme sauvegardées.

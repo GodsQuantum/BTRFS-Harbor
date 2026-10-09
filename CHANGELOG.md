@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.3] — NFSv4 checkpoint compatibility
+
+- Fix NFSv4 EINVAL from renameat2 with RENAME_NOREPLACE: atomic same-directory hard-link fallback for regular files, retaining no-overwrite and directory fsync durability.
+- Release native Snapper cleanup pins on a failed *pre-start* only after revalidating the target mount and proving no committed partial, manifest or final archive exists. Preserve pins when any transaction artifact or mount uncertainty remains.
+- Verified on a real NFSv4 export: renameat2 with NOREPLACE returned EINVAL; hard-link succeeded and refused overwriting an existing file.
+- Recovery of a pre-start failure restores native Snapper cleanup safely after proving that no transaction exists; no mount changes or new services are needed.
+- Fix desktop checkpoint progress refreshing during an active send and keep real errors visible instead of clearing them immediately during automatic refresh.
+
 ## [0.2.6-rc.2] — unified manual Resume preview
 
 - The Overview now exposes one main manual backup action and durable checkpoint status. Removed competing classic manual buttons from Overview and ProtectionEditor, collapsed secondary technical overview panels and enlarged the primary card.

@@ -360,6 +360,45 @@ def _release_snapper_pins(state: Path, manifest: ResumeManifest) -> None:
         pins.release(config, parent_number, parent_uuid, manifest.transfer_id)
 
 
+def _release_if_never_started(
+    *,
+    root: Path,
+    name: str,
+    manifest: ResumeManifest,
+    state: Path,
+    allow_local: bool,
+) -> bool:
+    """Undo native Snapper pins only when NO durable transfer entry exists.
+
+    Filesystem failure, lost NFS mount, manifest, partial, or final stream:
+    fail closed, preserve leases for later reconciliation. This is a cleanup
+    of pre-send failures, never a way to discard an interrupted backup.
+    """
+    try:
+        guard, _ = _open_guard(
+            root,
+            allow_local=allow_local,
+            expected=str(manifest.identity["destination_fingerprint"]),
+        )
+        with guard:
+            guard.validate_fd(guard.directory_fd)
+            names = (
+                f"{name}.btrfs.zst.{manifest.transfer_id}.part",
+                f".harbor-resume-{manifest.transfer_id}.json",
+                f"{name}.btrfs.zst",
+            )
+            for item in names:
+                try:
+                    os.stat(item, dir_fd=guard.directory_fd, follow_symlinks=False)
+                    return False
+                except FileNotFoundError:
+                    pass
+            _release_snapper_pins(state, manifest)
+            return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _new_manifest(
     args: argparse.Namespace, stable: str
 ) -> tuple[ResumeManifest, SourceFingerprint, Path | None]:
@@ -769,7 +808,16 @@ def _execute(args: argparse.Namespace) -> int:
                 resume=False,
             )
         except BaseException:
-            # Pin stays in place if an interruption/crash may have left a partial.
+            # No part + no journal + unchanged NFS identity means the worker
+            # failed before it could create a resumable transaction. Unpin
+            # its Snapper source; otherwise leave leases intact for recovery.
+            _release_if_never_started(
+                root=root,
+                name=args.name,
+                manifest=manifest,
+                state=state,
+                allow_local=args.allow_local,
+            )
             raise
     else:
         manifest = read_manifest(_manifest_path(root, args.transfer_id))

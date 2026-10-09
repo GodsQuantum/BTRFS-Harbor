@@ -117,7 +117,6 @@
 		busy = true;
 		try {
 			entries = await loadCheckpointTransfers(target);
-			error = '';
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -127,12 +126,12 @@
 	onMount(() => {
 		void refresh();
 		const interval = setInterval(() => {
-			if (!busy && !running) void refresh();
+			if (!busy) void refresh();
 		}, 12000);
 		return () => clearInterval(interval);
 	});
 	async function start() {
-		if (!ready || !source?.snapper_config || running) return;
+		if (!ready || !source?.snapper_config || running || unfinished) return;
 		running = true;
 		error = '';
 		info = t[14];
@@ -259,7 +258,7 @@
 			>
 			<button class="secondary compact" onclick={refresh} disabled={busy}>{t[3]}</button>
 		</div>
-		{#if info}<p class="quiet">{info}</p>{/if}
+		{#if info}<p class="operation-status" role="status">{info}</p>{/if}
 		{#if error}<p class="error-text" role="alert">{error}</p>{/if}
 		{#if entries.length === 0 && !busy}
 			<p class="quiet">{t[15]}</p>
@@ -316,6 +315,12 @@
 {/if}
 
 <style>
+	.operation-status {
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.5;
+		margin: 0;
+	}
 	.checkpoint-controls {
 		display: grid;
 		gap: 18px;

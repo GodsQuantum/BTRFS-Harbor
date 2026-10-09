@@ -2513,3 +2513,37 @@ def test_btrfs_scan_errors_cannot_masquerade_as_complete(monkeypatch):
     assert "injected Btrfs EIO" in partial.error_message
     assert "/home" in partial.error_message
     assert any(sub.mount_point == "/home" for sub in partial.subvolumes)
+
+
+def test_distinct_btrfs_filesystems_may_reuse_subvol_id(monkeypatch):
+    """IDs 256 on separate devices must never be correlated to the same mount."""
+    from btrfs_backup_ng.detection.scanner import scan_system
+
+    mounts = [
+        BtrfsMountInfo(
+            device="/dev/root", mount_point="/", subvol_path="/@", subvol_id=256
+        ),
+        BtrfsMountInfo(
+            device="/dev/data", mount_point="/srv", subvol_path="/@", subvol_id=256
+        ),
+    ]
+    monkeypatch.setattr(
+        "btrfs_backup_ng.detection.scanner.parse_proc_mounts",
+        lambda: mounts,
+    )
+
+    def mocked_listing(path):
+        assert path in ("/", "/srv")
+        return [DetectedSubvolume(id=256, path="/@")]
+
+    monkeypatch.setattr(
+        "btrfs_backup_ng.detection.scanner.list_subvolumes",
+        mocked_listing,
+    )
+    report = scan_system()
+    assert len(report.subvolumes) == 2
+    assert {(sv.device, sv.mount_point, sv.id) for sv in report.subvolumes} == {
+        ("/dev/root", "/", 256),
+        ("/dev/data", "/srv", 256),
+    }
+    assert not report.is_partial

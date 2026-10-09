@@ -303,42 +303,39 @@ def correlate_mounts_and_subvolumes(
     Returns:
         Updated list of subvolumes with mount info populated.
     """
-    # Build lookup by subvol_id
-    mount_by_id: dict[int, BtrfsMountInfo] = {}
-    for mount in mounts:
-        mount_by_id[mount.subvol_id] = mount
+    # Subvolume IDs are unique per filesystem, not globally per computer.
+    mount_by_id = {(m.device, m.subvol_id): m for m in mounts}
+    mount_by_path = {
+        (m.device, "/" + m.subvol_path.lstrip("/")): m for m in mounts if m.subvol_path
+    }
 
-    # Also try to match by path
-    mount_by_path: dict[str, BtrfsMountInfo] = {}
-    for mount in mounts:
-        if mount.subvol_path:
-            # Normalize path
-            normalized = mount.subvol_path
-            if not normalized.startswith("/"):
-                normalized = "/" + normalized
-            mount_by_path[normalized] = mount
-
-    # Track which subvol IDs we've seen
-    seen_ids: set[int] = {subvol.id for subvol in subvolumes}
-
-    # Update subvolumes
     for subvol in subvolumes:
-        # Try by ID first
-        if subvol.id in mount_by_id:
-            mount = mount_by_id[subvol.id]
+        mount = None
+        if subvol.device is not None:
+            mount = mount_by_id.get((subvol.device, subvol.id))
+            if mount is None:
+                mount = mount_by_path.get((subvol.device, subvol.path))
+        else:
+            # Legacy callers may not supply a device. Only accept a unique
+            # match instead of mixing /home from a second filesystem.
+            by_id = [m for m in mounts if m.subvol_id == subvol.id]
+            by_path = [
+                m for m in mounts if "/" + m.subvol_path.lstrip("/") == subvol.path
+            ]
+            candidates = by_id if len(by_id) == 1 else by_path
+            if len(candidates) == 1:
+                mount = candidates[0]
+        if mount is not None:
             subvol.mount_point = mount.mount_point
             subvol.device = mount.device
-        # Fall back to path matching
-        elif subvol.path in mount_by_path:
-            mount = mount_by_path[subvol.path]
-            subvol.mount_point = mount.mount_point
-            subvol.device = mount.device
+
+    seen_ids = {(subvol.device, subvol.id) for subvol in subvolumes}
 
     # Add mounted subvolumes that weren't in the btrfs subvolume list
     # This is important for the top-level subvolume (ID 5) which is typically
     # not shown by 'btrfs subvolume list' but may be mounted as /
     for mount in mounts:
-        if mount.subvol_id not in seen_ids:
+        if (mount.device, mount.subvol_id) not in seen_ids:
             # Determine path from mount info
             path = mount.subvol_path or mount.mount_point
             if not path.startswith("/"):
@@ -353,7 +350,7 @@ def correlate_mounts_and_subvolumes(
                     top_level=0,  # Top-level subvolumes have no parent
                 )
             )
-            seen_ids.add(mount.subvol_id)
+            seen_ids.add((mount.device, mount.subvol_id))
             logger.debug(
                 "Added mounted subvolume not in list: id=%d path=%s mount=%s",
                 mount.subvol_id,
@@ -362,8 +359,9 @@ def correlate_mounts_and_subvolumes(
             )
 
     # Set device for unmounted subvolumes from any mount on same filesystem
-    if mounts:
-        default_device = mounts[0].device
+    devices = {mount.device for mount in mounts}
+    if len(devices) == 1:
+        default_device = next(iter(devices))
         for subvol in subvolumes:
             if subvol.device is None:
                 subvol.device = default_device
@@ -418,6 +416,8 @@ def scan_system(
     for mount in unique_mounts:
         try:
             subvols = list_subvolumes(mount.mount_point)
+            for subvol in subvols:
+                subvol.device = mount.device
             all_subvolumes.extend(subvols)
             logger.info(
                 "Found %d subvolume(s) on %s",

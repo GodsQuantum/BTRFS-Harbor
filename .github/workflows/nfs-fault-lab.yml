@@ -3,6 +3,14 @@ name: NFS Interruption and Resume Acceptance
 
 on:
   workflow_dispatch:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - ".github/workflows/nfs-fault-lab.yml"
+      - "tests/integration/tier3/test_nfs_reconnect_real.py"
+      - "src/btrfs_backup_ng/core/**"
+      - "src/btrfs_backup_ng/endpoint/**"
+      - "src/btrfs_backup_ng/cli/checkpoint_v2_cmd.py"
 
 permissions:
   contents: read

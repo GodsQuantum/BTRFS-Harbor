@@ -32,7 +32,7 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
-## Préversion non publiée — résistance aux coupures
+## v0.2.6-rc.8 — préversion supervisée et reprise Btrfs/NFS
 
 - Les chaînes incrémentales v2 sont limitées à **7 niveaux par défaut** : Harbor crée alors une nouvelle base complète autonome (réglable de 1 à 256). Le plan de rétention est consultable sans suppression ; la purge automatique reste désactivée.
 

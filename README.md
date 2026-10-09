@@ -32,7 +32,7 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
-## Unreleased preview — crash and mount-loss hardening
+## v0.2.6-rc.8 — crash-safe Btrfs/NFS supervised preview
 
 - Automatic v2 incremental chains now have a maximum of **7 links by default**; the next save is a full independently restorable anchor (configurable 1–256). A read-only retention plan is available; automatic deletion is not enabled.
 

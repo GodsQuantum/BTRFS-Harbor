@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-harbor-desktop"
-version = "0.2.6-rc.6"
+version = "0.2.6-rc.7"
 dependencies = [
  "harbor-agent",
  "harbor-core",

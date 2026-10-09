@@ -32,7 +32,7 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
-## Après rc.6 — préversion des ensembles de volumes Btrfs (non publiée)
+## v0.2.6-rc.7 — préversion supervisée des ensembles Btrfs
 
 L'interface native propose **Sauvegarder tous les volumes Btrfs** :
 un catalogue durable par ensemble, des sauvegardes complètes puis
@@ -44,8 +44,7 @@ L'envoi et la restauration réels de sous-volumes imbriqués root/home sont test
 **Limites explicites :** partitions EFI et non-Btrfs, volumes déconnectés ou non
 montés, SSH et anciennes tâches planifiées non couverts. La reconstruction
 amorçable, une vraie coupure/reprise NFS et le systray graphique restent à
-valider. Ne pas en faire l'unique sauvegarde. Ceci n'est pas encore une
-nouvelle release ; la stable v0.2.5 ne change pas.
+valider. Ne pas en faire l'unique sauvegarde. Il s'agit d'une préversion supervisée ; la stable v0.2.5 reste inchangée.
 
 ## v0.2.6-rc.6 — restauration des archives historiques
 
@@ -98,7 +97,7 @@ Corrige **le bouton « Envoyer le dernier » qui ne démarrait pas sur certains 
 - **English / Français / 简体中文** — UI et documentation complètes.
 - **Aucun runtime Docker** — Harbor s’installe comme une application Linux native.
 
-La candidate en cours **v0.2.6-rc.5** (publication après validation) sait utiliser Snapper ou les snapshots Btrfs natifs de Harbor sur une racine de sous-volume vérifiée. **Les sous-volumes multiples, la reprise après vraie coupure NFS, la restauration système complète et la compatibilité de toutes les distributions ne sont pas encore qualifiés.**
+La candidate supervisée **v0.2.6-rc.7** (artefacts à vérifier) sait utiliser Snapper ou les snapshots Btrfs natifs de Harbor sur une racine de sous-volume vérifiée. **Les sous-volumes multiples, la reprise après vraie coupure NFS, la restauration système complète et la compatibilité de toutes les distributions ne sont pas encore qualifiés.**
 
 ## 📦 Télécharger et installer
 

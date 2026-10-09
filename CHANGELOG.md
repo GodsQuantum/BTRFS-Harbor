@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.7] — supervised multi-subvolume backup/recovery preview
+
+- Portable Btrfs-only machine-set catalog for mounted persistent subvolumes;
+  one existing checkpoint-v2 transaction per volume, full then verified
+  incremental parent chains, resume and destination-only staged recovery.
+- Native Backup/Restore buttons to start/resume sets and import from a
+  destination directory without the old Harbor profile.
+- Honest inventory of excluded EFI and non-Btrfs data. Does not claim
+  bootable disk replacement. Real NFS loss, SSH/scheduler v2 convergence
+  and cross-distro functional acceptance remain outstanding.
+- Fail-closed mount-pinned machine-set lock. Native read-only list avoids
+  polling-time authorization prompts and escalates only on protected records.
+- GitHub Tier2 actual Btrfs source/recovery tests; official registry images
+  replace unauthenticated rate-limited Docker Hub CI pulls.
+
 ## [0.2.6-rc.6] — historical raw archive recovery compatibility
 
 - Restore from destination now permits the same secure archive basenames accepted by the engine (e.g. root.20261009T120000), preserving original user snapshots instead of rejecting punctuation.

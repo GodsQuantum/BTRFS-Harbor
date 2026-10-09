@@ -71,7 +71,7 @@ Corrige **le bouton « Envoyer le dernier » qui ne démarrait pas sur certains 
 - **English / Français / 简体中文** — UI et documentation complètes.
 - **Aucun runtime Docker** — Harbor s’installe comme une application Linux native.
 
-La préversion expérimentale **v0.2.6-rc.1** se trouve dans les [préreleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1). Son panneau à checkpoints est indépendant du bouton de sauvegarde classique.
+La préversion à tester **v0.2.6-rc.4** est disponible dans les [préreleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.4). La sauvegarde reprenable requiert actuellement une source configurée dans Snapper. La couverture de toutes les dispositions Btrfs et distributions n’est pas encore qualifiée.
 
 ## 📦 Télécharger et installer
 
@@ -106,6 +106,9 @@ Harbor raisonne par **capacités disponibles**, pas par nom de distribution.
 - **Sauvegarde manuelle + récupération :** Linux + outils Btrfs et capacités nécessaires au workflow choisi. L’AppImage portable ne nécessite aucune installation Harbor.
 - **Planification automatique persistante :** nécessite en plus systemd. Sur un Linux Btrfs sans systemd, sauvegarde et récupération manuelles restent disponibles ; Harbor indique simplement que la planification automatique n’est pas disponible.
 - **Familles Tier A :** Arch/CachyOS, Debian/Ubuntu, Fedora et openSUSE servent de familles glibc/systemd/Btrfs représentatives.
+- **Validation de compatibilité :** les tests CI des quatre familles vérifient seulement la présence du gestionnaire de paquets et la syntaxe de l’installateur. Ils ne prouvent **pas** les envois complets/incrémentaux, la reprise ni la restauration réels. L’AppImage publiée cible actuellement Linux x86_64/glibc, pas toutes les architectures ni musl ; ces plateformes doivent être qualifiées séparément.
+
+Voir [les validations de portabilité requises](docs/PORTABILITY_AND_RELEASE_GATES.md) avant de déclarer une distribution totalement prise en charge.
 - **Autres distributions glibc/systemd :** support selon les capacités détectées, sans allowlist.
 - **Installation :** le `.run` universel détecte pacman, apt, dnf ou zypper. Les paquets DEB/RPM/Arch restent des canaux natifs optionnels.
 

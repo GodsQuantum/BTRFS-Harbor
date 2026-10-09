@@ -71,7 +71,7 @@ Fixes **NFSv4 backups that did not start after clicking Send latest**: certain L
 - **English / Français / 简体中文** — first-class UI and documentation.
 - **No Docker runtime** — Harbor installs as a native Linux desktop application.
 
-The latest experimental preview is **v0.2.6-rc.1**, available under [prereleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1). Its checkpoint panel is distinct from the stable Back up now workflow.
+The latest supervised preview is **v0.2.6-rc.4**, available under [prereleases](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.4). Portable Btrfs send with Resume currently requires a Snapper-configured source; this preview does **not** yet provide complete coverage for all Btrfs layouts or distributions.
 
 ## 📦 Download & install
 
@@ -106,6 +106,9 @@ Harbor is capability-driven rather than tied to a distro name.
 - **Manual backup + recovery:** requires Linux, Btrfs userspace tools and the capabilities used by the selected workflow. The Portable AppImage does not require Harbor to be installed.
 - **Persistent automatic scheduling:** additionally requires systemd. A non-systemd Btrfs system remains usable for manual backup/recovery; Harbor simply reports automatic scheduling as unavailable.
 - **Tier-A release families:** Arch/CachyOS, Debian/Ubuntu, Fedora and openSUSE are exercised as representative glibc/systemd/Btrfs families.
+- **Compatibility qualification:** current four-family CI only checks package-manager availability and installer shell syntax. It does **not** prove that full/incremental send, interrupted Resume or receive/restore work on each distribution. The current official binary is Linux x86_64/glibc, not universal across architectures or musl distributions; real support must be validated on each supported platform.
+
+See [distribution portability and release gates](docs/PORTABILITY_AND_RELEASE_GATES.md) for full Btrfs send/restore acceptance criteria.
 - **Other glibc/systemd distributions:** supported by detected capabilities rather than an allowlist.
 - **Package/install channels:** the universal `.run` detects pacman, apt, dnf or zypper. Native DEB/RPM/Arch recipes remain available where appropriate.
 

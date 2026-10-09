@@ -71,7 +71,7 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 - **English / Français / 简体中文** — UI 与文档均支持三种语言。
 - **不需要 Docker runtime** — Harbor 是原生 Linux 桌面应用。
 
-实验性预发布版 **v0.2.6-rc.1** 在[预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.1)。其检查点面板与稳定版“立即备份”功能相互独立。
+最新的监督测试预发布版为 **v0.2.6-rc.4**，参见[预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.4)。目前可续传备份仍需要已配置 Snapper 的来源，并未完成所有 Btrfs 布局和发行版的完整验收。
 
 ## 📦 下载与安装
 
@@ -106,6 +106,9 @@ Harbor 根据**可用能力**工作，而不是绑定某个发行版名称。
 - **手动备份 + 恢复：**需要 Linux、Btrfs 用户空间工具以及所选工作流需要的能力。Portable AppImage 不要求安装 Harbor。
 - **持久自动计划：**另外需要 systemd。没有 systemd 的 Btrfs Linux 仍可使用手动备份/恢复；Harbor 只会把自动计划标记为不可用。
 - **Tier-A 代表系列：**Arch/CachyOS、Debian/Ubuntu、Fedora 和 openSUSE。
+- **兼容性验证：**四个发行版系列的现有 CI 测试仅检查包管理器与安装脚本语法，**不等于**已验证真实完整/增量发送、中断续传或恢复。官方 AppImage 目前面向 Linux x86_64/glibc，并不自动兼容其他 CPU 架构或 musl，仍需逐平台验收。
+
+实际 Btrfs 备份和恢复验证要求参见[兼容性与发布门槛](docs/PORTABILITY_AND_RELEASE_GATES.md)。
 - **其他 glibc/systemd 发行版：**按检测到的能力支持，不使用发行版 allowlist。
 - **安装通道：**通用 `.run` 可检测 pacman、apt、dnf 或 zypper；DEB/RPM/Arch 配方作为可选原生通道保留。
 

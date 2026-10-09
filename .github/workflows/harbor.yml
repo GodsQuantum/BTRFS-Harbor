@@ -154,19 +154,32 @@ jobs:
           from pathlib import Path
 
           workspace = tomllib.loads(Path("harbor/Cargo.toml").read_text())
-          version = workspace["workspace"]["package"]["version"]
+          stable_version = workspace["workspace"]["package"]["version"]
           desktop = tomllib.loads(Path("harbor/desktop/src-tauri/Cargo.toml").read_text())
+          desktop_version = desktop["package"]["version"]
           package = json.loads(Path("harbor/desktop/package.json").read_text())
           tauri = json.loads(Path("harbor/desktop/src-tauri/tauri.conf.json").read_text())
           pkgbuild = Path("packaging/arch/PKGBUILD").read_text()
-          assert desktop["package"]["version"] == version
-          assert package["version"] == version
-          assert tauri["version"] == version
-          assert re.search(rf"^pkgver={re.escape(version)}\.r0\.g0000000$", pkgbuild, re.M)
+          # The mature Rust helper and Arch stable package retain the last
+          # stable version while desktop prereleases move independently.
+          assert package["version"] == desktop_version, "npm/Tauri version mismatch"
+          assert tauri["version"] == desktop_version, "Tauri bundle version mismatch"
+          assert re.search(
+              rf"^pkgver={re.escape(stable_version)}\.r0\.g0000000$",
+              pkgbuild, re.M
+          ), "Arch stable package version mismatch"
           for readme in ("README.md", "README.fr.md", "README.zh-CN.md"):
               text = Path(readme).read_text()
-              assert f"/v{version}/BTRFS-Harbor-{version}-linux-x86_64.run" in text
-          print("release version contract:", version)
+              assert (
+                  f"/v{stable_version}/BTRFS-Harbor-{stable_version}-linux-x86_64.run"
+                  in text
+              ), f"{readme}: stale stable download link"
+              if desktop_version != stable_version:
+                  assert "-rc." in desktop_version, "Unexpected mixed package versions"
+                  assert f"## v{desktop_version}" in text, (
+                      f"{readme}: current desktop preview is undocumented"
+                  )
+          print("version contract:", {"stable": stable_version, "desktop": desktop_version})
           PY
           if grep -RInE '\[Reading [0-9]+ lines from' harbor/desktop/src README*.md docs packaging; then
             echo "Tooling transcript text leaked into public sources" >&2

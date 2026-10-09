@@ -134,6 +134,16 @@ export async function openHarborReleasePage(): Promise<void> {
 	await invoke<string>('open_harbor_release_page');
 }
 
+async function loadPortableHarborConfiguration(): Promise<HarborConfig | null> {
+	const raw = await invoke<string | null>('portable_configuration');
+	return raw ? (JSON.parse(raw) as HarborConfig) : null;
+}
+
+export async function savePortableHarborConfiguration(config: HarborConfig): Promise<void> {
+	if (!isTauri()) throw new Error('Portable profile saving requires the native application');
+	await invoke<string>('save_portable_configuration', { configuration: JSON.stringify(config) });
+}
+
 export async function loadHarborConfiguration(): Promise<HarborConfig> {
 	if (!isTauri()) {
 		return createDefaultConfiguration();
@@ -150,7 +160,8 @@ export async function loadHarborConfiguration(): Promise<HarborConfig> {
 			message.includes('No such file') ||
 			integrationUnavailable(message)
 		) {
-			return createDefaultConfiguration();
+			const saved = await loadPortableHarborConfiguration();
+			return saved ?? createDefaultConfiguration();
 		}
 		throw error;
 	}

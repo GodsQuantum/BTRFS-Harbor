@@ -32,6 +32,13 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.4 — persistent portable backup destinations
+
+- Portable AppImage profiles now save and reload without requiring the installed Harbor system agent or an unrelated systemd service. The application writes a validated, atomic, user-only configuration file in its standard per-user application configuration directory.
+- The resumable backup card refuses empty destinations, filesystem root and malformed double-slash paths. It explains what to correct instead of surfacing a misleading filesystem "No such file" error.
+- The primary backup control also appears in portable mode when a Snapper-backed source is configured. This does not add an automatic schedule or claim that non-Snapper sources have been backed up.
+- Earlier interrupted backups and mount points are left untouched; the existing NFSv4 atomic publishing fix remains.
+
 ## v0.2.6-rc.3 — NFS compatibility hotfix
 
 Fixes **NFSv4 backups that did not start after clicking Send latest**: certain Linux NFS exports reject atomic renameat2 NOREPLACE with EINVAL. Harbor now uses an **atomic, no-overwrite hard-link fallback** on the same directory when unsupported, with no mount changes. On failures before any durable part or journal exists, Snapper source/parent cleanup leases are safely released after verifying the original mount identity. The interface still reports start errors and a real send/restore acceptance test remains necessary.

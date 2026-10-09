@@ -547,7 +547,7 @@
 					</button>
 				</article>
 
-				{#if dashboard.source === 'live' && harborConfig && activeProfile}
+				{#if harborConfig && activeProfile && activeProfileHasSnapper}
 					<div style="grid-column: 1 / -1; min-width: 0">
 						<CheckpointControls
 							profile={activeProfile}

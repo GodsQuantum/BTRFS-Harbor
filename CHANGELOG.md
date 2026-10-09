@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.4] — portable profile persistence and invalid destination guard
+
+- Fix portable AppImages losing their backup destination after restart. Load and atomically save the validated manual backup configuration in the user-specific application config directory (0600), without installing the system agent, an arbitrary service or timer.
+- Refuse an empty, filesystem-root or malformed double-slash checkpoint target before invoking any Btrfs sender; display an actionable configuration error instead of a raw ENOENT.
+- Make the resumable backup card visible in portable Overview once a Snapper source is configured; keep non-Snapper sources explicitly excluded.
+- Preserve prior NFS atomic/no-clobber workaround and existing partial/archived data.
+
 ## [0.2.6-rc.3] — NFSv4 checkpoint compatibility
 
 - Fix NFSv4 EINVAL from renameat2 with RENAME_NOREPLACE: atomic same-directory hard-link fallback for regular files, retaining no-overwrite and directory fsync durability.

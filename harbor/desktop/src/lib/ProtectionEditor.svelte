@@ -8,10 +8,10 @@
 	import LifeBuoy from 'lucide-svelte/icons/life-buoy';
 	import {
 		applyHarborConfiguration,
+		savePortableHarborConfiguration,
 		chooseDestinationDirectory,
 		discoverBtrfsSources,
 		inspectDestinationMount,
-		installFullHarbor,
 		loadInstallationState,
 		type InstallationState
 	} from './agent';
@@ -305,12 +305,17 @@
 			const draft = await validatedDraft();
 			if (!draft) return;
 			if (!installation?.helper_installed) {
-				await installFullHarbor();
-				installation = await loadInstallationState();
-				if (!installation.helper_installed) throw new Error(t('installationFailed'));
+				await savePortableHarborConfiguration(draft.config);
+				message =
+					locale === 'fr'
+						? 'Configuration portable enregistrée. Aucun service ni minuteur installé.'
+						: locale === 'zh-CN'
+							? '便携备份配置已保存，未安装服务或定时任务。'
+							: 'Portable backup configuration saved. No service or timer installed.';
+			} else {
+				await applyHarborConfiguration(draft.config, draft.profile.id);
+				message = t('configurationActivated');
 			}
-			await applyHarborConfiguration(draft.config, draft.profile.id);
-			message = t('configurationActivated');
 			await onApplied();
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
@@ -687,7 +692,11 @@
 					? t('savingConfiguration')
 					: installation?.helper_installed
 						? t('saveActivate')
-						: t('installAutomation')}
+						: locale === 'fr'
+							? 'Enregistrer'
+							: locale === 'zh-CN'
+								? '保存'
+								: 'Save portable profile'}
 			</button>
 		</div>
 	</div>

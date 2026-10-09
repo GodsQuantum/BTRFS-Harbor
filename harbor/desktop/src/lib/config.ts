@@ -352,3 +352,21 @@ export function isSourceEnabled(profile: BackupProfile, path: string): boolean {
 }
 
 export const recommendedSourcePaths = [...recommendedOrder];
+
+/** A draft or root filesystem itself is never a checkpoint destination. */
+export function checkpointTargetPath(destinationPath: string, targetSubdir: string): string | null {
+	const root = destinationPath.trim();
+	const subdir = targetSubdir.trim();
+	if (!root.startsWith('/') || root === '/' || root.startsWith('//') || root.includes('\\0'))
+		return null;
+	if (
+		!subdir ||
+		subdir.startsWith('/') ||
+		subdir === '.' ||
+		subdir === '..' ||
+		subdir.split('/').some((s) => !s || s === '.' || s === '..')
+	)
+		return null;
+	const clean = root.replace(/\/+$/, '');
+	return clean + '/' + subdir;
+}

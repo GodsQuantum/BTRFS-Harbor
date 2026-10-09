@@ -4,7 +4,7 @@
 	import { loadCheckpointTransfers, runCheckpointAction } from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
 	import { formatBytesBinary } from './status';
-	import type { BackupProfile, DestinationSpec } from './config';
+	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
 	import type { Locale } from './i18n';
 
 	export let profile: BackupProfile;
@@ -75,10 +75,7 @@
 	$: unavailableSources = profile.sources.filter((s) => !s.snapper_config);
 	let sourcePath = '';
 	$: source = sources.find((s) => s.path === sourcePath) ?? sources[0];
-	$: target = source
-		? destination.path.replace(/\/+$/, '') +
-			(source.target_subdir ? '/' + source.target_subdir.replace(/^\/+|\/+$/g, '') : '')
-		: '';
+	$: target = source ? (checkpointTargetPath(destination.path, source.target_subdir) ?? '') : '';
 	$: allowLocal = destination.kind !== 'nfs' && destination.kind !== 'smb';
 	$: ready =
 		isTauri() &&
@@ -203,6 +200,15 @@
 						? '此传输不包括未配置 Snapper 的来源：'
 						: 'Sources without Snapper are not included in this transfer:'}
 				{unavailableSources.map((s) => s.path).join(', ')}
+			</p>
+		{/if}
+		{#if source && !target}
+			<p class="source-warning" role="alert">
+				{locale === 'fr'
+					? 'Destination incorrecte. Choisir un dossier de sauvegarde existant dans Protection → Destination. Aucun transfert ne sera lancé.'
+					: locale === 'zh-CN'
+						? '备份目标路径无效。请在保护设置中选择现有的备份目录；不会启动传输。'
+						: 'Invalid backup destination. Choose an existing folder in Protection → Destination. No send will start.'}
 			</p>
 		{/if}
 		<details class="advanced">

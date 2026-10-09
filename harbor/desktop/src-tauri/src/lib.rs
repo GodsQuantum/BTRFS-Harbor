@@ -7,6 +7,8 @@ use harbor_storage::MountTable;
 use serde::Serialize;
 use serde_json::Value;
 use std::ffi::OsStr;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -912,6 +914,106 @@ async fn install_full_package() -> Result<String, String> {
     result
 }
 
+const MAX_PORTABLE_CONFIG_BYTES: u64 = 1024 * 1024;
+
+fn validate_portable_configuration(input: &str) -> Result<harbor_storage::HarborConfig, String> {
+    if input.len() as u64 > MAX_PORTABLE_CONFIG_BYTES {
+        return Err("Portable backup configuration is too large".into());
+    }
+    let config: harbor_storage::HarborConfig =
+        serde_json::from_str(input).map_err(|e| format!("Invalid backup configuration: {e}"))?;
+    config
+        .validate()
+        .map_err(|e| format!("Invalid backup configuration: {e}"))?;
+    for destination in &config.destinations {
+        if destination.path == Path::new("/")
+            || destination.path.to_string_lossy().starts_with("//")
+        {
+            return Err("Choose an actual backup directory, not '/' or '//root'".into());
+        }
+    }
+    Ok(config)
+}
+
+fn portable_config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|p| p.join("portable-profiles.json"))
+        .map_err(|e| format!("Cannot resolve Harbor portable configuration location: {e}"))
+}
+
+fn read_portable_file(path: &Path) -> Result<Option<String>, String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Cannot inspect saved portable configuration: {e}")),
+    };
+    if !metadata.file_type().is_file() || metadata.len() > MAX_PORTABLE_CONFIG_BYTES {
+        return Err("Portable configuration is not a regular file of acceptable size".into());
+    }
+    let input = std::fs::read_to_string(path)
+        .map_err(|e| format!("Cannot read saved portable configuration: {e}"))?;
+    validate_portable_configuration(&input)?;
+    Ok(Some(input))
+}
+
+fn save_portable_file(path: &Path, input: &str) -> Result<(), String> {
+    validate_portable_configuration(input)?;
+    let parent = path.parent().ok_or("Invalid portable configuration path")?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("Cannot create portable configuration directory: {e}"))?;
+    if parent
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err("Refusing symlinked portable configuration directory".into());
+    }
+    if path
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return Err("Refusing symlinked portable configuration file".into());
+    }
+    let temporary = parent.join(format!(".portable-profiles-{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<(), String> {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)
+            .map_err(|e| format!("Cannot create portable configuration draft: {e}"))?;
+        f.write_all(input.as_bytes())
+            .and_then(|()| f.sync_all())
+            .map_err(|e| format!("Cannot write portable configuration: {e}"))?;
+        std::fs::rename(&temporary, path)
+            .map_err(|e| format!("Cannot publish portable configuration: {e}"))?;
+        std::fs::File::open(parent)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| format!("Cannot sync portable configuration directory: {e}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
+    result
+}
+
+#[tauri::command]
+async fn portable_configuration(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let path = portable_config_file(&app)?;
+    read_portable_file(&path)
+}
+
+#[tauri::command]
+async fn save_portable_configuration(
+    app: tauri::AppHandle,
+    configuration: String,
+) -> Result<String, String> {
+    let path = portable_config_file(&app)?;
+    save_portable_file(&path, &configuration)?;
+    Ok("saved".into())
+}
+
 #[tauri::command]
 async fn profiles() -> Result<String, String> {
     call_agent("Profiles", &()).await
@@ -1769,6 +1871,8 @@ pub fn run() {
             install_full_package,
             profiles,
             configuration,
+            portable_configuration,
+            save_portable_configuration,
             profile_runtime,
             discover_sources,
             backup_status,
@@ -1795,6 +1899,56 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_profile_rejects_root_directory_and_round_trips_safely() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("portable-profiles.json");
+        let mut config = serde_json::json!({
+            "engine_policy": "auto",
+            "destinations": [{
+                "id": "22222222-2222-4222-8222-222222222222",
+                "name": "Backup",
+                "kind": "nfs",
+                "path": "/mnt/backup/workstation",
+                "mount_point": "/mnt/backup",
+                "expected_mount_source": "server:/export",
+                "compression": "zstd",
+                "optional": false
+            }],
+            "profiles": [{
+                "id": "11111111-1111-4111-8111-111111111111",
+                "name": "Workstation",
+                "sources": [{
+                    "path": "/", "snapshot_prefix": "root-",
+                    "snapper_config": "root", "target_subdir": "rootfs"
+                }],
+                "destination_ids": ["22222222-2222-4222-8222-222222222222"],
+                "on_calendar": "*-*-* 02:00:00",
+                "retention": {"hourly": 0, "daily": 7, "weekly": 4, "monthly": 3, "yearly": 0},
+                "verify_after_backup": true
+            }]
+        });
+        let json = config.to_string();
+        save_portable_file(&path, &json).unwrap();
+        assert_eq!(read_portable_file(&path).unwrap(), Some(json.clone()));
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        config["destinations"][0]["path"] = serde_json::json!("/");
+        assert!(save_portable_file(&path, &config.to_string()).is_err());
+        assert_eq!(read_portable_file(&path).unwrap(), Some(json));
+    }
+
+    #[test]
+    fn portable_profile_missing_file_is_not_mistaken_for_corrupt_configuration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("no-such-profile.json");
+        assert!(read_portable_file(&path).unwrap().is_none());
+        std::os::unix::fs::symlink("/etc/passwd", &path).unwrap();
+        assert!(read_portable_file(&path).is_err());
+    }
 
     #[test]
     fn engine_provenance_prefers_local_package_ownership_over_path_hints() {

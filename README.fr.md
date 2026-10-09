@@ -32,6 +32,13 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.4 — destinations persistantes en mode portable
+
+- Le mode AppImage mémorise et recharge son profil de sauvegarde **sans installer de service système**. La configuration est validée et écrite atomiquement dans le dossier standard de configuration utilisateur avec des permissions privées.
+- La commande reprenable refuse un dossier non configuré, la racine du système ou un chemin mal formé avec deux barres obliques. Un message explicite remplace l'erreur cryptique de fichier introuvable.
+- Le bouton de sauvegarde apparaît aussi dans l'Overview du mode portable lorsqu'une source Snapper est configurée. Aucun minuteur n'est activé et les sources sans Snapper ne sont pas annoncées comme protégées.
+- Aucun changement de montage et aucune suppression des anciens fichiers partiels.
+
 ## v0.2.6-rc.3 — correctif de compatibilité NFS
 
 Corrige **le bouton « Envoyer le dernier » qui ne démarrait pas sur certains partages NFSv4** : ceux-ci refusent renameat2 NOREPLACE (EINVAL). Harbor utilise désormais une **solution de repli atomique par lien physique, sans écrasement**, dans le même dossier et sans modifier le montage. Si aucun partiel ni journal n’a été créé, les protections Snapper sont libérées après vérification de l’identité du montage. Les tests Btrfs/NFS réels complets restent à effectuer.

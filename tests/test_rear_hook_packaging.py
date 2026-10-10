@@ -28,6 +28,10 @@ def test_static_rear_external_hook_and_no_partition_commands():
         "EXTERNAL_RESTORE='/usr/lib/btrfs-harbor/recovery/harbor-rear-restore'" in text
     )
     assert "EXTERNAL_BACKUP='true'" in text
+    # ReaR 2.9 can omit systemd's dynamically opened shared library from
+    # the rescue initramfs unless the distro's systemd lib directory is copied.
+    assert "rear_systemd_lib_dir" in text
+    assert 'COPY_AS_IS+=( "$rear_systemd_lib_dir" )' in text
     script = HOOK.read_text()
     assert "set-rear-recover" in script
     assert "RESTAURER" in script

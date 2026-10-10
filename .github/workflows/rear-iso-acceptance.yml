@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             rear xorriso grub-efi-amd64-bin isolinux syslinux-utils \
-            btrfs-progs rsync zstd dosfstools
+            btrfs-progs rsync zstd dosfstools qemu-system-x86 ovmf
           rear -V
 
       - name: Build exact Harbor Python engine and isolate rescue config
@@ -43,6 +43,14 @@ jobs:
           sudo install -m 0644 packaging/rear/local.conf \
             /usr/share/btrfs-harbor/rear/local.conf
           test -r /usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
+          # CI-only serial output for headless QEMU/OVMF acceptance. The
+          # default user packaging does not override anyone's console.
+          sudo tee -a /usr/share/btrfs-harbor/rear/local.conf >/dev/null <<'EOF'
+          USE_SERIAL_CONSOLE="yes"
+          GRUB_FORCE_SERIAL="yes"
+          SERIAL_CONSOLE_DEVICE_GRUB="serial --unit=0 --speed=115200"
+          KERNEL_CMDLINE+=" console=ttyS0,115200n8"
+          EOF
 
       - name: Build actual ReaR ISO on disposable GitHub VM
         run: |
@@ -52,8 +60,30 @@ jobs:
           test -n "$iso"
           test "$(sudo stat -c '%s' "$iso")" -gt 65536
           sudo xorriso -indev "$iso" -report_el_torito plain | tee /tmp/harbor-rear-eltorito.txt
+          grep -E 'El Torito boot img.*UEFI' /tmp/harbor-rear-eltorito.txt
           sudo sha256sum "$iso"
-          echo "ISO physically built, NOT a certified fresh-disk restored-OS boot."
+          echo "ISO physically built with UEFI entry; restored OS boot still untested."
+
+      - name: Boot actual rescue ISO under isolated QEMU OVMF firmware
+        timeout-minutes: 5
+        run: |
+          iso="$(sudo find /var/lib/rear/output -type f -name '*.iso' | head -n1)"
+          firmware=/usr/share/OVMF/OVMF_CODE_4M.fd
+          if ! test -f "$firmware"; then firmware=/usr/share/OVMF/OVMF_CODE.fd; fi
+          test -f "$firmware"
+          # NO writable disks or host device passthrough! TCG is used, not
+          # /dev/kvm, so all guest hardware is a private software simulation.
+          set +e
+          timeout --signal=TERM --kill-after=10 170s             qemu-system-x86_64               -machine q35,accel=tcg -cpu max -smp 2 -m 2048               -bios "$firmware"               -cdrom "$iso" -boot order=d               -display none -serial file:/tmp/rear-qemu-serial.log               -monitor none -no-reboot               >/tmp/rear-qemu-console.log 2>&1
+          qemu_code=$?
+          set -e
+          echo "QEMU process exit: $qemu_code (timeout expected for interactive rescue)."
+          tail -90 /tmp/rear-qemu-serial.log || true
+          if ! grep -Eiq '(Linux version|Relax.and.Recover|Welcome to.*Linux|systemd.*starting|Starting kernel)'             /tmp/rear-qemu-serial.log; then
+            echo "UEFI rescue boot was not proven from serial output" >&2
+            exit 1
+          fi
+          echo "Rescue ISO reached a Linux boot stage under emulated OVMF (not a restored-OS boot)."
 
       - name: Preserve diagnostics for unsupported CI boot layouts
         if: always()
@@ -63,4 +93,6 @@ jobs:
           path: |
             /tmp/harbor-rear-real-iso.log
             /tmp/harbor-rear-eltorito.txt
+            /tmp/rear-qemu-serial.log
+            /tmp/rear-qemu-console.log
           if-no-files-found: ignore

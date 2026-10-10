@@ -32,6 +32,15 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 同一块磁盘上的本地快照很有用，但它**不是**异机备份。Harbor 会始终明确区分这两种状态。
 
+## rc.11 之后的 preview 分支（尚未发布，实验性，2026 年 10 月 10 日）
+
+当前开发分支包含**不在已发布 rc.11 安装包中的新功能**。CI 成功并不等于新稳定版已发布。
+
+- **已安装 Ubuntu 24.04 的恢复**：[GitHub CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918085) 安装真实的 Ubuntu/systemd 根文件系统，备份 Btrfs 和 EFI，恢复到另一块新 GPT 虚拟盘，并成功完成两次 OVMF UEFI 启动。尚未认证 Arch/CachyOS、Fedora、Limine、systemd-boot、LUKS、UKI 或 Secure Boot。
+- **受限的实验性 SSH-v2 镜像**：[真实 SSH 故障 CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918056) 验证受限公钥、固定主机密钥、SHA-256 分块、断线和恢复。它只能镜像**本地/NFS 已完成的 checkpoint-v2 备份**，尚不能直接作为首页一键 SSH 目的地。参见 [SSH 安全指南](docs/SSH_V2_OPERATOR_2026-10-10.md)。
+- **事务保留实验室**：[临时 runner 崩溃恢复 CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) 验证持久日志、隔离区、保护外来文件和断点恢复。因应用的并发读写锁及计划清理尚未完全验证，**自动删除仍禁用**。
+- **桌面仍未完成认证**：真实 KDE Wayland/X11 托盘关闭/重新打开、进度、独立 VM 安装包和不同 UEFI 引导程序。务必保留其他独立且验证过的备份。
+
 ## v0.2.6-rc.11（已发布预览版）— ReaR 救援 ISO 与恢复
 
 **2026 年 10 月 10 日已发布：**[v0.2.6-rc.11 正式预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11)，包含经过校验的 AppImage、DEB、RPM、.run 和 SHA256SUMS。稳定的 `main` 仍为 v0.2.5。**尚未认证**无人值守的通用系统恢复。

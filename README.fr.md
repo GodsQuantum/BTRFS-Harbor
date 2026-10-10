@@ -32,6 +32,15 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## Branche preview après rc.11 (NON PUBLIÉE, expérimentale, 10 octobre 2026)
+
+La branche de développement contient de nouvelles modifications **absentes des paquets rc.11 déjà publiés**. Les CI vertes ne constituent pas une nouvelle version stable.
+
+- **Restauration d'un Ubuntu 24.04 installé** : [CI GitHub](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918085) installe un véritable Ubuntu avec systemd, sauvegarde Btrfs et EFI, restaure sur un AUTRE disque GPT et réussit deux boots UEFI sous OVMF. Arch/CachyOS, Fedora, Limine, systemd-boot, LUKS, UKI et Secure Boot ne sont pas encore certifiés.
+- **Miroir SSH-v2 expérimental restreint** : [CI SSH avec pannes réelles](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918056) valide la commande forcée, la clé hôte épinglée, les blocs SHA-256, l'arrêt du serveur et la reprise. La copie s'effectue depuis des **archives checkpoint-v2 déjà complètes en local/NFS** ; ce n'est pas encore une destination SSH directe du bouton principal. Voir le [guide SSH](docs/SSH_V2_OPERATOR_2026-10-10.md).
+- **Laboratoire de rétention transactionnelle** : [CI de crash sur runner jetable](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910), journal durable, quarantaine privée, refus des fichiers étrangers et reprise. **Suppression automatique désactivée** tant que l'exclusion des lectures/écritures concurrentes et la planification ne sont pas qualifiées.
+- **GUI non encore certifiée** : systray KDE Wayland/X11 en vraie session, progression, installation des paquets dans des VM jetables et autres chargeurs UEFI. Conserver une sauvegarde indépendante et vérifiée.
+
 ## v0.2.6-rc.11 (préversion publiée) — ISO de secours et restauration ReaR
 
 **Publiée le 10 octobre 2026 :** [version officielle v0.2.6-rc.11](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11) avec AppImage, DEB, RPM, .run et SHA256SUMS vérifiés. La branche stable `main` reste en v0.2.5. Cette version **ne certifie pas** la restauration universelle sans intervention.

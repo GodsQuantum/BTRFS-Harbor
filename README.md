@@ -32,6 +32,15 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## Preview branch after rc.11 (UNRELEASED, experimental, October 10, 2026)
+
+This source branch contains newer work **not included in the published rc.11 packages**. Do not confuse CI success for a new stable release.
+
+- **Installed Ubuntu 24.04 recovery**: [GitHub CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918085) installs a real Ubuntu 24.04 systemd root, archives Btrfs+EFI, restores on a DIFFERENT GPT disk and successfully performs two OVMF UEFI system boots. This does not certify Arch/CachyOS, Fedora, Limine, systemd-boot, LUKS, UKI or Secure Boot.
+- **Experimental restricted SSH-v2 archive mirror**: [real SSH fault-injection CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38088918056) verifies forced-key access, strict host-key pinning, checksummed chunks, remote server outage and Resume. It mirrors **already completed local/NFS checkpoint-v2 archives** and is not yet a direct one-click SSH destination. See [SSH setup/security](docs/SSH_V2_OPERATOR_2026-10-10.md).
+- **Retention transaction laboratory**: [disposable GC crash CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) exercises a private quarantine/journal, foreign-file refusal and crash recovery. **Automatic deletion remains disabled** because application-level concurrent reader/writer coordination and safe scheduling are not yet qualified.
+- **Desktop qualification still required**: native KDE Wayland/X11 systray close/reopen, real UI progression, package installation in disposable distro VMs, and several bootloaders. Do not replace your independent verified backups with this experimental preview.
+
 ## v0.2.6-rc.11 (published prerelease) — supervised rescue ISO and ReaR recovery
 
 **Published October 10, 2026:** [official v0.2.6-rc.11 release](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11) with verified AppImage, DEB, RPM, .run and SHA256SUMS. Stable `main` remains v0.2.5. This candidate is **not** certified for unattended universal recovery.

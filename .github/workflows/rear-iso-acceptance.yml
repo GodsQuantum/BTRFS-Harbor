@@ -64,6 +64,26 @@ jobs:
           sudo sha256sum "$iso"
           echo "ISO physically built with UEFI entry; restored OS boot still untested."
 
+      - name: Verify the rescue ISO contains the executable Harbor restore engine
+        run: |
+          iso="$(sudo find /var/lib/rear/output -type f -name '*.iso' | head -n1)"
+          test -n "$iso"
+          initrd="$RUNNER_TEMP/harbor-rear-initrd.cgz"
+          owned_iso="$RUNNER_TEMP/harbor-rear-inspect.iso"
+          sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)" "$iso" "$owned_iso"
+          trap 'rm -f "$owned_iso" "$initrd"' EXIT
+          xorriso -osirrox on -indev "$owned_iso" -extract /isolinux/initrd.cgz "$initrd"
+          # A rescue ISO with a bootable kernel but no restore program is
+          # useless during disaster recovery. Fail before release, not at boot.
+          gzip -dc "$initrd" | cpio -it 2>/dev/null >"$RUNNER_TEMP/harbor-rear-initrd-files.txt"
+          grep -Eq '(^|/)usr/lib/btrfs-harbor/recovery/harbor-rear-restore$' \
+            "$RUNNER_TEMP/harbor-rear-initrd-files.txt"
+          grep -Eq '(^|/)usr/lib/btrfs-harbor/btrfs-backup-ng.pyz$' \
+            "$RUNNER_TEMP/harbor-rear-initrd-files.txt"
+          grep -Eq '(^|/)(usr/bin|bin)/python3([.0-9]*)?$' \
+            "$RUNNER_TEMP/harbor-rear-initrd-files.txt"
+          echo "The actual rescue initramfs contains the Harbor recovery hook, engine and Python."
+
       - name: Boot actual rescue ISO under isolated QEMU OVMF firmware
         timeout-minutes: 5
         run: |

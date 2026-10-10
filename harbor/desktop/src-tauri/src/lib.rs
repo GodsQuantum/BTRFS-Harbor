@@ -1428,7 +1428,7 @@ async fn checkpoint_action(
         .ok_or("The bundled v2 engine is unavailable; install the v0.2.6 package")?;
     let long_running = matches!(
         request.action.as_str(),
-        "start" | "resume" | "set-start" | "set-resume" | "set-restore"
+        "start" | "resume" | "set-start" | "set-resume" | "set-restore" | "set-rescue-iso"
     );
     if long_running {
         // Existing backup runtime prevents closing the only controlling UI

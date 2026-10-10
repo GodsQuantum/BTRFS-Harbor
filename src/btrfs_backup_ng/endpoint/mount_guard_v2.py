@@ -208,7 +208,7 @@ class MountGuard:
             or not leaf
             or "/" in leaf
             or leaf in (".", "..")
-            or "\\x00" in leaf
+            or "\x00" in leaf
             or len(os.fsencode(leaf)) > 200
         ):
             raise ValueError("unsafe direct child name")

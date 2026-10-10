@@ -75,3 +75,18 @@ class MountGuardTest(unittest.TestCase):
             first.validate_fd(first.directory_fd)
         with MountGuard(self.root, identity) as second:
             second.validate_fd(second.directory_fd)
+
+
+def test_pinned_leaf_primitive_rejects_nul_and_parent_traversal(tmp_path):
+    import pytest
+
+    from btrfs_backup_ng.endpoint.mount_guard_v2 import (
+        MountGuard,
+        capture_mount_identity,
+    )
+
+    with MountGuard(tmp_path, capture_mount_identity(tmp_path)) as guard:
+        for unsafe in ("a/b", "..", ".", "", "bad\x00name", "x" * 201):
+            with pytest.raises(ValueError):
+                guard.create_below(unsafe)
+    assert not any(tmp_path.iterdir())

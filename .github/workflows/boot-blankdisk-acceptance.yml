@@ -1,0 +1,47 @@
+name: Fresh Disk UEFI Restore Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blank-disk-linux:
+    name: Two UEFI boots after Btrfs + EFI restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install tools only on disposable GitHub runner
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            linux-image-generic initramfs-tools busybox-static \
+            grub-efi-amd64-bin gdisk util-linux btrfs-progs \
+            dosfstools rsync zstd qemu-system-x86 ovmf cpio
+          sudo modprobe loop || true
+          sudo modprobe btrfs || true
+          uv sync --frozen
+          test -x .venv/bin/python
+
+      - name: Create old Btrfs Linux OS, archive EFI, restore to NEW GPT disk and boot twice
+        timeout-minutes: 25
+        run: |
+          # Absolutely no host-disks/devices. The test uses ONLY images
+          # created inside the runner's temporary directory and detaches
+          # every loop device before booting the restored virtual disk.
+          sudo env \
+            GITHUB_ACTIONS=true \
+            PYTHONPATH="$GITHUB_WORKSPACE/src" \
+            PATH="$GITHUB_WORKSPACE/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            "$GITHUB_WORKSPACE/.venv/bin/python" \
+            tests/integration/tier3/test_blank_disk_uefi_real.py
+          echo "Two UEFI Linux boots from restored fresh GPT+Btrfs+FAT32 image validated."

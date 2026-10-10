@@ -243,6 +243,20 @@ def main() -> None:
             assert (src_root / "lib/systemd/systemd").exists()
             assert (src_root / "sbin/init").exists()
             assert "Package: systemd" in (src_root / "var/lib/dpkg/status").read_text()
+            # A real installed Ubuntu needs matching kernel modules. The
+            # synthetic BusyBox acceptance never attempted to mount the ESP
+            # from systemd, so a missing vfat module was invisible. Install
+            # the runner's exact kernel/modules pair into the disposable
+            # guest; no host modules are changed.
+            source_modules = Path("/lib/modules") / kver
+            guest_modules = src_root / "lib/modules" / kver
+            assert source_modules.is_dir()
+            guest_modules.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_modules, guest_modules, symlinks=True)
+            guest_boot = src_root / "boot"
+            guest_boot.mkdir(exist_ok=True)
+            shutil.copy2(image_kernel, guest_boot / f"vmlinuz-{kver}")
+            shutil.copy2(image_initrd, guest_boot / f"initrd.img-{kver}")
             (src_root / "etc/hostname").write_text("harbor-restored-ubuntu\n")
             unit_dir = src_root / "etc/systemd/system"
             unit_dir.mkdir(parents=True, exist_ok=True)

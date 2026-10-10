@@ -37,7 +37,7 @@ A local snapshot on the same disk is useful, but it is **not** an off-host backu
 - **Back up now** remains one-click Btrfs + mounted EFI backup.
 - A separate **Create rescue ISO** action uses installed ReaR 2.9 with a Harbor-provided isolated configuration; no changes to /etc/rear. It builds locally, checks ISO9660 and SHA-256, and atomically publishes to the selected backup destination with a live mount guard.
 - The bundled ReaR rescue hook can stage verified Btrfs volumes and EFI, match the received subvolume UUIDs to ReaR's rebuilt mounts, validate and rewrite fstab UUIDs, then defer bootloader and initramfs finalization to ReaR.
-- **Not yet certified for bare-metal recovery:** actual UEFI boot/reboot of the restored VM, arbitrary encrypted configurations, non-Btrfs data, automatic v2 pruning, and SSH v2 resume remain unsupported. Do not use as your only independent recovery plan.
+- **UEFI blank-disk integration passed (minimal Linux only):** an independently created GPT disk received Harbor's Btrfs + FAT32 EFI archives, had its fstab UUIDs remapped and booted restored Linux /sbin/init twice in QEMU/OVMF ([CI evidence](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)). **Not universal disaster-recovery certification:** CachyOS/Arch, Fedora, full installed Ubuntu, LUKS, UKI, other bootloaders, non-Btrfs data, v2 automatic pruning and checkpointed SSH remain unqualified. Keep an independent backup.
 
 ## v0.2.6-rc.10 — capture separate EFI and boot files
 

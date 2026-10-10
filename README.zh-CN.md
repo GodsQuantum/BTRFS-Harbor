@@ -37,7 +37,7 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 - “立即备份”保留 Btrfs 和已挂载 EFI 分区数据。
 - “创建救援 ISO”使用隔离的 ReaR 2.9 配置，本地构建并使用 SHA-256 校验后安全地保存到选定的备份位置，不修改 /etc/rear。
 - 恢复工具将已校验的 Btrfs/EFI 内容映射到 ReaR 重建的挂载点，并修正 fstab UUID，之后由 ReaR 配置引导加载器。
-- **尚未验证空盘 UEFI 引导**；加密卷、其他非 Btrfs 数据卷、SSH 断点续传和自动保留清理仍未完成。
+- **最小 Linux 的空盘 UEFI 恢复测试通过**：Harbor 在新的 GPT 磁盘上恢复 Btrfs/EFI，重映射 fstab UUID；QEMU/OVMF 两次启动均达到恢复后的 /sbin/init（[CI 记录](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)）。**这并非所有发行版的完整认证**：CachyOS/Arch、Fedora、已安装的 Ubuntu、LUKS、UKI、其他引导程序、非 Btrfs 数据、自动保留清理及 SSH v2 仍需验证。请保留独立备份。
 
 ## v0.2.6-rc.10 — EFI 和引导文件备份
 

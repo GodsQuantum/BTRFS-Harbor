@@ -37,7 +37,7 @@ Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sau
 - **Sauvegarder maintenant** conserve les volumes Btrfs et les partitions EFI montées.
 - Un bouton **Créer ISO de secours** utilise ReaR 2.9 avec une configuration propre à Harbor, sans modifier /etc/rear. ISO construite localement puis copiée sur la destination avec contrôles de montage, ISO9660 et SHA-256.
 - L'outil intégré à l'ISO prépare la restauration Btrfs + EFI, vérifie les UUID et adapte fstab aux nouveaux volumes. ReaR doit ensuite finaliser le chargeur de démarrage et l'initramfs.
-- **Restauration amorçable sur disque vierge NON CERTIFIÉE** : manque encore un vrai démarrage/redémarrage UEFI en VM. Les volumes de données non-Btrfs, les configurations chiffrées, la purge transactionnelle et la reprise SSH v2 ne sont pas finalisés.
+- **Test de démarrage sur disque vierge réussi pour un Linux minimal** : après restauration Btrfs + EFI sur un autre disque GPT et correction des UUID, deux démarrages UEFI QEMU/OVMF ont atteint /sbin/init ([preuve CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)). **Ce n'est pas une certification universelle :** systèmes installés CachyOS/Arch, Ubuntu/Fedora, LUKS, UKI, autres chargeurs de démarrage, données non-Btrfs, rétention automatique et SSH-v2 restent à qualifier. Conserver une sauvegarde indépendante.
 
 ## v0.2.6-rc.10 — capture EFI et fichiers de démarrage
 

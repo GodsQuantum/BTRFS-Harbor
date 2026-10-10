@@ -85,8 +85,12 @@ REGISTRY: dict[str, tuple[str, ...]] = {
     "_legacy_main.py::prepare_source_endpoint": (BELOW, BELOW),
     "cli/common.py::create_snapshot_dir": (BELOW, BELOW),
     # Staged recovery creates one volume child in a verified existing EMPTY
-    # Btrfs destination; it never constructs a backup source/target directory.
-    "cli/machine_set_v2.py::_restore": (BELOW,),
+    # Btrfs destination; plus one optional boot-files leaf under the SAME
+    # already-verified staging base. Neither call creates its parents.
+    "cli/machine_set_v2.py::_restore": (BELOW, BELOW),
+    # EFI stage creates exactly one boot-NNN leaf under the empty verified
+    # boot-files staging dir; it never constructs a backup target location.
+    "core/boot_files_v2.py::stage_boot_members": (BELOW,),
     # The restore run marker lives under DESTINATION/.btrfs-backup-ng/, a
     # tree the local endpoint's prepare() has already created below a
     # destination that exists; the marker directory is one component under it.

@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .. import __util__
 from ..endpoint.mount_guard_v2 import (
     MountGuard,
     MountIdentity,
@@ -302,8 +303,12 @@ def stage_boot_members(
             raise ValueError("corrupt/nonexistent boot archive")
         archive = root / member["archive"]
         _validate_tar_safety(archive)
-        target = destination / f"boot-{index:03d}"
-        target.mkdir(mode=0o700)
+        target = __util__.create_below(
+            destination,
+            f"boot-{index:03d}",
+            mode=0o700,
+            what="Boot-file recovery stage",
+        )
         # A non-destructive stage intentionally does not preserve ownership.
         with tarfile.open(archive, mode="r:gz") as tar:
             tar.extractall(target, filter="data")

@@ -563,6 +563,29 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             set_parser.add_argument("--confirm", action="store_true")
         if set_action in ("set-rear-recover", "set-rescue-iso"):
             set_parser.add_argument("--confirm", action="store_true")
+    # SSH v2 is a restricted destination adapter over sealed checkpoint-v2
+    # files, never another Btrfs sender and never an arbitrary remote shell.
+    init_receiver = v2_actions.add_parser(
+        "ssh-receiver-init", help="Initialize a dedicated SSH receiver root locally"
+    )
+    init_receiver.add_argument("--root", required=True)
+    init_receiver.add_argument("--allow-local", action="store_true")
+    receiver = v2_actions.add_parser(
+        "ssh-receiver", help="Forced-command restricted SSH v2 receiver"
+    )
+    receiver.add_argument("--root", required=True)
+    mirror = v2_actions.add_parser(
+        "ssh-mirror", help="Resume copying a verified machine set to SSH receiver"
+    )
+    mirror.add_argument("--target", required=True)
+    mirror.add_argument("--set-id", required=True)
+    mirror.add_argument("--host", required=True)
+    mirror.add_argument("--user", required=True)
+    mirror.add_argument("--port", type=int, default=22)
+    mirror.add_argument("--identity-file", required=True)
+    mirror.add_argument("--known-hosts", required=True)
+    mirror.add_argument("--experimental", action="store_true")
+    mirror.add_argument("--allow-local", action="store_true")
     scheduled_v2 = v2_actions.add_parser(
         "schedule-run",
         help="One installed profile source via v2; resume incomplete job first",

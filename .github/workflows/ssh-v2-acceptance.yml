@@ -1,0 +1,96 @@
+name: SSH-v2 Forced-Key Interruption and Resume Acceptance
+
+on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/ssh-v2-acceptance.yml
+      - src/btrfs_backup_ng/ssh_checkpoint_v2_receiver.py
+      - src/btrfs_backup_ng/ssh_checkpoint_v2_client.py
+      - src/btrfs_backup_ng/cli/checkpoint_v2_cmd.py
+      - src/btrfs_backup_ng/cli/dispatcher.py
+      - tests/test_ssh_checkpoint_v2_receiver.py
+      - tests/integration/tier3/test_ssh_receiver_network_real.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-sshd:
+    name: Disposable OpenSSH restricted-account outage and resume
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Create disposable SSH server and forced-key restricted receiver
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server openssh-client
+          uv sync --frozen --extra dev
+          sudo useradd --create-home --shell /bin/bash harborrecv
+          sudo passwd -d harborrecv
+          sudo install -d -m 0700 -o harborrecv -g harborrecv /home/harborrecv/.ssh /home/harborrecv/backups
+          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/harbor-client"
+          ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/harbor-host"
+          sudo chown root:root "$RUNNER_TEMP/harbor-host" "$RUNNER_TEMP/harbor-host.pub"
+          forced="env PYTHONPATH=$GITHUB_WORKSPACE/src $GITHUB_WORKSPACE/.venv/bin/python -m btrfs_backup_ng raw checkpoint-v2 ssh-receiver --root /home/harborrecv/backups"
+          printf 'command="%s",restrict %s\n' "$forced" "$(cat "$RUNNER_TEMP/harbor-client.pub")" | \
+            sudo tee /home/harborrecv/.ssh/authorized_keys >/dev/null
+          sudo chown harborrecv:harborrecv /home/harborrecv/.ssh/authorized_keys
+          sudo chmod 0600 /home/harborrecv/.ssh/authorized_keys
+          printf '[127.0.0.1]:22222 %s\n' "$(cat "$RUNNER_TEMP/harbor-host.pub")" > "$RUNNER_TEMP/harbor-known-hosts"
+          chmod 0600 "$RUNNER_TEMP/harbor-known-hosts" "$RUNNER_TEMP/harbor-client"
+          sudo -u harborrecv env PYTHONPATH="$GITHUB_WORKSPACE/src" \
+            "$GITHUB_WORKSPACE/.venv/bin/python" -m btrfs_backup_ng raw checkpoint-v2 \
+            ssh-receiver-init --root /home/harborrecv/backups --allow-local
+          cat >"$RUNNER_TEMP/harbor-sshd.conf" <<EOF
+          Port 22222
+          ListenAddress 127.0.0.1
+          HostKey $RUNNER_TEMP/harbor-host
+          PidFile $RUNNER_TEMP/harbor-sshd.pid
+          AuthorizedKeysFile .ssh/authorized_keys
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          PermitRootLogin no
+          UsePAM no
+          PermitTTY no
+          AllowTcpForwarding no
+          X11Forwarding no
+          AllowUsers harborrecv
+          LogLevel VERBOSE
+          EOF
+          sudo mkdir -p /run/sshd
+          sudo /usr/sbin/sshd -t -f "$RUNNER_TEMP/harbor-sshd.conf"
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/harbor-sshd.conf"
+          sleep 1
+          test -s "$RUNNER_TEMP/harbor-sshd.pid"
+      - name: Test real SSH, break TCP transport, reconnect and resume at committed chunk
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE/src"
+          export HARBOR_NETWORK_PHASE=first
+          uv run --frozen python tests/integration/tier3/test_ssh_receiver_network_real.py
+          sudo kill "$(cat "$RUNNER_TEMP/harbor-sshd.pid")"
+          sleep 1
+          export HARBOR_NETWORK_PHASE=outage
+          uv run --frozen python tests/integration/tier3/test_ssh_receiver_network_real.py
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/harbor-sshd.conf"
+          sleep 1
+          export HARBOR_NETWORK_PHASE=resume
+          uv run --frozen python tests/integration/tier3/test_ssh_receiver_network_real.py
+          sudo -u harborrecv sha256sum /home/harborrecv/backups/machine20261010T235000-deadbeef-000.btrfs.zst
+      - name: Stop disposable SSH daemon
+        if: always()
+        run: |
+          if test -s "$RUNNER_TEMP/harbor-sshd.pid"; then
+            sudo kill "$(cat "$RUNNER_TEMP/harbor-sshd.pid")" || true
+          fi

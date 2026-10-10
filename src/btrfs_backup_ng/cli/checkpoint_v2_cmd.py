@@ -758,6 +758,42 @@ def _list_v2(root: Path, *, max_entries: int = 100) -> list[dict[str, object]]:
 
 def _execute(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
+    if action == "ssh-receiver-init":
+        from ..ssh_checkpoint_v2_receiver import initialize_receiver
+
+        result = initialize_receiver(Path(args.root), allow_local=args.allow_local)
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if action == "ssh-receiver":
+        from ..ssh_checkpoint_v2_receiver import receiver_main
+
+        return receiver_main(args.root)
+    if action == "ssh-mirror":
+        if not args.experimental:
+            raise ValueError("--experimental required for checkpointed SSH")
+        from ..ssh_checkpoint_v2_client import SSHMirror, mirror_machine_set
+        from ..core.native_send_v2 import destination_fingerprint
+        from ..endpoint.mount_guard_v2 import capture_mount_identity, REMOTE_TYPES
+
+        root = _target_root(args.target)
+        identity = capture_mount_identity(root)
+        if identity.fstype not in REMOTE_TYPES and not args.allow_local:
+            raise ValueError("local source staging requires --allow-local")
+        from .machine_set_v2 import _read
+
+        record = _read(root, args.set_id)
+        if record["destination_fingerprint"] != destination_fingerprint(identity, root):
+            raise ValueError("SSH source destination identity changed")
+        client = SSHMirror(
+            host=args.host,
+            user=args.user,
+            port=args.port,
+            key=Path(args.identity_file),
+            known_hosts=Path(args.known_hosts),
+        )
+        response = mirror_machine_set(root, args.set_id, client)
+        print(json.dumps({"mirrored": True, "files": response}, sort_keys=True))
+        return 0
     if action == "schedule-run":
         from .scheduled_v2 import execute_scheduled_checkpoint_v2
 

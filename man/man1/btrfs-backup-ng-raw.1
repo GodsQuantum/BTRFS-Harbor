@@ -336,7 +336,7 @@ an explicit set, or omit it to discover mounted persistent Btrfs sources.
 The \fB\-\-state-dir\fR and \fB\-\-allow-local\fR options
 match single-source checkpoint v2.
 A portable set catalog records each independently committed backup.
-The command does NOT back up non-Btrfs EFI or create a bootable system image.
+Machine-wide Btrfs sets also archive separately mounted EFI and /boot files\nwhen present, verify their SHA-256 and stage them safely for recovery.\nThe command does NOT create a bootable ISO or automatically reconstruct GPT,\nbootloader, Secure Boot or encrypted block devices on a blank disk.
 --max-incremental-depth N (1..256, default 7) starts a fresh independent
 FULL Btrfs backup after N incremental parents in the previous chain.
 .PP

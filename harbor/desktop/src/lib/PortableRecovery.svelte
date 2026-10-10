@@ -220,7 +220,7 @@
 					{label(
 						'Btrfs and archived boot/EFI files can be staged; rebuilding the disk bootloader remains manual and is not yet certified.',
 						'Restauration des volumes Btrfs et archives EFI possibles dans un dossier temporaire ; le redémarrage sur disque vierge reste non certifié.',
-						'仅恢复数据；不包含 EFI、引导程序及其他文件系统。'
+						'可以将 Btrfs 和已存档的 EFI 文件恢复到暂存目录；重新构建启动加载器尚未验证。'
 					)}
 				</p>
 				<button class="secondary" disabled={busy} onclick={() => void browseStaging()}>

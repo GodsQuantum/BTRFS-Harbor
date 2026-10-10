@@ -234,7 +234,12 @@
 							? '. Fichiers EFI et de démarrage inclus ; reconstruction amorçable non certifiée.'
 							: '. EFI non détecté/inclus.')
 					: locale === 'zh-CN'
-						? '已备份 ' + summary.members.length + ' 个 Btrfs 卷。EFI 未包含。'
+						? '已备份 ' +
+							summary.members.length +
+							' 个 Btrfs 卷。' +
+							(summary.status === 'completed_btrfs_and_boot_files'
+								? '已备份 EFI/启动文件；全盘可启动恢复尚未验证。'
+								: '未包含单独挂载的 EFI 分区。')
 						: 'Saved ' +
 							summary.members.length +
 							' Btrfs volumes. ' +

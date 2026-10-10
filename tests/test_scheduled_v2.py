@@ -98,6 +98,55 @@ def test_native_crash_resumes_existing_machine_set_not_new_snapshot(
     assert calls[0].set_id == set_id
 
 
+def test_native_completed_boot_efi_set_is_not_resumed_forever(
+    tmp_path: Path, monkeypatch, ready
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    set_id = str(uuid.uuid4())
+    (tmp_path / f".harbor-machine-set-{set_id}.json").write_text("{}")
+    monkeypatch.setattr(
+        schedules,
+        "_read",
+        lambda *_: {
+            "profile_id": PROFILE,
+            "status": "completed_btrfs_and_boot_files",
+            "members": [{"original_mount": str(source)}],
+        },
+    )
+    actions = []
+    monkeypatch.setattr(
+        schedules,
+        "execute_machine_set",
+        lambda req: actions.append(req.checkpoint_action) or 0,
+    )
+    assert (
+        schedules.execute_scheduled_checkpoint_v2(request(tmp_path, str(source))) == 0
+    )
+    assert actions == ["set-start"]
+
+
+def test_corrupt_machine_catalog_blocks_duplicate_scheduled_backup(
+    tmp_path: Path, monkeypatch, ready
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    set_id = str(uuid.uuid4())
+    (tmp_path / f".harbor-machine-set-{set_id}.json").write_text("not valid json")
+    monkeypatch.setattr(
+        schedules,
+        "_read",
+        lambda *_: (_ for _ in ()).throw(ValueError("damaged machine-set journal")),
+    )
+    called = []
+    monkeypatch.setattr(
+        schedules, "execute_machine_set", lambda req: called.append(req) or 0
+    )
+    with pytest.raises(ValueError, match="damaged machine-set journal"):
+        schedules.execute_scheduled_checkpoint_v2(request(tmp_path, str(source)))
+    assert not called
+
+
 def test_snapper_partial_resume_before_selecting_new_source(
     tmp_path: Path, monkeypatch, ready
 ):

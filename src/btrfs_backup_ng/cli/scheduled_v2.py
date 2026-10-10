@@ -73,13 +73,15 @@ def execute_scheduled_checkpoint_v2(args: argparse.Namespace) -> int:
                 ):
                     continue
                 identifier = filename[len(".harbor-machine-set-") : -len(".json")]
-                try:
-                    record = _read(root, identifier)
-                except (OSError, ValueError, TypeError, KeyError):
-                    continue
+                # An unreadable/corrupt catalog is an unresolved transaction,
+                # not proof that it is safe to begin another backup. Unlike a
+                # harmless unrelated ordinary file, a broken machine-set must
+                # stop scheduling until the operator can inspect it.
+                record = _read(root, identifier)
                 if (
                     record.get("profile_id") == profile
-                    and record.get("status") != "completed_btrfs_only"
+                    and record.get("status")
+                    not in ("completed_btrfs_only", "completed_btrfs_and_boot_files")
                     and any(
                         member.get("original_mount") == args.source
                         for member in record["members"]

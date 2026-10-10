@@ -1,0 +1,62 @@
+name: ReaR Real ISO Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-rescue-iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install official distro ReaR and UEFI ISO build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            rear xorriso grub-efi-amd64-bin isolinux syslinux-utils \
+            btrfs-progs rsync zstd dosfstools
+          rear -V
+
+      - name: Build exact Harbor Python engine and isolate rescue config
+        run: |
+          chmod +x packaging/build-engine-pyz.sh
+          ./packaging/build-engine-pyz.sh
+          sudo install -d -m 0755 /usr/lib/btrfs-harbor/recovery /usr/share/btrfs-harbor/rear
+          sudo install -m 0755 packaging/rear/harbor-rear-restore \
+            /usr/lib/btrfs-harbor/recovery/harbor-rear-restore
+          sudo install -m 0644 packaging/generated/btrfs-backup-ng.pyz \
+            /usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
+          sudo install -m 0644 packaging/rear/local.conf \
+            /usr/share/btrfs-harbor/rear/local.conf
+          test -r /usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
+
+      - name: Build actual ReaR ISO on disposable GitHub VM
+        run: |
+          sudo rear -v -c /usr/share/btrfs-harbor/rear mkrescue 2>&1 | tee /tmp/harbor-rear-real-iso.log
+          sudo find /var/lib/rear/output -name '*.iso' -type f -print
+          iso="$(sudo find /var/lib/rear/output -type f -name '*.iso' | head -n1)"
+          test -n "$iso"
+          test "$(sudo stat -c '%s' "$iso")" -gt 65536
+          sudo xorriso -indev "$iso" -report_el_torito plain | tee /tmp/harbor-rear-eltorito.txt
+          sudo sha256sum "$iso"
+          echo "ISO physically built, NOT a certified fresh-disk restored-OS boot."
+
+      - name: Preserve diagnostics for unsupported CI boot layouts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rear-iso-build-diagnostics
+          path: |
+            /tmp/harbor-rear-real-iso.log
+            /tmp/harbor-rear-eltorito.txt
+          if-no-files-found: ignore

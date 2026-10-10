@@ -97,3 +97,53 @@ def test_backup_mutation_with_changed_mount_is_rejected_without_new_files(
 def test_portable_restore_requires_valid_existing_backup_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="already exist"):
         machine.execute_machine_set(request(tmp_path / "not-mounted", "set-restore"))
+
+
+def test_portable_catalog_listing_does_not_hide_corruption(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    req = request(tmp_path, "set-list")
+    assert machine.execute_machine_set(req) == 0
+    assert json.loads(capsys.readouterr().out) == []
+    assert not list(tmp_path.iterdir())
+
+    name = tmp_path / ".harbor-machine-set-corrupt.json"
+    name.write_text("{}")
+    with pytest.raises(ValueError):
+        machine.execute_machine_set(req)
+    name.unlink()
+
+    good_uuid = "74f78258-4ff3-45e1-9840-df1a4db31cef"
+    catalog = tmp_path / f".harbor-machine-set-{good_uuid}.json"
+    catalog.write_text("not a real catalog")
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        machine.execute_machine_set(req)
+    assert catalog.read_text() == "not a real catalog"
+
+
+def test_machine_raw_restore_uses_local_staging_lockroot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from btrfs_backup_ng.cli.restore import _prepare_backup_endpoint
+
+    backup = tmp_path / "original-archive"
+    backup.mkdir()
+    staging = tmp_path / "target-staging"
+    staging.mkdir()
+    args = SimpleNamespace(destination=str(staging), prefix=None)
+    monkeypatch.setenv("BTRFS_HARBOR_RESTORE_LOCK_ROOT", str(staging))
+    endpoint = _prepare_backup_endpoint(args, f"raw://{backup}")
+    assert Path(endpoint.config["path"]) == backup
+    assert endpoint.config["lock_root"] == str(staging)
+    assert endpoint.config["create_tree"] is False
+    assert not list(backup.iterdir())
+
+    args.destination = str(backup)
+    with pytest.raises(ValueError, match="staging directory"):
+        _prepare_backup_endpoint(args, f"raw://{backup}")
+    args.destination = str(staging)
+    with pytest.raises(ValueError, match="staging directory"):
+        _prepare_backup_endpoint(args, "raw+ssh://example:/remote/backup")

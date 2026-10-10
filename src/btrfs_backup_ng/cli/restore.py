@@ -17,7 +17,7 @@ from typing import Any
 from .. import __util__, endpoint
 from ..__logger__ import create_logger
 from ..config import ConfigError, find_config_file, load_config
-from ..core.target import parse_target
+from ..core.target import TargetKind, parse_target
 from ..core.restore import (
     RestoreError,
     _retry_with_inferred_prefix,
@@ -707,6 +707,28 @@ def _prepare_backup_endpoint(args: argparse.Namespace, source: str):
     if openssl_cipher:
         endpoint_kwargs["openssl_cipher"] = openssl_cipher
 
+    # Harbor's verified machine-set recovery MUST NOT create even a lock
+    # directory on the source backup (USB/NAS may be read-only). Redirect
+    # the raw-source pin store to the *existing* receiving staging directory.
+    # Normal user restores retain their original persisted source pins.
+    private_locks = os.environ.get("BTRFS_HARBOR_RESTORE_LOCK_ROOT")
+    if private_locks is not None:
+        destination = getattr(args, "destination", None)
+        stage = Path(private_locks)
+        if (
+            scheme.kind != TargetKind.RAW
+            or not isinstance(destination, str)
+            or not stage.is_absolute()
+            or stage.is_symlink()
+            or not stage.is_dir()
+            or stage.resolve() != Path(destination).resolve()
+            or stage.resolve() == Path(scheme.path).resolve()
+        ):
+            raise ValueError(
+                "machine recovery lock root must equal the real local staging directory"
+            )
+        endpoint_kwargs["lock_root"] = str(stage)
+
     # Create endpoint - for restore, backup location needs to be set as "path"
     # (not "source") because list_snapshots() uses config["path"]
     # The source=False means the path will be stored in config["path"]
@@ -718,6 +740,11 @@ def _prepare_backup_endpoint(args: argparse.Namespace, source: str):
         endpoint_kwargs,
         source=False,
     )
+    # The generic factory intentionally whitelists keys. Set this scoped
+    # machine recovery lockroot after construction so RawEndpoint.set_lock
+    # cannot fall back to writing under the backup source path.
+    if private_locks is not None:
+        backup_ep.config["lock_root"] = str(stage)
     # Restore-time integrity check for raw targets: default ON, disabled by
     # --skip-verify (for last-copy recovery of a partially-corrupt backup).
     backup_ep.config["verify_before_restore"] = not getattr(args, "skip_verify", False)

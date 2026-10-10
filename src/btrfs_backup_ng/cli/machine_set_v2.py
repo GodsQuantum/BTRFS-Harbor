@@ -513,28 +513,40 @@ def execute_machine_set(args: argparse.Namespace) -> int:
     if action == "set-retention-plan":
         return _retention_plan(root, args)
     if action == "set-list":
+        # Destination-only catalog browsing is always read-only and portable,
+        # including a foreign NFS mount or USB disk with a different path.
+        # Never silently truncate or hide corrupt backups as "not found".
+        guard, _ = _open_guard(root, allow_local=True)
         rows: list[dict[str, object]] = []
-        for name in sorted(os.listdir(root))[:4096]:
-            if not (name.startswith(".harbor-machine-set-") and name.endswith(".json")):
-                continue
-            identifier = name[len(".harbor-machine-set-") : -len(".json")]
-            try:
+        with guard:
+            names = sorted(os.listdir(guard.directory_fd))
+            if len(names) > 8192:
+                raise ValueError(
+                    "destination catalog inventory exceeds safe scan limit"
+                )
+            selected = [
+                name
+                for name in names
+                if name.startswith(".harbor-machine-set-") and name.endswith(".json")
+            ]
+            if len(selected) > 1024:
+                raise ValueError("too many machine backup sets to enumerate safely")
+            for name in selected:
+                identifier = name[len(".harbor-machine-set-") : -len(".json")]
+                guard.validate_fd(guard.directory_fd)
                 data = _read(root, _canonical_uuid(identifier))
-            except (ValueError, OSError, TypeError, KeyError, json.JSONDecodeError):
-                continue
-            rows.append(
-                {
-                    "set_id": data["set_id"],
-                    "status": data["status"],
-                    "coverage": data["coverage"],
-                    "bootable": False,
-                    "created_utc": data.get("created_utc"),
-                    "members": len(data["members"]),
-                    "boot_partitions": len(data.get("boot_members", [])),
-                }
-            )
-            if len(rows) >= 100:
-                break
+                rows.append(
+                    {
+                        "set_id": data["set_id"],
+                        "status": data["status"],
+                        "coverage": data["coverage"],
+                        "bootable": False,
+                        "created_utc": data.get("created_utc"),
+                        "members": len(data["members"]),
+                        "boot_partitions": len(data.get("boot_members", [])),
+                    }
+                )
+            guard.validate_fd(guard.directory_fd)
         print(json.dumps(rows, sort_keys=True))
         return 0
     if action == "set-start":
@@ -922,6 +934,13 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
             stderr=subprocess.PIPE,
             timeout=1800,
             check=False,
+            # Restore-side pins live in the recovered Btrfs staging volume,
+            # never the original backup export. Other engine invocations keep
+            # their standard, durable source pins unchanged.
+            env={
+                **os.environ,
+                "BTRFS_HARBOR_RESTORE_LOCK_ROOT": str(destination),
+            },
         )
         if outcome.returncode:
             raise RuntimeError(

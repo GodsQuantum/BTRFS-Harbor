@@ -1,0 +1,57 @@
+name: Installed Ubuntu 24.04 UEFI Recovery Acceptance
+
+on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/installed-ubuntu-acceptance.yml
+      - tests/integration/tier3/test_installed_ubuntu_uefi_real.py
+      - src/btrfs_backup_ng/cli/machine_set_v2.py
+      - src/btrfs_backup_ng/cli/restore.py
+      - src/btrfs_backup_ng/core/rear_bridge_v2.py
+      - src/btrfs_backup_ng/core/boot_files_v2.py
+      - src/btrfs_backup_ng/endpoint/mount_guard_v2.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blank-disk-linux:
+    name: Two restored installed Ubuntu systemd boots on fresh GPT
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install tools only on disposable GitHub runner
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            linux-image-generic initramfs-tools debootstrap \
+            grub-efi-amd64-bin gdisk util-linux btrfs-progs \
+            dosfstools rsync zstd qemu-system-x86 ovmf cpio
+          sudo modprobe loop || true
+          sudo modprobe btrfs || true
+          uv sync --frozen
+          test -x .venv/bin/python
+
+      - name: Install Ubuntu 24.04, Harbor Btrfs+EFI backup, restore on new GPT disk, boot systemd twice
+        timeout-minutes: 47
+        run: |
+          # Absolutely no host-disks/devices. The test uses ONLY images
+          # created inside the runner's temporary directory and detaches
+          # every loop device before booting the restored virtual disk.
+          sudo unshare --mount --propagation private env \
+            GITHUB_ACTIONS=true \
+            PYTHONPATH="$GITHUB_WORKSPACE/src" \
+            PATH="$GITHUB_WORKSPACE/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            "$GITHUB_WORKSPACE/.venv/bin/python" \
+            tests/integration/tier3/test_installed_ubuntu_uefi_real.py
+          echo "Two UEFI installed Ubuntu systemd boots from restored new GPT+Btrfs+FAT32 image validated."

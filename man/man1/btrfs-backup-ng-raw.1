@@ -249,11 +249,51 @@ A \fBraw+ssh://\fR target is a POSIX-shell-remote model: btrfs-backup-ng runs
 \fBsh\fR, \fBcat\fR, \fBmv\fR, and \fBstat\fR over SSH on the remote host. For a
 non-POSIX or SMB/NFS/cloud destination, mount it locally and use a \fBraw://\fR
 path instead.
+.SS SSH-v2 archive mirror (EXPERIMENTAL)
+The dedicated restricted SSH receiver is an adapter for sealed checkpoint-v2
+machine-set archive files, not a separate Btrfs send engine or arbitrary SSH
+shell runner. It requires an administrator-provisioned non-root account,
+strict host key pinning and a forced
+.B harbor-v2
+command in the destination authorized_keys file.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 ssh-receiver-init
+initializes an already existing receiver directory with
+\fB\-\-root\fR \fIABSOLUTE_PATH\fR. Non-network local directories additionally
+require explicit \fB\-\-allow-local\fR. Initialization is NOT automatic when a
+mount is absent and refuses root privileges and changed mount identities.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 ssh-receiver
+uses \fB\-\-root\fR \fIABSOLUTE_PATH\fR in an SSH public key forced command.
+It accepts only the exact SSH_ORIGINAL_COMMAND value
+.B harbor-v2
+and an audited bounded JSON+binary protocol over standard input. It never
+executes SSH_ORIGINAL_COMMAND and does not accept arbitrary remote paths.
+.PP
+.B btrfs-backup-ng raw checkpoint-v2 ssh-mirror
+mirrors one locally completed verified set, its incremental ancestors, and
+EFI boot archives. Required flags:
+\fB\-\-target\fR \fISTAGING_DIRECTORY\fR,
+\fB\-\-set-id\fR \fIUUID\fR,
+\fB\-\-host\fR \fIRECEIVER_HOST\fR,
+\fB\-\-user\fR \fIUNPRIVILEGED_ACCOUNT\fR,
+\fB\-\-identity-file\fR \fIABSOLUTE_PRIVATE_KEY\fR,
+\fB\-\-known-hosts\fR \fIABSOLUTE_PINNED_HOST_KEYS\fR and
+\fB\-\-experimental\fR.
+\fB\-\-port\fR \fINUMBER\fR defaults to 22. For local staging use
+\fB\-\-allow-local\fR. On interruption, re-run the exact command;
+the client asks the restricted receiver which SHA-256-verified frames were
+committed and retransmits only the missing bytes. Full-file SHA-256 is checked
+before no-overwrite publication. A separate local staging repository remains
+necessary; this is not yet an SSH-only one-click system backup.
+.PP
 .SS checkpoint-v2 (EXPERIMENTAL)
 An explicitly opt-in checkpointed raw backup engine, separate from the
 existing raw target commands. Real Btrfs/NFS outage and recovery tests
-have passed, but bootable blank-disk restoration and SSH checkpoint resume
-are not yet supported. Keep independent verified full-system backups.
+have passed; a minimal restored Linux now boots twice on disposable GPT/UEFI.
+Installed distro and encrypted/Secure-Boot recovery remain unqualified.
+The experimental SSH mirror uses local completed checkpoint-v2 staging;
+keep independent verified full-system backups.
 .PP
 .B btrfs-backup-ng raw checkpoint-v2 start
 requires \fB\-\-target\fR \fIPATH\fR,

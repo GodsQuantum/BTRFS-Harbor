@@ -366,6 +366,24 @@ _btrfs_backup_ng() {
                                     '--keep[]:keep:' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
+                                    '--root[]:root:' \
+                                    '--allow-local[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--root[]:root:' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--set-id[]:set_id:' \
+                                    '--host[]:host:' \
+                                    '--user[]:user:' \
+                                    '--port[]:port:' \
+                                    '--identity-file[]:file:_files' \
+                                    '--known-hosts[]:known_hosts:' \
+                                    '--experimental[]' \
+                                    '--allow-local[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \
                                     '--profile-id[]:file:_files' \
                                     '--source[]:file:_files' \

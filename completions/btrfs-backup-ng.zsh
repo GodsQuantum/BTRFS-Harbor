@@ -325,6 +325,15 @@ _btrfs_backup_ng() {
                                     '--allow-local[]' \
                                     '--state-dir[]:file:_files' \
                                     '--experimental[]' \
+                                    '--set-id[]:set_id:' \
+                                    '--staging[]:staging:' \
+                                    '--confirm[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
                                     '--target[]:file:_files' \

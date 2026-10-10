@@ -130,8 +130,8 @@ def test_scan_opt_in_removable_media_is_not_global(monkeypatch):
     assert recorded == [True, False]
 
 
-def test_machine_set_list_only_shows_valid_catalogs(tmp_path, capsys):
-    """Read-only listing ignores corrupted files and never claims bootable restore."""
+def test_machine_set_list_never_hides_corrupted_catalogs(tmp_path, capsys):
+    """Corrupt archives must trigger a visible error, not disappear from recovery."""
     from btrfs_backup_ng.cli.machine_set_v2 import execute_machine_set
 
     import uuid
@@ -168,11 +168,24 @@ def test_machine_set_list_only_shows_valid_catalogs(tmp_path, capsys):
         allow_local=True,
         experimental=False,
     )
+    import pytest
+
+    # Fail closed on malformed JSON, or on a malicious symlink, even if a
+    # healthy backup is present. Silently filtering them looks like data loss.
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        execute_machine_set(args)
+    (tmp_path / f".harbor-machine-set-{invalid_id}.json").unlink()
+    with pytest.raises((ValueError, OSError)):
+        execute_machine_set(args)
+    for entry in tmp_path.glob(".harbor-machine-set-*.json"):
+        if entry.is_symlink():
+            entry.unlink()
     assert execute_machine_set(args) == 0
     found = json.loads(capsys.readouterr().out)
     assert len(found) == 1
     assert found[0]["set_id"] == valid_id
     assert found[0]["bootable"] is False
+    assert outside.read_text() == "unsafe"
 
 
 def test_set_lock_refuses_missing_mount_without_creating_file(tmp_path):

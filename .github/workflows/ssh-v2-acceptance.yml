@@ -34,21 +34,26 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server openssh-client
           uv sync --frozen --extra dev
+          # The runner checkout/.venv may be private; the restricted backup
+          # account must use an installed, readable engine, not runner home.
+          chmod +x packaging/build-engine-pyz.sh
+          ./packaging/build-engine-pyz.sh
+          sudo install -d -m 0755 /usr/local/lib/harbor
+          sudo install -m 0644 packaging/generated/btrfs-backup-ng.pyz /usr/local/lib/harbor/
           sudo useradd --create-home --shell /bin/bash harborrecv
           sudo passwd -d harborrecv
           sudo install -d -m 0700 -o harborrecv -g harborrecv /home/harborrecv/.ssh /home/harborrecv/backups
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/harbor-client"
           ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/harbor-host"
           sudo chown root:root "$RUNNER_TEMP/harbor-host" "$RUNNER_TEMP/harbor-host.pub"
-          forced="env PYTHONPATH=$GITHUB_WORKSPACE/src $GITHUB_WORKSPACE/.venv/bin/python -m btrfs_backup_ng raw checkpoint-v2 ssh-receiver --root /home/harborrecv/backups"
+          forced="/usr/bin/python3 /usr/local/lib/harbor/btrfs-backup-ng.pyz raw checkpoint-v2 ssh-receiver --root /home/harborrecv/backups"
           printf 'command="%s",restrict %s\n' "$forced" "$(cat "$RUNNER_TEMP/harbor-client.pub")" | \
             sudo tee /home/harborrecv/.ssh/authorized_keys >/dev/null
           sudo chown harborrecv:harborrecv /home/harborrecv/.ssh/authorized_keys
           sudo chmod 0600 /home/harborrecv/.ssh/authorized_keys
           printf '[127.0.0.1]:22222 %s\n' "$(cat "$RUNNER_TEMP/harbor-host.pub")" > "$RUNNER_TEMP/harbor-known-hosts"
           chmod 0600 "$RUNNER_TEMP/harbor-known-hosts" "$RUNNER_TEMP/harbor-client"
-          sudo -u harborrecv env PYTHONPATH="$GITHUB_WORKSPACE/src" \
-            "$GITHUB_WORKSPACE/.venv/bin/python" -m btrfs_backup_ng raw checkpoint-v2 \
+          sudo -u harborrecv /usr/bin/python3 /usr/local/lib/harbor/btrfs-backup-ng.pyz raw checkpoint-v2 \
             ssh-receiver-init --root /home/harborrecv/backups --allow-local
           cat >"$RUNNER_TEMP/harbor-sshd.conf" <<EOF
           Port 22222

@@ -104,9 +104,23 @@ def boot_twice(image: Path, scratch: Path) -> None:
         except subprocess.TimeoutExpired:
             pass
         result = log.read_text(errors="replace") if log.exists() else ""
+        critical = [
+            line
+            for line in result.splitlines()
+            if any(
+                text in line.lower()
+                for text in (
+                    "failed",
+                    "boot/efi",
+                    "dependency",
+                    "timed out",
+                    "emergency",
+                )
+            )
+        ]
         assert "HARBOR_INSTALLED_UBUNTU_RESTORED_OK" in result, (
             f"installed Ubuntu did not reach systemd multi-user.target after boot {index}; "
-            f"serial={result[-2500:]!r}"
+            f"critical={critical[-35:]!r}; serial_tail={result[-2500:]!r}"
         )
         print(
             f"BOOT {index}: installed Ubuntu systemd reached multi-user.target on restored GPT Btrfs root"
@@ -233,7 +247,7 @@ def main() -> None:
             run(
                 "debootstrap",
                 "--variant=minbase",
-                "--include=systemd-sysv,udev,dbus,btrfs-progs,ca-certificates",
+                "--include=systemd-sysv,udev,dbus,btrfs-progs,ca-certificates,dosfstools,kmod,util-linux",
                 "noble",
                 str(src_root),
                 "http://archive.ubuntu.com/ubuntu",

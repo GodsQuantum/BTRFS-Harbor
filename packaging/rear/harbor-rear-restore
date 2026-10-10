@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# ReaR BACKUP=EXTERNAL hook. No disk operations: ReaR owns layout/boot repair.
+set -Eeuo pipefail
+umask 077
+
+if [[ "$EUID" -ne 0 || ! -f /etc/rear/rescue.conf || ! -d /mnt/local ]] ||
+   ! mountpoint -q /mnt/local; then
+  echo "Harbor: ReaR rescue environment with mounted /mnt/local required" >&2
+  exit 2
+fi
+
+# Universal .run installs its standalone Python under /opt; DEB/RPM rely on
+# distro Python >=3.11. Both run the SAME zipapp in /usr/lib/btrfs-harbor.
+PY=/opt/btrfs-harbor/python/bin/python3
+if [[ ! -x "$PY" ]]; then
+  PY="$(command -v python3 || true)"
+fi
+PYZ=/usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
+if [[ -z "$PY" || ! -x "$PY" || ! -s "$PYZ" ]]; then
+  echo "Harbor engine is missing from rescue ISO; refusing incomplete restore" >&2
+  exit 2
+fi
+
+printf '%s\n' "BTRFS Harbor — reprise depuis la destination"
+printf '%s\n' "ReaR doit avoir déjà recréé et monté les partitions dans /mnt/local."
+printf '%s\n' "Montez votre NAS/disque de sauvegarde AVANT de saisir son dossier."
+printf 'Dossier des sauvegardes (chemin absolu déjà monté) : '
+IFS= read -r target
+if [[ "$target" != /* || ! -d "$target" || -L "$target" ]]; then
+  echo "Dossier de sauvegarde absent ou chemin invalide" >&2
+  exit 2
+fi
+
+result="$("$PY" "$PYZ" raw checkpoint-v2 set-list --target "$target" --allow-local)"
+printf 'Ensembles de sauvegardes complets :\n'
+printf '%s\n' "$result" | "$PY" -c '
+import json,sys
+rows=json.load(sys.stdin)
+valid=[r for r in rows if r.get("status") in
+  ("completed_btrfs_only","completed_btrfs_and_boot_files")]
+if not valid:
+    raise SystemExit("No verified completed machine set listed")
+for row in valid:
+    print(row["set_id"], row.get("created_utc",""), row.get("coverage",""))
+'
+printf 'UUID de la sauvegarde à restaurer : '
+IFS= read -r setid
+"$PY" -c '
+import sys, uuid
+value=sys.argv[1]
+assert str(uuid.UUID(value)) == value, "Invalid canonical set UUID"
+' "$setid"
+
+"$PY" "$PYZ" raw checkpoint-v2 set-rear-recover \
+  --target "$target" --set-id "$setid" --allow-local --experimental
+printf 'Confirmez la restauration sur les volumes vierges de ReaR (tapez RESTAURER) : '
+IFS= read -r consent
+if [[ "$consent" != "RESTAURER" ]]; then
+  echo "Opération annulée sans écriture."
+  exit 1
+fi
+"$PY" "$PYZ" raw checkpoint-v2 set-rear-recover \
+  --target "$target" --set-id "$setid" --allow-local --experimental --confirm
+printf '%s\n' "Copie terminée. ReaR doit finaliser l’initramfs et le chargeur UEFI."

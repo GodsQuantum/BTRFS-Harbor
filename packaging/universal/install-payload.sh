@@ -85,6 +85,8 @@ for required in \
   btrfs-harbor-recovery \
   btrfs-backup-ng.pyz \
   btrfs-backup-ng \
+  harbor-rear-restore \
+  rear-local.conf \
   python/bin/python3 \
   btrfs-harbor-agent.service \
   io.github.GodsQuantum.BtrfsHarbor1.conf \
@@ -119,6 +121,10 @@ install -m 0755 "$PAYLOAD/btrfs-harborctl" /usr/bin/btrfs-harborctl
 install -m 0755 "$PAYLOAD/btrfs-harbor-recovery" /usr/bin/btrfs-harbor-recovery
 install -m 0755 "$PAYLOAD/btrfs-backup-ng.pyz" /usr/lib/btrfs-harbor/btrfs-backup-ng.pyz
 install -m 0755 "$PAYLOAD/btrfs-backup-ng" /usr/lib/btrfs-harbor/btrfs-backup-ng
+install -d -m 0755 /usr/lib/btrfs-harbor/recovery
+install -m 0755 "$PAYLOAD/harbor-rear-restore" /usr/lib/btrfs-harbor/recovery/harbor-rear-restore
+install -d -m 0755 /usr/share/btrfs-harbor/rear
+install -m 0644 "$PAYLOAD/rear-local.conf" /usr/share/btrfs-harbor/rear/local.conf
 
 cat >/usr/bin/btrfs-harbor <<'EOF'
 #!/bin/sh

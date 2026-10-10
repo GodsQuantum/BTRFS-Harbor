@@ -32,6 +32,13 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.11 (préversion non publiée) — ISO de secours et restauration ReaR
+
+- **Sauvegarder maintenant** conserve les volumes Btrfs et les partitions EFI montées.
+- Un bouton **Créer ISO de secours** utilise ReaR 2.9 avec une configuration propre à Harbor, sans modifier /etc/rear. ISO construite localement puis copiée sur la destination avec contrôles de montage, ISO9660 et SHA-256.
+- L'outil intégré à l'ISO prépare la restauration Btrfs + EFI, vérifie les UUID et adapte fstab aux nouveaux volumes. ReaR doit ensuite finaliser le chargeur de démarrage et l'initramfs.
+- **Restauration amorçable sur disque vierge NON CERTIFIÉE** : manque encore un vrai démarrage/redémarrage UEFI en VM. Les volumes de données non-Btrfs, les configurations chiffrées, la purge transactionnelle et la reprise SSH v2 ne sont pas finalisés.
+
 ## v0.2.6-rc.10 — capture EFI et fichiers de démarrage
 
 - **Sauvegarder maintenant** inclut les volumes Btrfs et les partitions EFI FAT32 ou /boot séparées montées, dans la transaction de sauvegarde existante.

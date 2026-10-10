@@ -768,6 +768,8 @@ def _execute(args: argparse.Namespace) -> int:
         "set-status",
         "set-restore",
         "set-rear-copy",
+        "set-rear-recover",
+        "set-rescue-iso",
         "set-list",
         "set-retention-plan",
     ):

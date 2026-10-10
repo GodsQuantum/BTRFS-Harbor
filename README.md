@@ -32,6 +32,13 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.11 (unpublished preview) — supervised rescue ISO and ReaR recovery
+
+- **Back up now** remains one-click Btrfs + mounted EFI backup.
+- A separate **Create rescue ISO** action uses installed ReaR 2.9 with a Harbor-provided isolated configuration; no changes to /etc/rear. It builds locally, checks ISO9660 and SHA-256, and atomically publishes to the selected backup destination with a live mount guard.
+- The bundled ReaR rescue hook can stage verified Btrfs volumes and EFI, match the received subvolume UUIDs to ReaR's rebuilt mounts, validate and rewrite fstab UUIDs, then defer bootloader and initramfs finalization to ReaR.
+- **Not yet certified for bare-metal recovery:** actual UEFI boot/reboot of the restored VM, arbitrary encrypted configurations, non-Btrfs data, automatic v2 pruning, and SSH v2 resume remain unsupported. Do not use as your only independent recovery plan.
+
 ## v0.2.6-rc.10 — capture separate EFI and boot files
 
 - The **Back up now** action captures native Btrfs volumes and separately mounted FAT32 EFI and ext4 boot files in the same durable machine-set transaction.

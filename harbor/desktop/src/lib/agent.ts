@@ -47,6 +47,7 @@ export interface CheckpointActionRequest {
 		| 'set-resume'
 		| 'set-status'
 		| 'set-restore'
+		| 'set-rescue-iso'
 		| 'set-list';
 	target: string;
 	name?: string | null;

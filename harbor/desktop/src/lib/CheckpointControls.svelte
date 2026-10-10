@@ -143,6 +143,7 @@
 		set_id: string;
 		status: string;
 		members: number;
+		created_utc?: string;
 	}
 	let machineSets: MachineSetEntry[] = [];
 	$: machineTarget = destination.path ?? '';
@@ -170,6 +171,74 @@
 			return false;
 		}
 	}
+	async function makeRescueIso() {
+		if (running || !isTauri() || destination.kind === 'ssh') return;
+		const backups = machineSets
+			.filter((item) => item.status === 'completed_btrfs_and_boot_files')
+			.sort((a, b) => (b.created_utc ?? '').localeCompare(a.created_utc ?? ''));
+		const selected = backups[0];
+		if (!selected) {
+			error =
+				locale === 'fr'
+					? 'Sauvegardez Btrfs et EFI avant de créer un support de secours.'
+					: 'Back up Btrfs and EFI before creating a rescue ISO.';
+			return;
+		}
+		if (
+			!window.confirm(
+				locale === 'fr'
+					? 'Créer une image ISO de secours pour la sauvegarde ' +
+							selected.set_id.slice(0, 8) +
+							' ? ReaR doit être installé. Cette ISO ne garantit pas encore la restauration amorçable sur disque vierge.'
+					: 'Create a ReaR rescue ISO for backup ' +
+							selected.set_id.slice(0, 8) +
+							'? ReaR must be installed; bootable bare-metal recovery is not yet certified.'
+			)
+		)
+			return;
+		running = true;
+		error = '';
+		info = locale === 'fr' ? 'Construction de l’ISO de secours…' : 'Building rescue ISO…';
+		try {
+			const probe = await inspectDestinationMount(machineTarget);
+			if (
+				!probe ||
+				!destination.mount_point ||
+				!destination.expected_mount_source ||
+				probe.mount_point !== destination.mount_point ||
+				probe.source !== destination.expected_mount_source
+			) {
+				throw new Error('Backup destination mount changed: refusing ISO write.');
+			}
+			const response = await runCheckpointAction({
+				action: 'set-rescue-iso',
+				target: machineTarget,
+				allow_local: allowLocal,
+				set_id: selected.set_id,
+				confirm: true
+			});
+			const json = JSON.parse(response.trim().split('\n').at(-1) ?? '{}') as {
+				iso_created: boolean;
+				boot_tested: boolean;
+				name: string;
+				sha256: string;
+			};
+			if (!json.iso_created) throw new Error('ReaR did not produce a rescue ISO');
+			info =
+				(locale === 'fr' ? 'ISO créée : ' : 'Rescue ISO created: ') +
+				json.name +
+				' · SHA-256 ' +
+				json.sha256 +
+				(locale === 'fr'
+					? ' · démarrage UEFI non encore certifié'
+					: ' · UEFI boot not yet certified');
+		} catch (reason) {
+			error = String(reason);
+		} finally {
+			running = false;
+		}
+	}
+
 	async function machineTransfer(action: 'set-start' | 'set-resume', setId?: string) {
 		if (running) return;
 		if (!isTauri() || !machineTarget || destination.kind === 'ssh') {
@@ -573,6 +642,21 @@
 			</label>
 		</details>
 		<div class="machine-set">
+			<button
+				class="secondary compact"
+				type="button"
+				disabled={!isTauri() ||
+					running ||
+					!machineTarget ||
+					!machineSets.some((item) => item.status === 'completed_btrfs_and_boot_files')}
+				onclick={() => void makeRescueIso()}
+			>
+				{locale === 'fr'
+					? 'Créer ISO de secours'
+					: locale === 'zh-CN'
+						? '创建救援 ISO'
+						: 'Create rescue ISO'}
+			</button>
 			<button
 				class="secondary compact"
 				disabled={!isTauri() || running || unfinished || unfinishedMachine || !machineTarget}

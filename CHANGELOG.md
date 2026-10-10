@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.11] — ReaR bridge and supervised rescue ISO (unpublished)
+
+- Included ReaR EXTERNAL restore hook/config in DEB/RPM/AppImage/universal installer.
+- Match verified Btrfs received UUIDs to recreated root/home, stage EFI, check
+  new filesystem types and rewrite fstab UUIDs before ReaR boot finalization.
+- User-visible Create rescue ISO builds locally and publishes atomically to a
+  mount-pinned backup target with SHA-256; no automatically installed service.
+- Full original-device to blank-disk **UEFI boot test is still missing**.
+- Automatic incremental-safe pruning and checkpoint-v2 SSH remain disabled.
+
 ## [0.2.6-rc.10] — EFI partition coverage (supervised)
 
 - Existing v2 transaction includes separately mounted EFI/boot files as

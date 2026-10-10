@@ -42,6 +42,7 @@ from ..core.native_snapshots import (
     reserve_native_snapshot_name,
 )
 from ..core.rear_bridge_v2 import apply_rear_restore, plan_rear_restore
+from ..core.rear_iso_v2 import build_rescue_iso, _check_catalog
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
 from ..core.verify_v2 import verify_checkpoint_index
 from ..endpoint.mount_guard_v2 import MountGuard
@@ -648,6 +649,42 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                 )
             if action == "set-restore":
                 return _restore(root, data, args)
+            if action == "set-rescue-iso":
+                _check_catalog(data)
+                if not args.confirm:
+                    print(
+                        json.dumps(
+                            {
+                                "dry_run": True,
+                                "iso_created": False,
+                                "boot_tested": False,
+                                "set_id": data["set_id"],
+                                "note": "ReaR ISO is built locally and published atomically to this destination.",
+                            }
+                        )
+                    )
+                    return 0
+                for member in data["members"]:
+                    if not _archive_valid(root, member["archive"]):
+                        raise ValueError(
+                            "Btrfs archive failed verification before rescue ISO"
+                        )
+                for member in data.get("boot_members", []):
+                    if not verify_boot_member(root, member):
+                        raise ValueError(
+                            "EFI archive failed verification before rescue ISO"
+                        )
+                pinned, _ = _open_guard(
+                    root,
+                    allow_local=args.allow_local,
+                    expected=data["destination_fingerprint"],
+                )
+                with pinned:
+                    iso = build_rescue_iso(root, data, pinned)
+                print(json.dumps(iso, sort_keys=True))
+                return 0
+            if action == "set-rear-recover":
+                return _rear_recover(root, data, args)
             if action == "set-rear-copy":
                 # Nothing partitions/formats a disk in Harbor. ReaR must
                 # already have recreated filesystems and mounted /mnt/local.
@@ -686,6 +723,77 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                 )
                 return 0
     raise ValueError("unknown machine-set action")
+
+
+def _rear_recover(root: Path, data: dict, args: argparse.Namespace) -> int:
+    """Single ReaR EXTERNAL restore action after ReaR recreated/mounted disks.
+
+    Never formats partitions. The rescue ISO must provide the static wrapper
+    and dependencies; this function only runs in the ReaR rescue system.
+    """
+    rescue_root = Path("/mnt/local")
+    if (
+        os.geteuid() != 0
+        or not Path("/etc/rear/rescue.conf").is_file()
+        or not rescue_root.is_mount()
+    ):
+        raise PermissionError("ReaR rescue environment and mounted root required")
+    if data["status"] not in ("completed_btrfs_only", "completed_btrfs_and_boot_files"):
+        raise ValueError("cannot restore an incomplete machine set")
+    if not args.confirm:
+        print(
+            json.dumps(
+                {
+                    "dry_run": True,
+                    "bootable": False,
+                    "machine_set": data["set_id"],
+                    "staging": str(rescue_root / f".harbor-rear-{data['set_id'][:8]}"),
+                    "warning": "This recovery will copy onto partitions ALREADY recreated by ReaR.",
+                }
+            )
+        )
+        return 0
+    # Preflight the target before ANY stage creation; no host mount changes.
+    probe = subprocess.run(
+        [
+            "findmnt",
+            "--noheadings",
+            "--output",
+            "FSTYPE",
+            "--mountpoint",
+            str(rescue_root),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if probe.returncode or probe.stdout.strip() != "btrfs":
+        raise ValueError("ReaR system root must be mounted Btrfs")
+    staging = __util__.create_below(
+        rescue_root,
+        f".harbor-rear-{data['set_id'][:8]}",
+        mode=0o700,
+        what="ReaR recovery staging",
+    )
+    step = argparse.Namespace(
+        confirm=True,
+        staging=str(staging),
+    )
+    _restore(root, data, step)
+    restored = apply_rear_restore(data, staging)
+    print(
+        json.dumps(
+            {
+                "copied_to_rear": True,
+                "bootable": False,
+                "staging": str(staging),
+                "mounts": [job.original_mount for job in restored],
+                "next": "ReaR must finalize bootloader/initramfs; do not reboot until it succeeds.",
+            }
+        )
+    )
+    return 0
 
 
 def _result(data: dict) -> int:

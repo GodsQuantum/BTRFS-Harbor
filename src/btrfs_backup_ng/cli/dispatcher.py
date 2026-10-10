@@ -528,6 +528,8 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         "set-status",
         "set-restore",
         "set-rear-copy",
+        "set-rear-recover",
+        "set-rescue-iso",
         "set-list",
         "set-retention-plan",
     ):
@@ -558,6 +560,8 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             set_parser.add_argument("--keep", type=int, default=0)
         if set_action in ("set-restore", "set-rear-copy"):
             set_parser.add_argument("--staging", required=True)
+            set_parser.add_argument("--confirm", action="store_true")
+        if set_action in ("set-rear-recover", "set-rescue-iso"):
             set_parser.add_argument("--confirm", action="store_true")
     scheduled_v2 = v2_actions.add_parser(
         "schedule-run",

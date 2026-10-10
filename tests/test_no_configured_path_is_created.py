@@ -88,6 +88,10 @@ REGISTRY: dict[str, tuple[str, ...]] = {
     # Btrfs destination; plus one optional boot-files leaf under the SAME
     # already-verified staging base. Neither call creates its parents.
     "cli/machine_set_v2.py::_restore": (BELOW, BELOW),
+    # ReaR has already recreated and mounted the *new* target Btrfs root
+    # in its rescue environment; a single, privately owned staging leaf
+    # is created below that verified mount, never a backup location.
+    "cli/machine_set_v2.py::_rear_recover": (BELOW,),
     # EFI stage creates exactly one boot-NNN leaf under the empty verified
     # boot-files staging dir; it never constructs a backup target location.
     "core/boot_files_v2.py::stage_boot_members": (BELOW,),

@@ -119,6 +119,9 @@ jobs:
           mkdir -p harbor/desktop/portable
           cp harbor/target/release/btrfs-harborctl harbor/desktop/portable/
           cp packaging/universal/btrfs-backup-ng harbor/desktop/portable/
+          mkdir -p harbor/desktop/portable/recovery
+          cp packaging/rear/harbor-rear-restore harbor/desktop/portable/recovery/
+          cp packaging/rear/local.conf harbor/desktop/portable/recovery/
           cp packaging/generated/btrfs-backup-ng.pyz harbor/desktop/portable/
           cp -a packaging/generated/python-runtime harbor/desktop/portable/python
           chmod 0755 \
@@ -169,6 +172,8 @@ jobs:
           cp harbor/target/release/harbor-recovery "$payload/btrfs-harbor-recovery"
           cp packaging/generated/btrfs-backup-ng.pyz "$payload/btrfs-backup-ng.pyz"
           cp packaging/universal/btrfs-backup-ng "$payload/btrfs-backup-ng"
+          cp packaging/rear/harbor-rear-restore "$payload/harbor-rear-restore"
+          cp packaging/rear/local.conf "$payload/rear-local.conf"
           cp packaging/systemd/btrfs-harbor-agent.service "$payload/"
           cp packaging/dbus/io.github.GodsQuantum.BtrfsHarbor1.conf "$payload/"
           cp packaging/polkit/io.github.GodsQuantum.BtrfsHarbor.policy "$payload/"
@@ -187,6 +192,7 @@ jobs:
             "$payload/btrfs-harbor-recovery" \
             "$payload/btrfs-backup-ng.pyz" \
             "$payload/btrfs-backup-ng" \
+            "$payload/harbor-rear-restore" \
             "$payload/install.sh"
 
           chmod +x packaging/universal/make-run.sh

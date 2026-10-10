@@ -46,6 +46,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --exclude btrfs-harbor-desktop --all-targets --locked -- -D warnings
 
+  rear-smoke:
+    name: ReaR external rescue simulation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate static backup-to-ISO ReaR configuration
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends rear xorriso
+          bash -n packaging/rear/harbor-rear-restore
+          bash -n packaging/rear/local.conf
+          sudo rear -s -c "$PWD/packaging/rear" mkrescue > /tmp/harbor-rear-simulation.log 2>&1
+          grep -q 'Source prep/EXTERNAL/default/' /tmp/harbor-rear-simulation.log
+          grep -q 'Source output/ISO/' /tmp/harbor-rear-simulation.log
+          echo "ReaR ISO and external restore simulation OK; not a boot test"
+
   distro-smoke:
     runs-on: ubuntu-24.04
     strategy:
@@ -55,8 +71,8 @@ jobs:
           - name: arch
             image: ghcr.io/archlinux/archlinux:base
             package_manager: pacman
-          - name: debian
-            image: public.ecr.aws/ubuntu/ubuntu:24.04
+          - name: ubuntu-host
+            image: runner-host
             package_manager: apt-get
           - name: fedora
             image: quay.io/fedora/fedora:43
@@ -71,17 +87,27 @@ jobs:
           IMAGE: ${{ matrix.image }}
           PACKAGE_MANAGER: ${{ matrix.package_manager }}
         run: |
-          docker run --rm \
-            -e PACKAGE_MANAGER="$PACKAGE_MANAGER" \
-            -v "$PWD:/src:ro" \
-            "$IMAGE" \
-            /bin/bash -lc '
-              command -v "$PACKAGE_MANAGER"
-              bash -n /src/packaging/universal/install-payload.sh
-              bash -n /src/install-linux.sh
-              bash -n /src/install-cachyos.sh
-              /src/packaging/universal/install-payload.sh --help | grep -q "x86_64 Linux with systemd and glibc"
-            '
+          # Ubuntu hosted runner IS Ubuntu 24.04: no external registry pull
+          # (Amazon ECR exceeded its public anonymous rate limit).
+          if [ "$IMAGE" = runner-host ]; then
+            command -v "$PACKAGE_MANAGER"
+            bash -n packaging/universal/install-payload.sh
+            bash -n install-linux.sh
+            bash -n install-cachyos.sh
+            packaging/universal/install-payload.sh --help | grep -q "x86_64 Linux with systemd and glibc"
+          else
+            docker run --rm \
+              -e PACKAGE_MANAGER="$PACKAGE_MANAGER" \
+              -v "$PWD:/src:ro" \
+              "$IMAGE" \
+              /bin/bash -lc '
+                command -v "$PACKAGE_MANAGER"
+                bash -n /src/packaging/universal/install-payload.sh
+                bash -n /src/install-linux.sh
+                bash -n /src/install-cachyos.sh
+                /src/packaging/universal/install-payload.sh --help | grep -q "x86_64 Linux with systemd and glibc"
+              '
+          fi
 
   desktop:
     runs-on: ubuntu-24.04

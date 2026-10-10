@@ -185,6 +185,20 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw chec
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l experimental
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l set-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l confirm
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l experimental
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l set-id -x
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l confirm
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l state-dir -r -F
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l experimental
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -s h -l help -d 'show this help message and exit'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l target -r -F
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -l allow-local
@@ -245,6 +259,8 @@ complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw chec
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a schedule-run -d 'schedule-run'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-list -d 'set-list'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-rear-copy -d 'set-rear-copy'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-rear-recover -d 'set-rear-recover'
+complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-rescue-iso -d 'set-rescue-iso'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-restore -d 'set-restore'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-resume -d 'set-resume'
 complete -c btrfs-backup-ng -n '__fish_btrfs_backup_ng_using_subcommand raw checkpoint-v2' -a set-retention-plan -d 'set-retention-plan'

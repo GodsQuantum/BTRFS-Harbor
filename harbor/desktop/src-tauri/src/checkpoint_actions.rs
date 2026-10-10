@@ -179,7 +179,7 @@ fn set_action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
     let action = req.action.as_str();
     if !matches!(
         action,
-        "set-start" | "set-resume" | "set-status" | "set-restore" | "set-list"
+        "set-start" | "set-resume" | "set-status" | "set-restore" | "set-list" | "set-rescue-iso"
     ) {
         return Err("Unsupported machine-set action".into());
     }
@@ -234,6 +234,9 @@ fn set_action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
             return Err("Noncanonical machine-set ID".into());
         }
         args.extend(["--set-id".into(), set_id.into()]);
+    }
+    if action == "set-rescue-iso" && req.confirm {
+        args.push("--confirm".into());
     }
     if action == "set-restore" {
         let staging = req.staging.as_deref().ok_or("Missing restore staging")?;
@@ -373,6 +376,19 @@ mod tests {
                 .unwrap()
                 .contains(&"--confirm".into())
         );
+        let mut iso = base("set-rescue-iso");
+        let args = action_arguments(&iso).unwrap();
+        assert!(args.contains(&"--set-id".into()));
+        assert!(args.contains(&"--experimental".into()));
+        assert!(!args.contains(&"--confirm".into()));
+        iso.confirm = true;
+        assert!(
+            action_arguments(&iso)
+                .unwrap()
+                .contains(&"--confirm".into())
+        );
+        iso.set_id = Some("../invalid".into());
+        assert!(action_arguments(&iso).is_err());
 
         assert!(
             !action_arguments(&base("set-list"))

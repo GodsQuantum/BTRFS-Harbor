@@ -14,6 +14,7 @@
 		type SnapperSnapshotChoice
 	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
+	import { chooseBackupNow } from './backup-now';
 	import { formatBytesBinary } from './status';
 	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
 	import type { Locale } from './i18n';
@@ -146,10 +147,10 @@
 	let machineSets: MachineSetEntry[] = [];
 	$: machineTarget = destination.path ?? '';
 	$: unfinishedMachine = machineSets.some((item) => item.status !== 'completed_btrfs_only');
-	async function refreshMachineSets() {
+	async function refreshMachineSets(): Promise<boolean> {
 		if (!isTauri() || !machineTarget || !machineTarget.startsWith('/')) {
 			machineSets = [];
-			return;
+			return false;
 		}
 		try {
 			const json = await loadMachineSetCatalog(machineTarget);
@@ -163,17 +164,56 @@
 					typeof value.status === 'string' &&
 					typeof value.members === 'number'
 			);
+			return true;
 		} catch (reason) {
 			error = String(reason);
+			return false;
 		}
 	}
 	async function machineTransfer(action: 'set-start' | 'set-resume', setId?: string) {
-		if (running || !machineTarget || destination.kind === 'ssh') return;
-		if (action === 'set-start' && (unfinishedMachine || unfinished)) return;
+		if (running) return;
+		if (!isTauri() || !machineTarget || destination.kind === 'ssh') {
+			error =
+				locale === 'fr'
+					? 'Destination non compatible avec les checkpoints Btrfs.'
+					: 'Destination does not support Btrfs checkpoints.';
+			return;
+		}
+		if (action === 'set-start' && (unfinishedMachine || unfinished)) {
+			error =
+				locale === 'fr'
+					? 'Une sauvegarde interrompue existe : utilisez Reprendre ci-dessous avant de démarrer un nouvel ensemble.'
+					: 'An interrupted backup exists: use Resume below before creating another set.';
+			return;
+		}
 		running = true;
 		error = '';
 		info = '';
 		try {
+			// The configured export must still be mounted under the same source.
+			// Never write to the empty directory left beneath a detached NAS.
+			const probe = await inspectDestinationMount(machineTarget);
+			if (
+				!probe ||
+				!destination.mount_point ||
+				!destination.expected_mount_source ||
+				probe.mount_point !== destination.mount_point ||
+				probe.source !== destination.expected_mount_source ||
+				((destination.kind === 'nfs' || destination.kind === 'smb') &&
+					probe.kind !== destination.kind)
+			) {
+				throw new Error(
+					locale === 'fr'
+						? 'Destination déconnectée ou remplacée. Rechoisissez une destination valide.'
+						: 'Destination missing or replaced. Select a valid backup destination.'
+				);
+			}
+			info =
+				locale === 'fr'
+					? 'Sauvegarde des volumes Btrfs en cours…'
+					: locale === 'zh-CN'
+						? '正在备份 Btrfs 卷…'
+						: 'Backing up Btrfs volumes…';
 			const response = await runCheckpointAction({
 				action,
 				target: machineTarget,
@@ -201,6 +241,34 @@
 			await refreshMachineSets();
 			await refresh();
 		}
+	}
+	/** Same complete Btrfs machine-set action used by the dashboard's primary CTA.
+	 * Never silently create a new set when a resumable transfer already exists.
+	 */
+	export async function backupNow(): Promise<void> {
+		if (running) return;
+		// Reload the durable destination journal before deciding start vs resume.
+		// A stale cached list must NEVER trigger a duplicate new machine set.
+		if (!(await refreshMachineSets())) return;
+		await refresh();
+		const choice = chooseBackupNow(machineSets, entries);
+		if (choice.kind === 'resume-set') {
+			await machineTransfer('set-resume', choice.id);
+			return;
+		}
+		if (choice.kind === 'resume-stream') {
+			const item = entries.find((entry) => entry.transfer_id === choice.id);
+			if (item) await command('resume', item);
+			return;
+		}
+		if (choice.kind === 'choose-set' || choice.kind === 'choose-stream') {
+			error =
+				locale === 'fr'
+					? 'Plusieurs sauvegardes interrompues : choisissez celle à reprendre ci-dessous.'
+					: 'Multiple interrupted backups: choose which one to resume below.';
+			return;
+		}
+		await machineTransfer('set-start');
 	}
 	let running = false;
 	let busy = false;

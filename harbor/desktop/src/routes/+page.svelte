@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { isTauri } from '@tauri-apps/api/core';
 	import Activity from 'lucide-svelte/icons/activity';
 	import Anchor from 'lucide-svelte/icons/anchor';
 	import ArchiveRestore from 'lucide-svelte/icons/archive-restore';
@@ -107,6 +108,17 @@
 	let scheduleFeedback = '';
 	let scheduleError = '';
 	let editingJobId: string | null = null;
+	let checkpointControls: CheckpointControls | undefined;
+	let backupNowRunning = false;
+	async function backupNow() {
+		if (!checkpointControls || backupNowRunning) return;
+		backupNowRunning = true;
+		try {
+			await checkpointControls.backupNow();
+		} finally {
+			backupNowRunning = false;
+		}
+	}
 	let jobRuntimes: Record<string, ProfileRuntime | null> = {};
 	$: activeProfile = harborConfig?.profiles[0] ?? null;
 	$: activeSchedule = activeProfile?.on_calendar ?? '';
@@ -553,6 +565,31 @@
 								: 'Backup or restore'}
 					</h2>
 					<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+						<button
+							class="primary"
+							type="button"
+							onclick={() => void backupNow()}
+							disabled={!isTauri() ||
+								!checkpointControls ||
+								backupNowRunning ||
+								!activeProfile ||
+								activeProfile.sources.length === 0 ||
+								!harborConfig ||
+								resolveDestination(harborConfig, activeProfile).kind === 'ssh'}
+						>
+							<DatabaseBackup size={18} />
+							{backupNowRunning
+								? locale === 'fr'
+									? 'Sauvegarde en cours…'
+									: locale === 'zh-CN'
+										? '正在备份…'
+										: 'Backing up…'
+								: locale === 'fr'
+									? 'Sauvegarder maintenant'
+									: locale === 'zh-CN'
+										? '立即备份'
+										: 'Back up now'}
+						</button>
 						<button class="secondary" onclick={() => (active = 'destinations')}>
 							<HardDrive size={18} />
 							{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}
@@ -563,19 +600,20 @@
 						</button>
 					</div>
 				</article>
-				{#if !harborConfig || !activeProfile || !activeProfileHasSnapper}
+				{#if !harborConfig || !activeProfile || activeProfile.sources.length === 0}
 					<article class="panel" style="grid-column: 1 / -1; padding: 18px;">
 						{locale === 'fr'
-							? 'Aucun snapshot Snapper configuré. Choisissez une source Btrfs dans les paramètres.'
+							? 'Aucune source Btrfs configurée. Ajoutez des volumes dans les paramètres.'
 							: locale === 'zh-CN'
-								? '尚未配置 Snapper 快照来源。'
-								: 'No Snapper snapshot configured yet. Choose a Btrfs source in settings.'}
+								? '尚未配置 Btrfs 来源，请在设置中添加卷。'
+								: 'No Btrfs source configured. Add volumes in settings.'}
 					</article>
 				{/if}
 
-				{#if harborConfig && activeProfile && activeProfileHasSnapper}
+				{#if harborConfig && activeProfile && activeProfile.sources.length > 0}
 					<div style="grid-column: 1 / -1; min-width: 0">
 						<CheckpointControls
+							bind:this={checkpointControls}
 							onChooseDestination={saveChosenCheckpointDestination}
 							profile={activeProfile}
 							destination={resolveDestination(harborConfig, activeProfile)}

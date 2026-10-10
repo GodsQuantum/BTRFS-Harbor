@@ -32,6 +32,13 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.9 — Back up now on the home screen
+
+- A prominent **Back up now** button on the overview backs up all detected persistent Btrfs subvolumes using the existing durable machine-set v2 transaction.
+- Native Btrfs snapshot users now see the backup panel even without Snapper.
+- A single click resumes one unfinished backup before creating a new set. Multiple unfinished jobs require an explicit choice. Network destination identity is checked before transfer.
+- Experimental: EFI, non-Btrfs volumes and bootable blank-disk restoration are still unavailable; v2 SSH checkpointing and automatic pruning remain unfinished.
+
 ## v0.2.6-rc.8 — crash-safe Btrfs/NFS supervised preview
 
 - Automatic v2 incremental chains now have a maximum of **7 links by default**; the next save is a full independently restorable anchor (configurable 1–256). A read-only retention plan is available; automatic deletion is not enabled.

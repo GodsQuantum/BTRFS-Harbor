@@ -32,6 +32,13 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.9 — Sauvegarder maintenant sur l'accueil
+
+- Le bouton principal **Sauvegarder maintenant** sauvegarde les sous-volumes Btrfs persistants détectés avec la transaction multivolume v2 existante.
+- Les utilisateurs de snapshots Btrfs natifs voient désormais la sauvegarde même sans Snapper.
+- Un seul clic reprend d'abord la sauvegarde interrompue lorsqu'elle est unique ; plusieurs sauvegardes imposent un choix. L'identité du montage de destination est vérifiée.
+- Préversion : EFI, partitions non-Btrfs et restauration amorçable non inclus ; SSH reprenable et rétention automatique non finalisés.
+
 ## v0.2.6-rc.8 — préversion supervisée et reprise Btrfs/NFS
 
 - Les chaînes incrémentales v2 sont limitées à **7 niveaux par défaut** : Harbor crée alors une nouvelle base complète autonome (réglable de 1 à 256). Le plan de rétention est consultable sans suppression ; la purge automatique reste désactivée.

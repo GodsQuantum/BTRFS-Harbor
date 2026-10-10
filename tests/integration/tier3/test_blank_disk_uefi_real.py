@@ -120,6 +120,13 @@ def main() -> None:
     assert os.readlink("/proc/self/ns/mnt") != os.readlink("/proc/1/ns/mnt"), (
         "isolated mount namespace required"
     )
+    # A Github-hosted runner may ALREADY mount a real ESP at /boot/efi.
+    # Detach that *namespace-local copy* before attaching our disposable
+    # loop FAT32, otherwise /proc/self/mountinfo has stacked entries at
+    # the same path and the older hidden entry fails pinned mount checks.
+    # The runner host mount namespace is never changed.
+    if ESP.is_mount():
+        run("umount", str(ESP))
     kernel_images = sorted(Path("/boot").glob("vmlinuz-*"))
     candidates = [
         path

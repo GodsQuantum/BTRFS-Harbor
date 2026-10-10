@@ -196,6 +196,40 @@ def test_real_btrfs_plus_real_fat32_efi_staged_restore(
             b"harbor-efi-test-boot-file"
         )
         assert any(p.read_text() == "fixture-root" for p in staged.rglob("fstab"))
+        # True portable destination-only restore: the origin export and mount
+        # path have changed, and the original backed-up computer is NOT used.
+        # Read-only recovery must not create/update a target lock, journal,
+        # directory, checksum or metadata on this relocated backup disk.
+        import shutil
+
+        relocated = tmp_path / "relocated-backup"
+        shutil.copytree(archive, relocated)
+        before = {
+            item.name: (item.stat().st_size, item.stat().st_mtime_ns)
+            for item in relocated.iterdir()
+        }
+        alternate = btrfs_volume / "restored-from-relocated"
+        alternate.mkdir()
+        from_changed_path = _cli(
+            "set-restore",
+            "--target",
+            str(relocated),
+            "--set-id",
+            first["set_id"],
+            "--staging",
+            str(alternate),
+            "--allow-local",
+            "--experimental",
+            "--confirm",
+        )
+        assert from_changed_path["restored"] is True
+        assert (
+            alternate / "boot-files/boot-000/EFI/BOOT/BOOTX64.EFI"
+        ).read_bytes() == (b"harbor-efi-test-boot-file")
+        assert before == {
+            item.name: (item.stat().st_size, item.stat().st_mtime_ns)
+            for item in relocated.iterdir()
+        }
         # Actual ReaR bridge: a DIFFERENT blank Btrfs loopback filesystem
         # and a DIFFERENT FAT32 loopback ESP are mounted in this disposable
         # privileged GitHub CI container. Never on Cloud9 or a workstation.

@@ -632,11 +632,23 @@ def execute_machine_set(args: argparse.Namespace) -> int:
     guard, stable = _open_guard(root, allow_local=args.allow_local)
     with guard:
         data = _read(root, set_id)
+        # Destination-only restore may be run on a DIFFERENT computer with
+        # the backup export mounted at a new path. No destination lock file,
+        # no write, and no dependence on the original path/fingerprint.
+        # The current mount is pinned for the duration of the read.
+        if action in (
+            "set-status",
+            "set-restore",
+            "set-rear-recover",
+            "set-rear-copy",
+        ):
+            readonly_result = _read_only_machine_action(root, data, args)
+            guard.validate_fd(guard.directory_fd)
+            return readonly_result
+        # Mutating operations (send, ISO publish) still require the original
+        # exact export. A changed/missing mount is never eligible for writes.
         if stable != data.get("destination_fingerprint"):
             raise ValueError("machine-set destination fingerprint changed")
-        # A read-only status or dry-run needs no extra lock file.
-        if action == "set-status":
-            return _result(data)
         with _exclusive_set_lock(guard, set_id):
             if action == "set-resume":
                 return _result(
@@ -647,8 +659,6 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                         state_dir=args.state_dir,
                     )
                 )
-            if action == "set-restore":
-                return _restore(root, data, args)
             if action == "set-rescue-iso":
                 _check_catalog(data)
                 if not args.confirm:
@@ -683,46 +693,56 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                     iso = build_rescue_iso(root, data, pinned)
                 print(json.dumps(iso, sort_keys=True))
                 return 0
-            if action == "set-rear-recover":
-                return _rear_recover(root, data, args)
-            if action == "set-rear-copy":
-                # Nothing partitions/formats a disk in Harbor. ReaR must
-                # already have recreated filesystems and mounted /mnt/local.
-                # The rescue marker and strict mount checks are inside the
-                # bridge, so a healthy running OS can never trigger writes.
-                staging = Path(args.staging)
-                if not args.confirm:
-                    plan = plan_rear_restore(data, staging, Path("/mnt/local"))
-                    print(
-                        json.dumps(
-                            {
-                                "dry_run": True,
-                                "bootable": False,
-                                "plan": [
-                                    {
-                                        "source": str(item.source),
-                                        "target": str(item.target),
-                                    }
-                                    for item in plan
-                                ],
-                                "note": "ReaR must finalize the initramfs and bootloader afterwards.",
-                            }
-                        )
-                    )
-                    return 0
-                restored = apply_rear_restore(data, staging)
-                print(
-                    json.dumps(
-                        {
-                            "copied_to_rear": True,
-                            "bootable": False,
-                            "mounts": [item.original_mount for item in restored],
-                            "note": "ReaR bootloader finalization and QEMU boot test still required.",
-                        }
-                    )
-                )
-                return 0
+
     raise ValueError("unknown machine-set action")
+
+
+def _read_only_machine_action(root: Path, data: dict, args: argparse.Namespace) -> int:
+    action = args.checkpoint_action
+    if action == "set-status":
+        return _result(data)
+    if action == "set-restore":
+        return _restore(root, data, args)
+    if action == "set-rear-recover":
+        return _rear_recover(root, data, args)
+    if action == "set-rear-copy":
+        # Nothing partitions/formats a disk in Harbor. ReaR must
+        # already have recreated filesystems and mounted /mnt/local.
+        # The rescue marker and strict mount checks are inside the
+        # bridge, so a healthy running OS can never trigger writes.
+        staging = Path(args.staging)
+        if not args.confirm:
+            plan = plan_rear_restore(data, staging, Path("/mnt/local"))
+            print(
+                json.dumps(
+                    {
+                        "dry_run": True,
+                        "bootable": False,
+                        "plan": [
+                            {
+                                "source": str(item.source),
+                                "target": str(item.target),
+                            }
+                            for item in plan
+                        ],
+                        "note": "ReaR must finalize the initramfs and bootloader afterwards.",
+                    }
+                )
+            )
+            return 0
+        restored = apply_rear_restore(data, staging)
+        print(
+            json.dumps(
+                {
+                    "copied_to_rear": True,
+                    "bootable": False,
+                    "mounts": [item.original_mount for item in restored],
+                    "note": "ReaR bootloader finalization and QEMU boot test still required.",
+                }
+            )
+        )
+        return 0
+    raise ValueError("unknown read-only machine-set action")
 
 
 def _rear_recover(root: Path, data: dict, args: argparse.Namespace) -> int:

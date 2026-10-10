@@ -14,7 +14,7 @@
 		type SnapperSnapshotChoice
 	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
-	import { chooseBackupNow } from './backup-now';
+	import { chooseBackupNow, isMachineSetFinished } from './backup-now';
 	import { formatBytesBinary } from './status';
 	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
 	import type { Locale } from './i18n';
@@ -146,7 +146,7 @@
 	}
 	let machineSets: MachineSetEntry[] = [];
 	$: machineTarget = destination.path ?? '';
-	$: unfinishedMachine = machineSets.some((item) => item.status !== 'completed_btrfs_only');
+	$: unfinishedMachine = machineSets.some((item) => !isMachineSetFinished(item.status));
 	async function refreshMachineSets(): Promise<boolean> {
 		if (!isTauri() || !machineTarget || !machineTarget.startsWith('/')) {
 			machineSets = [];
@@ -226,14 +226,22 @@
 				members: unknown[];
 				status: string;
 			};
-			info =
-				summary.status === 'completed_btrfs_only'
-					? locale === 'fr'
-						? 'Volumes Btrfs sauvegardés : ' + summary.members.length + '. EFI exclu.'
-						: locale === 'zh-CN'
-							? '已备份 ' + summary.members.length + ' 个 Btrfs 卷。EFI 未包含。'
-							: 'Saved ' + summary.members.length + ' Btrfs volumes. EFI excluded.'
-					: response;
+			info = isMachineSetFinished(summary.status)
+				? locale === 'fr'
+					? 'Volumes Btrfs sauvegardés : ' +
+						summary.members.length +
+						(summary.status === 'completed_btrfs_and_boot_files'
+							? '. Fichiers EFI et de démarrage inclus ; reconstruction amorçable non certifiée.'
+							: '. EFI non détecté/inclus.')
+					: locale === 'zh-CN'
+						? '已备份 ' + summary.members.length + ' 个 Btrfs 卷。EFI 未包含。'
+						: 'Saved ' +
+							summary.members.length +
+							' Btrfs volumes. ' +
+							(summary.status === 'completed_btrfs_and_boot_files'
+								? 'Boot/EFI files included; bare-metal boot recovery is not certified.'
+								: 'EFI not mounted/included.')
+				: response;
 		} catch (reason) {
 			error = String(reason);
 		} finally {
@@ -573,12 +581,12 @@
 			</button>
 			<p class="source-warning">
 				{locale === 'fr'
-					? 'Volumes Btrfs uniquement. EFI et les autres partitions sont exclus ; restauration amorçable non disponible.'
+					? 'Les volumes Btrfs et les partitions EFI /boot montées sont sauvegardés ; le redémarrage depuis un disque vierge reste à valider.'
 					: locale === 'zh-CN'
 						? '仅包含 Btrfs 卷；EFI 等其他分区未包含，暂不支持可启动恢复。'
-						: 'Btrfs volumes only. EFI and other partitions are excluded; bootable recovery unavailable.'}
+						: 'Btrfs volumes and mounted separate EFI/boot partitions are saved; bootable bare-metal recovery is not yet certified.'}
 			</p>
-			{#each machineSets.filter((item) => item.status !== 'completed_btrfs_only') as item (item.set_id)}
+			{#each machineSets.filter((item) => !isMachineSetFinished(item.status)) as item (item.set_id)}
 				<div class="actions">
 					<span>{item.members} Btrfs · {item.status}</span>
 					<button

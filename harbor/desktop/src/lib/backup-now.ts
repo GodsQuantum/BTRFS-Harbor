@@ -6,11 +6,15 @@ export type BackupNowChoice =
 	| { kind: 'choose-set' }
 	| { kind: 'choose-stream' };
 
+export function isMachineSetFinished(status: string): boolean {
+	return status === 'completed_btrfs_only' || status === 'completed_btrfs_and_boot_files';
+}
+
 export function chooseBackupNow(
 	sets: ReadonlyArray<{ set_id: string; status: string }>,
 	transfers: ReadonlyArray<{ transfer_id: string; resumable: boolean }>
 ): BackupNowChoice {
-	const pendingSets = sets.filter((item) => item.status !== 'completed_btrfs_only');
+	const pendingSets = sets.filter((item) => !isMachineSetFinished(item.status));
 	if (pendingSets.length > 1) return { kind: 'choose-set' };
 	if (pendingSets.length === 1) return { kind: 'resume-set', id: pendingSets[0].set_id };
 	const pendingStreams = transfers.filter((item) => item.resumable);

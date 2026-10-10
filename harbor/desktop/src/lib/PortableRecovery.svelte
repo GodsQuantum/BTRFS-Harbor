@@ -7,6 +7,7 @@
 		runCheckpointAction
 	} from './agent';
 	import type { Locale } from './i18n';
+	import { isMachineSetFinished } from './backup-now';
 	export let locale: Locale;
 
 	interface ArchiveRecord {
@@ -69,7 +70,7 @@
 					typeof value.status === 'string' &&
 					typeof value.members === 'number'
 			);
-			selectedSet = machineSets.find((set) => set.status === 'completed_btrfs_only')?.set_id ?? '';
+			selectedSet = machineSets.find((set) => isMachineSetFinished(set.status))?.set_id ?? '';
 			machinePlan = '';
 			machineResult = '';
 		} catch (reason) {
@@ -196,7 +197,7 @@
 		{#if backupFolder}<code>{backupFolder}</code>{/if}
 	</div>
 	{#if backupFolder}
-		{#if machineSets.some((item) => item.status === 'completed_btrfs_only')}
+		{#if machineSets.some((item) => isMachineSetFinished(item.status))}
 			<div class="recovery-section">
 				<label class="field">
 					{label('Complete Btrfs volume set', 'Ensemble de volumes Btrfs', '完整的 Btrfs 卷组')}
@@ -208,7 +209,7 @@
 							machineResult = '';
 						}}
 					>
-						{#each machineSets.filter((item) => item.status === 'completed_btrfs_only') as item (item.set_id)}
+						{#each machineSets.filter( (item) => isMachineSetFinished(item.status) ) as item (item.set_id)}
 							<option value={item.set_id}>
 								{item.members} Btrfs · {item.set_id.slice(0, 8)}
 							</option>
@@ -217,8 +218,8 @@
 				</label>
 				<p class="warning">
 					{label(
-						'Data recovery only: EFI, bootloader and other filesystems are not included.',
-						'Récupération de données seulement : EFI, chargeur de démarrage et autres systèmes de fichiers non inclus.',
+						'Btrfs and archived boot/EFI files can be staged; rebuilding the disk bootloader remains manual and is not yet certified.',
+						'Restauration des volumes Btrfs et archives EFI possibles dans un dossier temporaire ; le redémarrage sur disque vierge reste non certifié.',
 						'仅恢复数据；不包含 EFI、引导程序及其他文件系统。'
 					)}
 				</p>
@@ -243,7 +244,11 @@
 						disabled={busy || !machinePlan}
 						onclick={() => void recoverMachineSet(false)}
 					>
-						{label('Restore Btrfs volumes', 'Restaurer les volumes Btrfs', '恢复 Btrfs 卷')}
+						{label(
+							'Stage Btrfs and boot files',
+							'Restaurer Btrfs et fichiers de démarrage dans le dossier temporaire',
+							'恢复 Btrfs 与启动文件'
+						)}
 					</button>
 				{/if}
 				{#if machinePlan}<pre class="plan">{machinePlan}</pre>{/if}

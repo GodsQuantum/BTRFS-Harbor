@@ -23,6 +23,15 @@ from typing import Iterator
 from .. import __util__
 from ..config import RetentionConfig
 from ..core.machine_retention_v2 import SetPoint, calculate_set_retention
+from ..core.boot_files_v2 import (
+    assert_configured_boot_mounts_present,
+    capture_boot_member,
+    discover_boot_mounts,
+    snapshot_boot_layout,
+    stage_boot_members,
+    verify_boot_member,
+)
+from ..core.machine_inventory_v2 import _mount_rows
 from ..endpoint.raw_metadata import discover_raw_snapshots
 from ..core.machine_inventory_v2 import inspect_live_machine
 from ..core.native_snapshots import (
@@ -72,7 +81,7 @@ def _read(root: Path, set_id: str) -> dict:
         not isinstance(data, dict)
         or data.get("schema_version") != 1
         or data.get("set_id") != set_id
-        or data.get("coverage") != "btrfs-only"
+        or data.get("coverage") not in ("btrfs-only", "btrfs-and-boot-files")
         or not isinstance(data.get("members"), list)
         or not data["members"]
         or len(data["members"]) > 1024
@@ -109,6 +118,38 @@ def _read(root: Path, set_id: str) -> dict:
             )
         if member.get("status") not in ("pending", "sending", "completed"):
             raise ValueError("invalid machine-set member state")
+    boot_members = data.get("boot_members", [])
+    if not isinstance(boot_members, list) or len(boot_members) > 8:
+        raise ValueError("invalid boot partition inventory")
+    if data["coverage"] == "btrfs-and-boot-files" and not boot_members:
+        raise ValueError("boot coverage promised with no archived boot partitions")
+    for index, member in enumerate(boot_members):
+        if not isinstance(member, dict):
+            raise ValueError("invalid boot partition member")
+        if member.get("archive") != f".harbor-boot-{set_id}-{index:03d}.tar.gz":
+            raise ValueError("unreserved boot partition archive name")
+        if member.get("mount_point") not in (
+            "/boot",
+            "/boot/efi",
+            "/boot/firmware",
+            "/efi",
+        ):
+            raise ValueError("invalid boot partition mount")
+        if not isinstance(member.get("source"), str) or not member["source"].startswith(
+            "/dev/"
+        ):
+            raise ValueError("invalid boot partition source")
+        if member.get("filesystem") not in (
+            "vfat",
+            "ext2",
+            "ext3",
+            "ext4",
+            "xfs",
+            "f2fs",
+        ):
+            raise ValueError("unsupported boot filesystem type")
+        if member.get("status") not in ("pending", "completed"):
+            raise ValueError("invalid boot archive state")
     return data
 
 
@@ -290,7 +331,30 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
         member["status"] = "completed"
         member["transfer_id"] = entries[0]["transfer_id"]
         _write(root, data, allow_local=allow_local)
-    data["status"] = "completed_btrfs_only"
+    # A second, source-readonly archive class shares the SAME machine-set
+    # transaction/catalog and destination mount guard. EFI/boot are not
+    # Btrfs subvolumes; they must never be passed to btrfs send.
+    boot_members = data.get("boot_members", [])
+    if boot_members:
+        guard, _ = _open_guard(
+            root,
+            allow_local=allow_local,
+            expected=data["destination_fingerprint"],
+        )
+        with guard:
+            for index, member in enumerate(boot_members):
+                if member["status"] == "completed":
+                    if not verify_boot_member(root, member):
+                        raise ValueError(
+                            f"completed boot archive failed checksum: {index}"
+                        )
+                    continue
+                recorded = capture_boot_member(root, guard, member)
+                boot_members[index] = recorded
+                _write(root, data, allow_local=allow_local)
+        data["status"] = "completed_btrfs_and_boot_files"
+    else:
+        data["status"] = "completed_btrfs_only"
     _write(root, data, allow_local=allow_local)
     return data
 
@@ -359,6 +423,10 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
             ):
                 raise ValueError("unverified raw archive in retention inventory")
             graph[row.name] = row.parent_name
+        if any(record.get("boot_members") for record in records):
+            raise ValueError(
+                "retention eligibility unavailable for boot-bearing machine sets"
+            )
         points: list[SetPoint] = []
         for record in records:
             stamp = datetime.fromisoformat(record["created_utc"])
@@ -442,6 +510,7 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                     "bootable": False,
                     "created_utc": data.get("created_utc"),
                     "members": len(data["members"]),
+                    "boot_partitions": len(data.get("boot_members", [])),
                 }
             )
             if len(rows) >= 100:
@@ -493,18 +562,44 @@ def execute_machine_set(args: argparse.Namespace) -> int:
         max_depth = getattr(args, "max_incremental_depth", 7)
         if type(max_depth) is not int or not 1 <= max_depth <= 256:
             raise ValueError("max incremental depth must be 1..256")
+        # Machine-wide mode captures separate EFI and /boot partitions.
+        # Explicit --source mode (used for selecting data volumes and CI
+        # fixtures) deliberately does not quietly archive the host ESP.
+        boot_rows = []
+        layout = None
+        if not requested:
+            mount_rows = _mount_rows(Path("/proc/mounts").read_text(encoding="utf-8"))
+            configured = Path("/etc/fstab")
+            if configured.exists():
+                assert_configured_boot_mounts_present(
+                    mount_rows, configured.read_text(encoding="utf-8")
+                )
+            boot_rows = discover_boot_mounts(mount_rows)
+            layout = snapshot_boot_layout()
+        boot_members = [
+            {
+                "archive": f".harbor-boot-{set_id}-{index:03d}.tar.gz",
+                "mount_point": item["mount_point"],
+                "source": item["source"],
+                "filesystem": item["filesystem"],
+                "status": "pending",
+            }
+            for index, item in enumerate(boot_rows)
+        ]
         data = {
             "schema_version": 1,
             "max_incremental_depth": max_depth,
             "set_id": set_id,
             "profile_id": args.profile_id,
             "destination_fingerprint": stable,
-            "coverage": "btrfs-only",
+            "coverage": "btrfs-and-boot-files" if boot_members else "btrfs-only",
             "bootable": False,
             "status": "pending",
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "inventory": inventory,
             "members": members,
+            "boot_members": boot_members,
+            "disk_layout": layout,
         }
         with guard, _exclusive_set_lock(guard, set_id):
             _write(root, data, allow_local=args.allow_local)
@@ -553,6 +648,14 @@ def _result(data: dict) -> int:
                     }
                     for m in data["members"]
                 ],
+                "boot_partitions": [
+                    {
+                        "mount": m["mount_point"],
+                        "filesystem": m["filesystem"],
+                        "status": m["status"],
+                    }
+                    for m in data.get("boot_members", [])
+                ],
             },
             sort_keys=True,
         )
@@ -561,7 +664,7 @@ def _result(data: dict) -> int:
 
 
 def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
-    if data["status"] != "completed_btrfs_only":
+    if data["status"] not in ("completed_btrfs_only", "completed_btrfs_and_boot_files"):
         raise ValueError("refusing incomplete machine-set recovery")
     staging = Path(args.staging)
     if not staging.is_absolute() or staging.is_symlink() or not staging.is_dir():
@@ -583,6 +686,9 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
     for member in data["members"]:
         if not _archive_valid(root, member["archive"]):
             raise ValueError(f"invalid/missing archive: {member['archive']}")
+    for member in data.get("boot_members", []):
+        if not verify_boot_member(root, member):
+            raise ValueError(f"invalid/missing boot archive: {member['archive']}")
     plan = [
         {
             "archive": member["archive"],
@@ -591,8 +697,25 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
         }
         for index, member in enumerate(data["members"])
     ]
+    boot_plan = [
+        {
+            "original_mount": m["mount_point"],
+            "archive": m["archive"],
+            "staging": str(staging / "boot-files" / f"boot-{i:03d}"),
+        }
+        for i, m in enumerate(data.get("boot_members", []))
+    ]
     if not args.confirm:
-        print(json.dumps({"dry_run": True, "bootable": False, "plan": plan}))
+        print(
+            json.dumps(
+                {
+                    "dry_run": True,
+                    "bootable": False,
+                    "plan": plan,
+                    "boot_plan": boot_plan,
+                }
+            )
+        )
         return 0
     for entry in plan:
         destination = Path(entry["staging"])
@@ -620,5 +743,14 @@ def _restore(root: Path, data: dict, args: argparse.Namespace) -> int:
             raise RuntimeError(
                 f"restore failed for {entry['archive']}: {outcome.stderr[-1000:]}"
             )
-    print(json.dumps({"restored": True, "bootable": False, "plan": plan}))
+    if data.get("boot_members"):
+        boot_destination = __util__.create_below(
+            staging, "boot-files", mode=0o700, what="Boot-file restore staging"
+        )
+        stage_boot_members(root, data["boot_members"], boot_destination)
+    print(
+        json.dumps(
+            {"restored": True, "bootable": False, "plan": plan, "boot_plan": boot_plan}
+        )
+    )
     return 0

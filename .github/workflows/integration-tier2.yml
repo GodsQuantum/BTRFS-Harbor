@@ -47,7 +47,8 @@ jobs:
             python3-pip \
             git \
             kmod \
-            util-linux
+            util-linux \
+            dosfstools
 
       - name: Check btrfs support
         run: |

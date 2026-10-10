@@ -32,6 +32,12 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## v0.2.6-rc.10 — capture EFI et fichiers de démarrage
+
+- **Sauvegarder maintenant** inclut les volumes Btrfs et les partitions EFI FAT32 ou /boot séparées montées, dans la transaction de sauvegarde existante.
+- Les archives EFI sont vérifiées en SHA-256 et récupérables dans un dossier vide sans écraser les partitions originales. Une partition déclarée dans /etc/fstab mais non montée provoque une erreur.
+- **La restauration amorçable sur disque vierge n'est pas encore certifiée** : il faut valider la reconstruction GPT/LUKS, GRUB/Limine/systemd-boot, initramfs et UEFI dans QEMU/OVMF. Autres volumes non-Btrfs, SSH reprenable et purge automatique restent à finaliser.
+
 ## v0.2.6-rc.9 — Sauvegarder maintenant sur l'accueil
 
 - Le bouton principal **Sauvegarder maintenant** sauvegarde les sous-volumes Btrfs persistants détectés avec la transaction multivolume v2 existante.

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6-rc.10] — EFI partition coverage (supervised)
+
+- Existing v2 transaction includes separately mounted EFI/boot files as
+  private SHA256-verified tar.gz archives with fail-closed mount checks.
+- Saves read-only disk topology and allows safe temporary staging recovery.
+- Tested real FAT32 loopback + Btrfs; NOT CERTIFIED to boot a blank disk.
+
 ## [0.2.6-rc.9] — one-click manual backup on the dashboard
 
 - Visible primary Backup Now action for native Btrfs profiles without Snapper.

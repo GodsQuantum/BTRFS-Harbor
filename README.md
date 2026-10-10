@@ -32,6 +32,13 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## v0.2.6-rc.10 — capture separate EFI and boot files
+
+- The **Back up now** action captures native Btrfs volumes and separately mounted FAT32 EFI and ext4 boot files in the same durable machine-set transaction.
+- Boot files have independent SHA-256 verification, safe mount detection, and resumable catalog state. Stage recovery restores to a new empty folder, never overwrites live disks.
+- An EFI partition declared in /etc/fstab but unmounted fails closed.
+- **Still not a bootable full-system recovery**: creating a rescue ISO, recovering GPT/LUKS, bootloaders, initramfs and Secure Boot must pass QEMU/OVMF tests first. Unrelated non-Btrfs data, SSH-v2 resumability, and automated pruning remain unsupported.
+
 ## v0.2.6-rc.9 — Back up now on the home screen
 
 - A prominent **Back up now** button on the overview backs up all detected persistent Btrfs subvolumes using the existing durable machine-set v2 transaction.

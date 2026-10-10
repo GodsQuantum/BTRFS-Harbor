@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { chooseBackupNow } from './backup-now';
 
+import { isMachineSetFinished } from './backup-now';
+
 describe('Back up now - durable selection', () => {
+	it('never starts a duplicate for a completed Btrfs plus EFI machine point', () => {
+		expect(isMachineSetFinished('completed_btrfs_and_boot_files')).toBe(true);
+		expect(
+			chooseBackupNow([{ set_id: 'complete', status: 'completed_btrfs_and_boot_files' }], [])
+		).toEqual({ kind: 'start' });
+	});
+
 	it('starts when there is no unfinished transaction', () => {
 		expect(chooseBackupNow([{ set_id: 'old', status: 'completed_btrfs_only' }], [])).toEqual({
 			kind: 'start'

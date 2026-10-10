@@ -1,6 +1,10 @@
 name: ReaR Real ISO Acceptance
 
 on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/rear-iso-acceptance.yml
   workflow_dispatch:
 
 permissions:

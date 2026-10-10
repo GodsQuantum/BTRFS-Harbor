@@ -196,6 +196,26 @@ class MountGuard:
         ):
             raise RuntimeError("pinned mount unique identity changed")
 
+    def create_below(self, leaf: str, *, mode: int = 0o700) -> None:
+        """Create exactly ONE private leaf on the pinned existing mount FD.
+
+        Unlike path-based mkdir, this can never write into an unmounted
+        target's underlying host directory between a check and the syscall.
+        No parents, symlink, path traversal or target directory creation.
+        """
+        if (
+            not isinstance(leaf, str)
+            or not leaf
+            or "/" in leaf
+            or leaf in (".", "..")
+            or "\\x00" in leaf
+            or len(os.fsencode(leaf)) > 200
+        ):
+            raise ValueError("unsafe direct child name")
+        self.validate_fd(self.directory_fd)
+        os.mkdir(leaf, mode=mode, dir_fd=self.directory_fd)
+        self.validate_fd(self.directory_fd)
+
     def close(self) -> None:
         if not self._closed:
             self._closed = True

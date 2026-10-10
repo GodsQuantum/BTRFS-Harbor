@@ -212,7 +212,7 @@ def collect_verified_files(
         files = [_check_file(rootfd, name) for name in sorted(planned)]
         stamp = uuid.uuid4()
         dirname = TX_PREFIX + str(stamp)
-        os.mkdir(dirname, 0o700, dir_fd=rootfd)
+        guard.create_below(dirname, mode=0o700)
         os.fsync(rootfd)
         stagefd = os.open(
             dirname, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=rootfd

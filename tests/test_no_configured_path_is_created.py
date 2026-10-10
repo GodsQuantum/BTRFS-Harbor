@@ -101,6 +101,13 @@ REGISTRY: dict[str, tuple[str, ...]] = {
     # Harbor-owned readonly snapshots live under the already validated Btrfs
     # subvolume root (single component, never parents=True); they are source
     # artifacts, not an inferred destination/mount created from a typo.
+    # Transactional retention quarantine is one private leaf under the
+    # pre-existing, pinned, verified backup directory. Never mkdir parents,
+    # never recreate an unmounted NAS target.
+    "core/machine_retention_gc_v2.py::collect_verified_files": (BELOW,),
+    # Pinned-dirfd-only primitive creates a SINGLE child under the verified
+    # mount; unlike generic path mkdir it never falls through to NAS underlay.
+    "endpoint/mount_guard_v2.py::MountGuard.create_below": (PRIMITIVE,),
     "core/native_snapshots.py::_snapshot_directory": (BELOW,),
     "core/layout.py::PlainLayout._write_marker": (BELOW,),
     # The writer lock lives in .snapshots below a target that must already
@@ -415,7 +422,9 @@ class TestEveryCreationSiteIsClassified:
         offenders = [
             k
             for k, cats in REGISTRY.items()
-            if PRIMITIVE in cats and not k.startswith("__util__.py::")
+            if PRIMITIVE in cats
+            and not k.startswith("__util__.py::")
+            and k != "endpoint/mount_guard_v2.py::MountGuard.create_below"
         ]
         assert not offenders
 

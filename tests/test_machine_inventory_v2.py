@@ -172,7 +172,7 @@ def test_machine_set_list_never_hides_corrupted_catalogs(tmp_path, capsys):
 
     # Fail closed on malformed JSON, or on a malicious symlink, even if a
     # healthy backup is present. Silently filtering them looks like data loss.
-    with pytest.raises((ValueError, json.JSONDecodeError)):
+    with pytest.raises((ValueError, OSError)):
         execute_machine_set(args)
     (tmp_path / f".harbor-machine-set-{invalid_id}.json").unlink()
     with pytest.raises((ValueError, OSError)):

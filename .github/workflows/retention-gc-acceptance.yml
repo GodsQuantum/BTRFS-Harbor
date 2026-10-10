@@ -1,0 +1,34 @@
+name: Transactional Retention GC Disposable Runner Acceptance
+
+on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/retention-gc-acceptance.yml
+      - src/btrfs_backup_ng/core/machine_retention_gc_v2.py
+      - src/btrfs_backup_ng/core/machine_retention_v2.py
+      - tests/integration/tier3/test_retention_gc_ephemeral.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ephemeral-gc:
+    name: Crash-safe GC and foreign-file refusal in disposable runner folder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Install test dependencies
+        run: uv sync --frozen --extra dev
+      - name: Test ONLY disposable temporary files on GitHub runner
+        env:
+          GITHUB_ACTIONS: "true"
+        run: |
+          test "$GITHUB_ACTIONS" = "true"
+          uv run --frozen python tests/integration/tier3/test_retention_gc_ephemeral.py

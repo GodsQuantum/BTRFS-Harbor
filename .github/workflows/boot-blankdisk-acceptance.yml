@@ -1,6 +1,10 @@
 name: Fresh Disk UEFI Restore Acceptance
 
 on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/boot-blankdisk-acceptance.yml
   workflow_dispatch:
 
 permissions:

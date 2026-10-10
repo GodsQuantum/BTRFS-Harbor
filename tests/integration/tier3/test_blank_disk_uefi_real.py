@@ -117,7 +117,9 @@ def main() -> None:
     assert os.geteuid() == 0, "privileged disposable GitHub runner required"
     assert os.environ.get("GITHUB_ACTIONS") == "true", "CI-only disk builder"
     assert not ROOT.is_mount(), "root recovery mount is already in use"
-    assert not ESP.is_mount(), "host EFI recovery mount is already in use"
+    assert os.readlink("/proc/self/ns/mnt") != os.readlink("/proc/1/ns/mnt"), (
+        "isolated mount namespace required"
+    )
     kernel_images = sorted(Path("/boot").glob("vmlinuz-*"))
     candidates = [
         path

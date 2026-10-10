@@ -42,7 +42,7 @@ jobs:
           # Absolutely no host-disks/devices. The test uses ONLY images
           # created inside the runner's temporary directory and detaches
           # every loop device before booting the restored virtual disk.
-          sudo env \
+          sudo unshare --mount --propagation private env \
             GITHUB_ACTIONS=true \
             PYTHONPATH="$GITHUB_WORKSPACE/src" \
             PATH="$GITHUB_WORKSPACE/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \

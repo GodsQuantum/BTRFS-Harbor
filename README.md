@@ -32,12 +32,16 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
-## v0.2.6-rc.11 (unpublished preview) — supervised rescue ISO and ReaR recovery
+## v0.2.6-rc.11 (published prerelease) — supervised rescue ISO and ReaR recovery
+
+**Published October 10, 2026:** [official v0.2.6-rc.11 release](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11) with verified AppImage, DEB, RPM, .run and SHA256SUMS. Stable `main` remains v0.2.5. This candidate is **not** certified for unattended universal recovery.
 
 - **Back up now** remains one-click Btrfs + mounted EFI backup.
 - A separate **Create rescue ISO** action uses installed ReaR 2.9 with a Harbor-provided isolated configuration; no changes to /etc/rear. It builds locally, checks ISO9660 and SHA-256, and atomically publishes to the selected backup destination with a live mount guard.
 - The bundled ReaR rescue hook can stage verified Btrfs volumes and EFI, match the received subvolume UUIDs to ReaR's rebuilt mounts, validate and rewrite fstab UUIDs, then defer bootloader and initramfs finalization to ReaR.
 - **UEFI blank-disk integration passed (minimal Linux only):** an independently created GPT disk received Harbor's Btrfs + FAT32 EFI archives, had its fstab UUIDs remapped and booted restored Linux /sbin/init twice in QEMU/OVMF ([CI evidence](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)). **Not universal disaster-recovery certification:** CachyOS/Arch, Fedora, full installed Ubuntu, LUKS, UKI, other bootloaders, non-Btrfs data, v2 automatic pruning and checkpointed SSH remain unqualified. Keep an independent backup.
+
+**Historical release notes (rc.10 and earlier):** statements about unimplemented functionality or unpublished binaries below describe those older versions *at the time of their release*, not the current rc.11 candidate.
 
 ## v0.2.6-rc.10 — capture separate EFI and boot files
 

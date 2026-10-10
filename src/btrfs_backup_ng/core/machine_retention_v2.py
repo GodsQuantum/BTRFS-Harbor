@@ -70,25 +70,22 @@ def calculate_set_retention(
     if set(parents) != set(owners):
         raise ValueError("backup target has unmanaged/unknown dependent archives")
 
-    visiting: set[str] = set()
+    # A real archive catalog may contain thousands of incremental
+    # generations. Traverse chains iteratively: Python recursion limits must
+    # never turn valid retention input into an unexpected failure.
     visited: set[str] = set()
-
-    def validate_parent(name: str) -> None:
-        if name in visiting:
-            raise ValueError("cycle in Btrfs incremental parent chain")
-        if name in visited:
-            return
-        visiting.add(name)
-        parent = parents[name]
-        if parent is not None:
-            if parent not in owners or parent == name:
-                raise ValueError("missing incremental parent archive")
-            validate_parent(parent)
-        visiting.remove(name)
-        visited.add(name)
-
     for archive in owners:
-        validate_parent(archive)
+        chain: set[str] = set()
+        current: str | None = archive
+        while current is not None and current not in visited:
+            if current in chain:
+                raise ValueError("cycle in Btrfs incremental parent chain")
+            chain.add(current)
+            parent = parents[current]
+            if parent is not None and (parent not in owners or parent == current):
+                raise ValueError("missing incremental parent archive")
+            current = parent
+        visited.update(chain)
 
     incomplete = {point.identifier for point in sets if not point.complete}
     complete = [point for point in sets if point.complete]
@@ -108,12 +105,10 @@ def calculate_set_retention(
     kept_names: set[str] = set()
 
     def protect_parents(name: str) -> None:
-        if name in kept_names:
-            return
-        kept_names.add(name)
-        parent = parents[name]
-        if parent is not None:
-            protect_parents(parent)
+        current: str | None = name
+        while current is not None and current not in kept_names:
+            kept_names.add(current)
+            current = parents[current]
 
     for identifier in mandatory:
         for name in by_id[identifier].archives:

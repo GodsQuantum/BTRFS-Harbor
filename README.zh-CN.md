@@ -32,12 +32,16 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 
 同一块磁盘上的本地快照很有用，但它**不是**异机备份。Harbor 会始终明确区分这两种状态。
 
-## v0.2.6-rc.11（未发布预览）— ReaR 救援 ISO 与恢复
+## v0.2.6-rc.11（已发布预览版）— ReaR 救援 ISO 与恢复
+
+**2026 年 10 月 10 日已发布：**[v0.2.6-rc.11 正式预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11)，包含经过校验的 AppImage、DEB、RPM、.run 和 SHA256SUMS。稳定的 `main` 仍为 v0.2.5。**尚未认证**无人值守的通用系统恢复。
 
 - “立即备份”保留 Btrfs 和已挂载 EFI 分区数据。
 - “创建救援 ISO”使用隔离的 ReaR 2.9 配置，本地构建并使用 SHA-256 校验后安全地保存到选定的备份位置，不修改 /etc/rear。
 - 恢复工具将已校验的 Btrfs/EFI 内容映射到 ReaR 重建的挂载点，并修正 fstab UUID，之后由 ReaR 配置引导加载器。
 - **最小 Linux 的空盘 UEFI 恢复测试通过**：Harbor 在新的 GPT 磁盘上恢复 Btrfs/EFI，重映射 fstab UUID；QEMU/OVMF 两次启动均达到恢复后的 /sbin/init（[CI 记录](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)）。**这并非所有发行版的完整认证**：CachyOS/Arch、Fedora、已安装的 Ubuntu、LUKS、UKI、其他引导程序、非 Btrfs 数据、自动保留清理及 SSH v2 仍需验证。请保留独立备份。
+
+**历史版本说明（rc.10 及更早）：**下文提及的尚未实现功能、未发布内容仅反映**对应旧版本发布当时**的状态，并非当前 rc.11 的功能清单。
 
 ## v0.2.6-rc.10 — EFI 和引导文件备份
 

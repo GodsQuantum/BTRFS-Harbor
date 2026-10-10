@@ -30,3 +30,72 @@ storage reconstruction, data restore and bootloader deployment:
 https://relax-and-recover.org/documentation/release-notes-2-9
 A rescue ISO without ESP and /boot data captured by Harbor cannot provide
 a working clone; QEMU/OVMF clean disk boot verification is obligatory.
+
+## Verified web follow-up — 2026-10-10 (post-rc.11)
+
+This is a research and gate review, **not a claim of newly certified features**.
+
+- ReaR official GA remains **2.9 (January 2025)** as of this check:
+  https://relax-and-recover.org/download/ . In the official configuration
+  documentation, `OUTPUT=ISO` builds rescue media while
+  `BACKUP=EXTERNAL` delegates restoring data to an external hook:
+  https://relax-and-recover.org/rear-user-guide/basics/configuration.html .
+  Merely booting that rescue ISO **does not** prove its restore hook ran.
+  CI must exercise the hook in the disposable guest before an installed-OS
+  recovery can be advertised as certified.
+- Btrfs send and receive require readonly sources and an exact usable parent
+  for incrementals: https://btrfs.readthedocs.io/en/latest/btrfs-send.html .
+  The checkpoint-v2 stream replay is application-level; no upstream protocol
+  promise of arbitrary byte-offset resumption should be inferred.
+- btrbk 0.32.7 explicitly fixes **CVE-2026-62943**, arbitrary command
+  execution through the `ssh_filter_btrbk.sh` forced-command filter:
+  https://github.com/digint/btrbk/blob/master/ChangeLog . For Harbor SSH-v2,
+  do not copy shell-filtering expressions. Require a dedicated fixed-action
+  remote receiver with validated identities and host keys, exact-size
+  chunk commitments, no caller-provided shell fragment and server-side
+  bounded manifests; qualify real network interruption on CI ephemeral SSH.
+  Until then, checkpointed SSH stays blocked.
+- Snapper's `number` and `timeline` cleanup operates on **source
+  snapshots**, not Harbor remote archives:
+  https://snapper.io/manpages/snapper.html ;
+  https://snapper.io/manpages/snapper-configs.html . Harbor v2 remote pruning
+  must keep the complete ancestor closure of retained incremental archives.
+  Existing retention-plan is **dry-run only**; do not enable deletion without
+  complete catalog, foreign-object and power-loss transaction tests.
+- ArchWiki Limine documents the ESP/system partition and the UEFI fallback
+  `EFI/BOOT/BOOTX64.EFI`; kernels/initramfs must be accessible via supported
+  filesystems: https://wiki.archlinux.org/title/Limine . The September 10,
+  2026 archinstall report about a small Limine+Snapper ESP is a specific
+  user report, not an all-host benchmark:
+  https://github.com/archlinux/archinstall/issues/4769 .
+  Test GRUB, Limine and systemd-boot separately, with installed guest OSes.
+- A June 1, 2026 Tauri/KDE Wayland report notes native titlebar controls
+  becoming unresponsive after restoring a window from tray:
+  https://github.com/tauri-apps/tauri/issues/15460 . This supports adding
+  KDE Wayland and X11 close/reopen tests; it **does not** demonstrate a
+  Harbor-specific failure.
+- GitHub Actions path filters must cover source code that affects a gate:
+  https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax .
+  rc.11's ReaR ISO workflow previously triggered only on edits to its own
+  YAML. The source/package recovery paths are now tracked explicitly with
+  a regression test.
+
+**Validated so far:** disposable NFS outage/Resume, Tier2 Btrfs + FAT32,
+ReaR 2.9 rescue ISO boot, and two OVMF UEFI boots of the restored BusyBox
+minimal Linux. **Not validated:** full installed OS restoration, SSH-v2,
+automatic v2 retention, KDE tray on actual graphical desktops, LUKS/UKI and
+Secure Boot.
+
+### Community cross-check (not security evidence)
+
+- **2026-08-27, r/cachyos:** a user describes a Snapper rollback
+  breaking after the corresponding kernel disappeared from a separately
+  managed boot partition. This is anecdotal, but it illustrates why
+  Harbor must capture and restore compatible /boot, ESP and kernel together,
+  then test the bootloader on an installed OS, not just a synthetic guest:
+  https://www.reddit.com/r/cachyos/comments/1vzte82/welp_snapper_and_my_ignorance_broke_my_system/
+- **2026-07-11, r/btrfs:** an openSUSE-on-Btrfs user with a separate ZFS
+  pool asked how to make root/home snapshot archives restorable after
+  replacing the OS drive. Responses discuss incremental raw stream
+  complexity; user reports are not technical verification:
+  https://www.reddit.com/r/btrfs/comments/1utfoee/snapshots_to_a_different_drive/

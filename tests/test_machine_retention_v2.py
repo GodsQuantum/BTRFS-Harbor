@@ -103,3 +103,44 @@ def test_timezone_required_and_empty_inventory_is_safe():
             POLICY,
             now=datetime.now(),
         )
+
+
+def test_large_incremental_graph_preserves_every_parent_without_recursion():
+    # Retention plans must handle thousands of independent durable backups.
+    # A Python recursion error is neither a valid safety verdict nor a plan.
+    count = 1500
+    sets = [
+        SetPoint(
+            f"set-{index}",
+            BASE + timedelta(seconds=index),
+            (f"archive-{index}",),
+            True,
+        )
+        for index in range(count)
+    ]
+    graph = {
+        f"archive-{index}": f"archive-{index - 1}" if index else None
+        for index in range(count)
+    }
+    decision = plan(sets, graph)
+    assert decision.keep == frozenset(point.identifier for point in sets)
+    assert decision.eligible == frozenset()
+
+
+def test_large_incremental_cycle_is_explicitly_refused():
+    count = 1500
+    sets = [
+        SetPoint(
+            f"set-{index}",
+            BASE + timedelta(seconds=index),
+            (f"archive-{index}",),
+            True,
+        )
+        for index in range(count)
+    ]
+    graph = {
+        f"archive-{index}": f"archive-{index - 1}" if index else f"archive-{count - 1}"
+        for index in range(count)
+    }
+    with pytest.raises(ValueError, match="cycle"):
+        plan(sets, graph)

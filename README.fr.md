@@ -32,12 +32,16 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
-## v0.2.6-rc.11 (préversion non publiée) — ISO de secours et restauration ReaR
+## v0.2.6-rc.11 (préversion publiée) — ISO de secours et restauration ReaR
+
+**Publiée le 10 octobre 2026 :** [version officielle v0.2.6-rc.11](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11) avec AppImage, DEB, RPM, .run et SHA256SUMS vérifiés. La branche stable `main` reste en v0.2.5. Cette version **ne certifie pas** la restauration universelle sans intervention.
 
 - **Sauvegarder maintenant** conserve les volumes Btrfs et les partitions EFI montées.
 - Un bouton **Créer ISO de secours** utilise ReaR 2.9 avec une configuration propre à Harbor, sans modifier /etc/rear. ISO construite localement puis copiée sur la destination avec contrôles de montage, ISO9660 et SHA-256.
 - L'outil intégré à l'ISO prépare la restauration Btrfs + EFI, vérifie les UUID et adapte fstab aux nouveaux volumes. ReaR doit ensuite finaliser le chargeur de démarrage et l'initramfs.
 - **Test de démarrage sur disque vierge réussi pour un Linux minimal** : après restauration Btrfs + EFI sur un autre disque GPT et correction des UUID, deux démarrages UEFI QEMU/OVMF ont atteint /sbin/init ([preuve CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38058403995)). **Ce n'est pas une certification universelle :** systèmes installés CachyOS/Arch, Ubuntu/Fedora, LUKS, UKI, autres chargeurs de démarrage, données non-Btrfs, rétention automatique et SSH-v2 restent à qualifier. Conserver une sauvegarde indépendante.
+
+**Notes des versions précédentes (rc.10 et antérieures) :** les fonctions indiquées comme absentes ou non publiées ci-dessous décrivent l'état de **chaque ancienne version à sa sortie**, pas celui de rc.11.
 
 ## v0.2.6-rc.10 — capture EFI et fichiers de démarrage
 

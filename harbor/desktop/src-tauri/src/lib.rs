@@ -2342,7 +2342,9 @@ mod tests {
         assert!(validate_name_for_restore("../../etc").is_err());
         // There is no shell interpolation: punctuation is passed as one argv.
         assert!(validate_name_for_restore("root;rm").is_ok());
-        assert!(validate_name_for_restore("a\\0b").is_err());
+        // Backslash is a valid Linux filename character, not a NUL byte.
+        assert!(validate_name_for_restore("a\\0b").is_ok());
+        assert!(validate_name_for_restore("a\0b").is_err());
     }
 
     #[test]

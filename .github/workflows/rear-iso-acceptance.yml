@@ -5,6 +5,14 @@ on:
     branches: [preview/checkpoint-resume-v026]
     paths:
       - .github/workflows/rear-iso-acceptance.yml
+      - packaging/rear/**
+      - packaging/build-engine-pyz.sh
+      - src/btrfs_backup_ng/core/rear_iso_v2.py
+      - src/btrfs_backup_ng/core/rear_bridge_v2.py
+      - src/btrfs_backup_ng/core/boot_files_v2.py
+      - src/btrfs_backup_ng/cli/machine_set_v2.py
+      - src/btrfs_backup_ng/cli/restore.py
+      - src/btrfs_backup_ng/endpoint/mount_guard_v2.py
   workflow_dispatch:
 
 permissions:

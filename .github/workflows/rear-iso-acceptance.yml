@@ -85,7 +85,15 @@ jobs:
           test -r "$firmware" && test -r "$variables"
           vars_copy="$RUNNER_TEMP/harbor-rear-ovmf-vars.fd"
           cp -- "$variables" "$vars_copy"
-          test "$(stat -c '%s' "$firmware")" -eq "$(stat -c '%s' "$vars_copy")"
+          # Split 4M firmware is CODE (~3.5 MiB) + VARS (~0.5 MiB).
+          # The individual files must NOT be equal in size; the pair's
+          # combined pflash capacity must match its format.
+          code_size="$(stat -c '%s' "$firmware")"
+          vars_size="$(stat -c '%s' "$vars_copy")"
+          case "$firmware" in
+            *_4M.fd) test "$((code_size + vars_size))" -eq 4194304 ;;
+            *) test "$((code_size + vars_size))" -eq 2097152 ;;
+          esac
           trap 'rm -f "$readable_iso" "$vars_copy"' EXIT
           # NO writable disks or host device passthrough! TCG is used, not
           # /dev/kvm, so all guest hardware is a private software simulation.

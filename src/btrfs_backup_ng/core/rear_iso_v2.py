@@ -24,8 +24,15 @@ ISO_MIN = 65536
 
 
 def _iso_inventory(root: Path) -> dict[Path, tuple[int, int]]:
-    if root.is_symlink() or not root.is_dir():
-        raise ValueError("ReaR local output directory is missing")
+    # ReaR creates this directory itself on the FIRST mkrescue. Missing
+    # output is a valid empty pre-build inventory, not a failed install.
+    # A dangling symlink or ordinary file is never accepted as missing.
+    if root.is_symlink():
+        raise ValueError("unsafe symlinked ReaR output directory")
+    if not root.exists():
+        return {}
+    if not root.is_dir():
+        raise ValueError("ReaR output path is not a directory")
     found: dict[Path, tuple[int, int]] = {}
     for file in root.rglob("*.iso"):
         if file.is_symlink() or not file.is_file():

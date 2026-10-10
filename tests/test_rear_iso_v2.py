@@ -112,6 +112,48 @@ def test_builder_invokes_rear_with_private_config_and_uses_only_fresh_output(
     assert old.exists()
 
 
+def test_first_rear_iso_build_when_output_is_initially_missing(tmp_path: Path) -> None:
+    destination = tmp_path / "safe"
+    destination.mkdir()
+    output = tmp_path / "first-rear-build"
+
+    def first_build(argv, **kwargs):
+        output.mkdir()
+        iso_fixture(output / "rear-first.iso")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    with MountGuard(destination, capture_mount_identity(destination)) as guard:
+        result = build_rescue_iso(
+            destination,
+            catalog(),
+            guard,
+            runner=first_build,
+            output=output,
+            check_installation=False,
+        )
+    assert result["iso_created"] is True
+    assert len(list(destination.glob("*.iso"))) == 1
+
+
+def test_rear_iso_output_symlink_refused_before_any_write(tmp_path: Path) -> None:
+    destination = tmp_path / "safe"
+    destination.mkdir()
+    output = tmp_path / "foreign"
+    output.mkdir()
+    link = tmp_path / "rear-output-symlink"
+    link.symlink_to(output)
+    with MountGuard(destination, capture_mount_identity(destination)) as guard:
+        with pytest.raises(ValueError, match="symlinked ReaR output"):
+            build_rescue_iso(
+                destination,
+                catalog(),
+                guard,
+                output=link,
+                check_installation=False,
+            )
+    assert not list(destination.iterdir())
+
+
 def test_failing_rear_build_never_writes_backup_target(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()

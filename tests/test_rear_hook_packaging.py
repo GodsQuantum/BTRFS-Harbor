@@ -43,7 +43,10 @@ def test_rear_hook_bundled_with_all_package_flavors():
             "/usr/lib/btrfs-harbor/recovery/harbor-rear-restore"
             in config["bundle"]["linux"][variant]["files"]
         )
-        assert "/usr/share/btrfs-harbor/rear/local.conf" in config["bundle"]["linux"][variant]["files"]
+        assert (
+            "/usr/share/btrfs-harbor/rear/local.conf"
+            in config["bundle"]["linux"][variant]["files"]
+        )
     universal = (ROOT / "packaging/universal/install-payload.sh").read_text()
     release = (ROOT / ".github/workflows/release.yml").read_text()
     assert "harbor-rear-restore" in universal

@@ -41,6 +41,7 @@ from ..core.native_snapshots import (
     find_native_snapshot,
     reserve_native_snapshot_name,
 )
+from ..core.rear_bridge_v2 import apply_rear_restore, plan_rear_restore
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
 from ..core.verify_v2 import verify_checkpoint_index
 from ..endpoint.mount_guard_v2 import MountGuard
@@ -423,10 +424,21 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
             ):
                 raise ValueError("unverified raw archive in retention inventory")
             graph[row.name] = row.parent_name
-        if any(record.get("boot_members") for record in records):
-            raise ValueError(
-                "retention eligibility unavailable for boot-bearing machine sets"
-            )
+        # Boot-file attachments have the SAME lifetime as their Btrfs set.
+        # They are not Btrfs streams and must not appear in the incremental
+        # graph, but cannot be retained/deleted separately from their owner.
+        for record in records:
+            boot = record.get("boot_members", [])
+            if any(
+                member.get("status") == "completed"
+                and not verify_boot_member(root, member)
+                for member in boot
+            ):
+                raise ValueError("boot archive is corrupt or missing")
+            if record.get("status") == "completed_btrfs_and_boot_files" and (
+                not boot or any(member.get("status") != "completed" for member in boot)
+            ):
+                raise ValueError("boot-bearing machine set has incomplete archives")
         points: list[SetPoint] = []
         for record in records:
             stamp = datetime.fromisoformat(record["created_utc"])
@@ -435,7 +447,8 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
                     record["set_id"],
                     stamp,
                     tuple(member["archive"] for member in record["members"]),
-                    record["status"] == "completed_btrfs_only",
+                    record["status"]
+                    in ("completed_btrfs_only", "completed_btrfs_and_boot_files"),
                 )
             )
         plan = calculate_set_retention(
@@ -451,6 +464,12 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
                 "protected_incremental_sets": sorted(plan.protected_dependencies),
                 "retention_eligible_sets": sorted(plan.eligible),
                 "keep_archives": sorted(plan.kept_archives),
+                "eligible_boot_archives": sorted(
+                    member["archive"]
+                    for record in records
+                    if record["set_id"] in plan.eligible
+                    for member in record.get("boot_members", [])
+                ),
                 "note": "Preview only; automatic pruning is not enabled.",
             },
             sort_keys=True,
@@ -629,6 +648,43 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                 )
             if action == "set-restore":
                 return _restore(root, data, args)
+            if action == "set-rear-copy":
+                # Nothing partitions/formats a disk in Harbor. ReaR must
+                # already have recreated filesystems and mounted /mnt/local.
+                # The rescue marker and strict mount checks are inside the
+                # bridge, so a healthy running OS can never trigger writes.
+                staging = Path(args.staging)
+                if not args.confirm:
+                    plan = plan_rear_restore(data, staging, Path("/mnt/local"))
+                    print(
+                        json.dumps(
+                            {
+                                "dry_run": True,
+                                "bootable": False,
+                                "plan": [
+                                    {
+                                        "source": str(item.source),
+                                        "target": str(item.target),
+                                    }
+                                    for item in plan
+                                ],
+                                "note": "ReaR must finalize the initramfs and bootloader afterwards.",
+                            }
+                        )
+                    )
+                    return 0
+                restored = apply_rear_restore(data, staging)
+                print(
+                    json.dumps(
+                        {
+                            "copied_to_rear": True,
+                            "bootable": False,
+                            "mounts": [item.original_mount for item in restored],
+                            "note": "ReaR bootloader finalization and QEMU boot test still required.",
+                        }
+                    )
+                )
+                return 0
     raise ValueError("unknown machine-set action")
 
 

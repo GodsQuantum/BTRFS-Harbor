@@ -61,6 +61,25 @@ def test_real_btrfs_plus_real_fat32_efi_staged_restore(
         btrfs_source = btrfs_volume / "rootfs"
         subprocess.run(["btrfs", "subvolume", "create", str(btrfs_source)], check=True)
         (btrfs_source / "fstab").write_text("fixture-root")
+        original_root_uuid = subprocess.check_output(
+            [
+                "findmnt",
+                "--noheadings",
+                "--output",
+                "UUID",
+                "--mountpoint",
+                str(btrfs_volume),
+            ],
+            text=True,
+        ).strip()
+        original_efi_uuid = subprocess.check_output(
+            ["blkid", "--output", "value", "--match-tag", "UUID", loop], text=True
+        ).strip()
+        (btrfs_source / "etc").mkdir()
+        (btrfs_source / "etc/fstab").write_text(
+            f"UUID={original_root_uuid} / btrfs defaults 0 0\n"
+            f"UUID={original_efi_uuid} /boot/efi vfat umask=0077 0 2\n"
+        )
 
         archive = tmp_path / "backup"
         archive.mkdir()
@@ -110,6 +129,41 @@ def test_real_btrfs_plus_real_fat32_efi_staged_restore(
         assert not list(archive.glob("*.tmp"))
         saved = json.loads(catalog.read_text())
         assert saved["boot_members"][0]["bytes"] > 0
+        # The explicit-source integration fixture is not mounted at '/'.
+        # Model the same snapshot as the real automatic root inventory would
+        # record, while preserving its actual sent UUID and restore bytes.
+        from btrfs_backup_ng.core.native_snapshots import NATIVE_FOLDER
+
+        saved["members"][0]["original_mount"] = "/"
+        snapshot_name = Path(saved["members"][0]["snapshot_path"]).name
+        saved["members"][0]["snapshot_path"] = f"/{NATIVE_FOLDER}/{snapshot_name}"
+        saved["disk_layout"] = {
+            "blockdevices": [
+                {
+                    "path": "/dev/test-btrfs",
+                    "uuid": original_root_uuid,
+                    "partuuid": None,
+                    "mountpoints": ["/"],
+                },
+                {
+                    "path": loop,
+                    "uuid": original_efi_uuid,
+                    "partuuid": None,
+                    "mountpoints": ["/boot/efi"],
+                },
+            ]
+        }
+        catalog.write_text(json.dumps(saved))
+        plan_retention = _cli(
+            "set-retention-plan",
+            "--target",
+            str(archive),
+            "--profile-id",
+            PROFILE,
+            "--allow-local",
+            "--experimental",
+        )
+        assert plan_retention["deletion_performed"] is False
         staged = btrfs_volume / "restored"
         staged.mkdir()
         plan = _cli(
@@ -142,6 +196,97 @@ def test_real_btrfs_plus_real_fat32_efi_staged_restore(
             b"harbor-efi-test-boot-file"
         )
         assert any(p.read_text() == "fixture-root" for p in staged.rglob("fstab"))
+        # Actual ReaR bridge: a DIFFERENT blank Btrfs loopback filesystem
+        # and a DIFFERENT FAT32 loopback ESP are mounted in this disposable
+        # privileged GitHub CI container. Never on Cloud9 or a workstation.
+        from .conftest import LoopbackBtrfs
+
+        rear_root = Path("/mnt/local")
+        assert not rear_root.is_mount()
+        rear_root.mkdir(parents=True, exist_ok=True)
+        rear_marker = Path("/etc/rear/rescue.conf")
+        assert not rear_marker.exists()
+        rear_marker.parent.mkdir(parents=True, exist_ok=True)
+        with LoopbackBtrfs(size_mb=256, label="rear-fresh") as fresh:
+            subprocess.run(["mount", "--bind", str(fresh), str(rear_root)], check=True)
+            rear_esp_loop = None
+            rear_efi_mounted = False
+            try:
+                (rear_root / "etc").mkdir()
+                (rear_root / "boot/efi").mkdir(parents=True)
+                rear_esp_image = tmp_path / "fresh-esp.img"
+                subprocess.run(
+                    ["truncate", "-s", "64M", str(rear_esp_image)], check=True
+                )
+                subprocess.run(
+                    ["mkfs.vfat", "-F", "32", str(rear_esp_image)],
+                    check=True,
+                    capture_output=True,
+                )
+                rear_esp_loop = subprocess.check_output(
+                    ["losetup", "--find", "--show", str(rear_esp_image)], text=True
+                ).strip()
+                subprocess.run(
+                    ["mount", rear_esp_loop, str(rear_root / "boot/efi")], check=True
+                )
+                rear_efi_mounted = True
+                rear_marker.write_text("# ephemeral privileged runner fixture\n")
+                try:
+                    copied = _cli(
+                        "set-rear-copy",
+                        "--target",
+                        str(archive),
+                        "--set-id",
+                        first["set_id"],
+                        "--staging",
+                        str(staged),
+                        "--allow-local",
+                        "--experimental",
+                        "--confirm",
+                    )
+                finally:
+                    rear_marker.unlink()
+                assert copied["copied_to_rear"] is True
+                assert copied["bootable"] is False
+                assert (rear_root / "fstab").read_text() == "fixture-root"
+                assert (rear_root / "boot/efi/EFI/BOOT/BOOTX64.EFI").read_bytes() == (
+                    b"harbor-efi-test-boot-file"
+                )
+                new_root_uuid = subprocess.check_output(
+                    [
+                        "findmnt",
+                        "--noheadings",
+                        "--output",
+                        "UUID",
+                        "--mountpoint",
+                        str(rear_root),
+                    ],
+                    text=True,
+                ).strip()
+                new_esp_uuid = subprocess.check_output(
+                    [
+                        "blkid",
+                        "--output",
+                        "value",
+                        "--match-tag",
+                        "UUID",
+                        rear_esp_loop,
+                    ],
+                    text=True,
+                ).strip()
+                written_fstab = (rear_root / "etc/fstab").read_text()
+                assert f"UUID={new_root_uuid} / btrfs" in written_fstab
+                assert f"UUID={new_esp_uuid} /boot/efi vfat" in written_fstab
+                assert new_root_uuid != original_root_uuid
+                assert new_esp_uuid != original_efi_uuid
+            finally:
+                if rear_marker.exists():
+                    rear_marker.unlink()
+                if rear_efi_mounted:
+                    subprocess.run(["umount", str(rear_root / "boot/efi")], check=True)
+                if rear_esp_loop:
+                    subprocess.run(["losetup", "-d", rear_esp_loop], check=True)
+                subprocess.run(["umount", str(rear_root)], check=True)
         (efi / "machine-test-id").write_text("source preserved")
     finally:
         if mounted:

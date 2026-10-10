@@ -767,6 +767,7 @@ def _execute(args: argparse.Namespace) -> int:
         "set-resume",
         "set-status",
         "set-restore",
+        "set-rear-copy",
         "set-list",
         "set-retention-plan",
     ):

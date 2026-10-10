@@ -527,6 +527,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         "set-resume",
         "set-status",
         "set-restore",
+        "set-rear-copy",
         "set-list",
         "set-retention-plan",
     ):
@@ -555,7 +556,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             ):
                 set_parser.add_argument(f"--{bucket}", type=int, default=default)
             set_parser.add_argument("--keep", type=int, default=0)
-        if set_action == "set-restore":
+        if set_action in ("set-restore", "set-rear-copy"):
             set_parser.add_argument("--staging", required=True)
             set_parser.add_argument("--confirm", action="store_true")
     scheduled_v2 = v2_actions.add_parser(

@@ -48,7 +48,8 @@ jobs:
             git \
             kmod \
             util-linux \
-            dosfstools
+            dosfstools \
+            rsync
 
       - name: Check btrfs support
         run: |

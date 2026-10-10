@@ -73,13 +73,24 @@ jobs:
           readable_iso="$RUNNER_TEMP/harbor-rear-boot-test.iso"
           sudo install -m 0600 -o "$(id -un)" -g "$(id -gn)"             "$iso" "$readable_iso"
           trap 'rm -f "$readable_iso"' EXIT
+          # OVMF 4 MiB cannot be passed to legacy QEMU -bios (it errors
+          # "could not load PC BIOS"). Select a MATCHED CODE/VARS pair and
+          # use readonly pflash CODE + a disposable writable VARS copy.
           firmware=/usr/share/OVMF/OVMF_CODE_4M.fd
-          if ! test -f "$firmware"; then firmware=/usr/share/OVMF/OVMF_CODE.fd; fi
-          test -f "$firmware"
+          variables=/usr/share/OVMF/OVMF_VARS_4M.fd
+          if ! test -f "$firmware" || ! test -f "$variables"; then
+            firmware=/usr/share/OVMF/OVMF_CODE.fd
+            variables=/usr/share/OVMF/OVMF_VARS.fd
+          fi
+          test -r "$firmware" && test -r "$variables"
+          vars_copy="$RUNNER_TEMP/harbor-rear-ovmf-vars.fd"
+          cp -- "$variables" "$vars_copy"
+          test "$(stat -c '%s' "$firmware")" -eq "$(stat -c '%s' "$vars_copy")"
+          trap 'rm -f "$readable_iso" "$vars_copy"' EXIT
           # NO writable disks or host device passthrough! TCG is used, not
           # /dev/kvm, so all guest hardware is a private software simulation.
           set +e
-          timeout --signal=TERM --kill-after=10 170s             qemu-system-x86_64               -machine q35,accel=tcg -cpu max -smp 2 -m 2048               -bios "$firmware"               -cdrom "$readable_iso" -boot order=d               -display none -serial file:/tmp/rear-qemu-serial.log               -monitor none -no-reboot               >/tmp/rear-qemu-console.log 2>&1
+          timeout --signal=TERM --kill-after=10 170s             qemu-system-x86_64               -machine q35,accel=tcg -cpu max -smp 2 -m 2048               -drive "if=pflash,format=raw,readonly=on,file=$firmware"               -drive "if=pflash,format=raw,file=$vars_copy"               -cdrom "$readable_iso" -boot order=d               -display none -serial file:/tmp/rear-qemu-serial.log               -monitor none -no-reboot               >/tmp/rear-qemu-console.log 2>&1
           qemu_code=$?
           set -e
           echo "QEMU process exit: $qemu_code (timeout expected for interactive rescue)."

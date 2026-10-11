@@ -7,6 +7,10 @@ destination, so activating the CTA cannot start a production backup.
 import sys
 import time
 import subprocess
+import re
+import os
+import tempfile
+from pathlib import Path
 
 import pyatspi
 
@@ -36,6 +40,37 @@ def find_button():
     return None
 
 
+def red_alert_pixels():
+    """Count red status/error text pixels in the real native X11 window.
+
+    Screenshots are validation evidence only; no OCR or screen interaction
+    besides the explicit button click, never data writes or real backups.
+    """
+    win = subprocess.run(
+        ["xdotool", "search", "--onlyvisible", "--name", "Btrfs Harbor"],
+        text=True, capture_output=True, check=True, timeout=10
+    ).stdout.splitlines()[0]
+    with tempfile.TemporaryDirectory(prefix="harbor-native-alert-") as tmp:
+        screenshot = str(Path(tmp) / "window.png")
+        subprocess.run(
+            ["import", "-display", os.environ["DISPLAY"], "-window", win, "-silent", screenshot],
+            check=True, timeout=15, stdout=subprocess.DEVNULL
+        )
+        histogram = subprocess.run(
+            ["convert", screenshot, "-depth", "8", "-format", "%c", "histogram:info:-"],
+            check=True, timeout=15, capture_output=True, text=True
+        ).stdout
+        count=0
+        for line in histogram.splitlines():
+            match=re.search(r"^\s*(\d+):\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", line)
+            if not match:
+                continue
+            pixels, red, green, blue = map(int, match.groups())
+            if red >= 110 and green < 150 and red > green * 1.5 and red > blue * 1.4:
+                count += pixels
+        return count
+
+
 button = None
 for _ in range(45):
     button = find_button()
@@ -55,6 +90,8 @@ if not enabled:
 print("NATIVE PASS: real Tauri first-run exposes an enabled Back up now button.", flush=True)
 start = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
 print(f"NATIVE CTA before click: y={start.y}, height={start.height}", flush=True)
+before_error_pixels = red_alert_pixels()
+print(f"NATIVE red alert pixels BEFORE click: {before_error_pixels}", flush=True)
 try:
     action = button.queryAction()
     supported = [action.getName(i).lower() for i in range(action.nActions)]
@@ -107,6 +144,14 @@ ok, names, evidence = check_guidance_or_scroll()
 if ok:
     print(f"NATIVE PASS: first-run backup action activated: {evidence}", flush=True)
     sys.exit(0)
+after_error_pixels = red_alert_pixels()
+if after_error_pixels - before_error_pixels >= 80:
+    print(
+        f"NATIVE PASS: click displayed red destination guidance "
+        f"({before_error_pixels} to {after_error_pixels} red pixels).",
+        flush=True
+    )
+    sys.exit(0)
 
 try:
     rect = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
@@ -126,7 +171,15 @@ ok, names, evidence = check_guidance_or_scroll()
 if ok:
     print(f"NATIVE PASS: physical first-run click activated: {evidence}", flush=True)
     sys.exit(0)
+after_error_pixels = red_alert_pixels()
+if after_error_pixels - before_error_pixels >= 80:
+    print(
+        f"NATIVE PASS: physical click displayed red destination guidance "
+        f"({before_error_pixels} to {after_error_pixels} red pixels).",
+        flush=True
+    )
+    sys.exit(0)
 
-print("NATIVE FAIL: no guidance or scroll after native and pointer clicks.", file=sys.stderr)
+print("NATIVE FAIL: neither accessible guidance, scroll nor visual error after click.", file=sys.stderr)
 print("Accessible names/text:", names[:85], file=sys.stderr)
 sys.exit(1)

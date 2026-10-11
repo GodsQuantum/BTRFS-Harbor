@@ -1,0 +1,74 @@
+name: Native Tauri X11 Runtime GUI Acceptance
+
+on:
+  push:
+    branches: [preview/checkpoint-resume-v026]
+    paths:
+      - .github/workflows/tauri-x11-runtime.yml
+      - harbor/desktop/**
+      - harbor/Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-window:
+    name: Disposable desktop binary launches a real X11 window
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: "12.9.1"
+      - name: Install native runtime and virtual display dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libdbus-1-dev xvfb xauth xdotool dbus-x11
+      - name: Build actual frontend assets and real Tauri binary
+        timeout-minutes: 27
+        run: |
+          cd harbor/desktop
+          pnpm install --frozen-lockfile
+          pnpm build
+          cd ..
+          cargo build -p btrfs-harbor-desktop --locked --release
+          test -x target/release/btrfs-harbor
+      - name: Open actual window and inspect live title under isolated X11
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' \
+            dbus-run-session -- bash -euo pipefail -c '
+              harbor/target/release/btrfs-harbor > /tmp/harbor-tauri-gui.log 2>&1 &
+              pid=$!
+              trap "kill $pid 2>/dev/null || true" EXIT
+              found=""
+              for i in $(seq 1 60); do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                  cat /tmp/harbor-tauri-gui.log
+                  echo "Native Tauri GUI exited before showing a window" >&2
+                  exit 1
+                fi
+                found=$(xdotool search --onlyvisible --name "Btrfs Harbor" 2>/dev/null | head -n 1 || true)
+                if [ -n "$found" ]; then break; fi
+                sleep 1
+              done
+              if [ -z "$found" ]; then
+                cat /tmp/harbor-tauri-gui.log
+                echo "Actual native X11 window not visible" >&2
+                exit 1
+              fi
+              xdotool getwindowname "$found" | grep -F "Btrfs Harbor"
+              sleep 3
+              kill -0 "$pid"
+              echo "Native GUI PASS: real visible window, X11 display and live process."
+            '

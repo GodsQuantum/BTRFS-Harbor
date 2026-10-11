@@ -571,13 +571,16 @@
 			</div>
 		</div>
 		{#if !machineTarget}
-			<p class="source-warning" role="alert">
+			<p class="source-warning" role="status">
 				{locale === 'fr'
 					? 'Choisissez une destination pour la sauvegarde complète.'
 					: locale === 'zh-CN'
 						? '目标文件夹无效，请先配置。'
 						: 'Choose a destination for the whole-computer backup.'}
 			</p>
+		{/if}
+		{#if error}
+			<p class="error-text" role="alert" data-testid="whole-computer-error">{error}</p>
 		{/if}
 		<div class="machine-set">
 			<fieldset
@@ -685,7 +688,6 @@
 			{/each}
 		</div>
 		{#if info}<p class="operation-status" role="status">{info}</p>{/if}
-		{#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 		<details class="advanced rescue-tools">
 			<summary

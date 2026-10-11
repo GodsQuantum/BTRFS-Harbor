@@ -718,8 +718,14 @@ def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
 def _sources_from_inventory() -> tuple[list[str], dict]:
     inventory = inspect_live_machine()
     if not inventory["inventory_complete"]:
+        problems = inventory.get("warnings", [])
+        if not isinstance(problems, list):
+            raise ValueError("invalid Btrfs inventory warnings")
+        detail = "; ".join(str(problem) for problem in problems[:4])
         raise ValueError(
-            "Btrfs enumeration incomplete; cannot start an automatic machine set"
+            "Cannot safely cover the whole computer: "
+            + (detail or "Btrfs enumeration is incomplete")
+            + ". No backup will be started."
         )
     detected = inventory["sources"]
     if not isinstance(detected, list):

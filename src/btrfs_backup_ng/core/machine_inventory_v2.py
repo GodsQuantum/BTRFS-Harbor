@@ -8,6 +8,11 @@ certificate or a destructive discovery tool.
 from __future__ import annotations
 
 from pathlib import Path
+import stat
+import subprocess
+
+from ..detection.models import DetectedSubvolume
+from ..detection.scanner import parse_proc_mounts
 
 from .. import __util__
 from ..detection.models import DetectionResult, SubvolumeClass
@@ -78,8 +83,10 @@ def build_machine_inventory(
         key=lambda item: (item.device or "", item.path, item.id),
     ):
         path = sv.path
-        is_snapshot = sv.classification == SubvolumeClass.SNAPSHOT or any(
-            marker in path + "/" for marker in SNAPSHOT_PATH_MARKERS
+        is_snapshot = (
+            sv.is_snapshot
+            or sv.classification == SubvolumeClass.SNAPSHOT
+            or any(marker in path + "/" for marker in SNAPSHOT_PATH_MARKERS)
         )
         if is_snapshot or sv.classification == SubvolumeClass.INTERNAL:
             excluded.append(
@@ -159,10 +166,121 @@ def build_machine_inventory(
     }
 
 
+def _is_real_subvolume_root(path: str) -> bool:
+    """Btrfs bind mounts can expose a directory, not a subvolume root.
+
+    A subvolid in /proc/mounts identifies the containing subvolume even for
+    bind mounts of directories (e.g. ~/.local/share/fonts). Such mountpoints
+    cannot be passed to btrfs subvolume snapshot. A real root has inode
+    256, and btrfs-progs must also recognize it. This is READ-ONLY.
+    """
+    candidate = Path(path)
+    try:
+        if not candidate.is_absolute() or candidate.is_symlink():
+            return False
+        info = candidate.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_ino != 256:
+            return False
+        result = subprocess.run(
+            ["btrfs", "subvolume", "show", path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _select_live_subvolume_roots(
+    detection: DetectionResult, mounts_content: str
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Deduplicate bind aliases while reporting genuinely uncovered mounts.
+
+    Never replace a missing true subvolume root with a bind mount of an inner
+    directory. Fail closed if a non-external mounted Btrfs identity has no
+    accessible true root; else a complete machine claim would omit data.
+    """
+    mounts = parse_proc_mounts(content=mounts_content, exclude_removable=False)
+    roots: dict[tuple[str, int], list[str]] = {}
+    invalid = []
+    for mount in mounts:
+        identity = (mount.device, mount.subvol_id)
+        if mount.subvol_id > 0 and _is_real_subvolume_root(mount.mount_point):
+            roots.setdefault(identity, []).append(mount.mount_point)
+        else:
+            invalid.append(mount)
+
+    # Prefer the shortest stable path for multiple mounts of the same subvol.
+    preferred = {
+        identity: min(paths, key=lambda path: (len(Path(path).parts), len(path), path))
+        for identity, paths in roots.items()
+    }
+
+    seen: set[tuple[str, int]] = set()
+    for sv in detection.subvolumes:
+        identity = (sv.device or "", sv.id)
+        sv.mount_point = preferred.get(identity)
+        seen.add(identity)
+
+    # scan_system may not list top-level subvolumes (id 5).
+    for identity, path in preferred.items():
+        if identity in seen:
+            continue
+        device, subvolid = identity
+        detection.subvolumes.append(
+            DetectedSubvolume(id=subvolid, device=device, path=path, mount_point=path)
+        )
+
+    ignored = []
+    uncovered = []
+    for mount in invalid:
+        path = mount.mount_point
+        identity = (mount.device, mount.subvol_id)
+        external = path.startswith(EXTERNAL_PREFIXES) or path in (
+            "/mnt",
+            "/media",
+            "/run/media",
+        )
+        reason = (
+            "external_not_auto_included"
+            if external
+            else "bind_alias_of_verified_btrfs_root"
+            if identity in preferred
+            else "uncovered_nonroot_btrfs_mount"
+        )
+        record = {
+            "mount_point": path,
+            "filesystem": "btrfs",
+            "device": mount.device,
+            "subvolume_id": str(mount.subvol_id),
+            "reason": reason,
+        }
+        ignored.append(record)
+        if reason == "uncovered_nonroot_btrfs_mount":
+            uncovered.append(record)
+    return ignored, uncovered
+
+
 def inspect_live_machine(
     *, mounts_path: Path = Path("/proc/mounts")
 ) -> dict[str, object]:
-    """Read only, including external mounts for honest exclusion reporting."""
+    """Read-only inventory, selecting only actual Btrfs subvolume roots."""
+    mounts_content = mounts_path.read_text(encoding="utf-8")
     detection = scan_system(allow_partial=True, include_removable=True)
-    rows = _mount_rows(mounts_path.read_text(encoding="utf-8"))
-    return build_machine_inventory(detection, rows)
+    ignored, uncovered = _select_live_subvolume_roots(detection, mounts_content)
+    report = build_machine_inventory(detection, _mount_rows(mounts_content))
+    report["bind_mounts"] = ignored
+    if uncovered:
+        report["inventory_complete"] = False
+        existing = report["warnings"]
+        if not isinstance(existing, list):
+            raise ValueError("invalid warning inventory")
+        existing.extend(
+            f"Btrfs directory mount has no accessible subvolume root: "
+            f"{row['mount_point']} ({row['device']}, ID {row['subvolume_id']}). "
+            "The complete-machine backup is blocked to avoid missing data."
+            for row in uncovered
+        )
+    return report

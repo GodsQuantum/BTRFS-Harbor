@@ -212,3 +212,193 @@ def test_set_lock_refuses_missing_mount_without_creating_file(tmp_path):
         assert not list(tmp_path.glob(".harbor-machine-set-*.lock"))
     finally:
         os.close(guard.directory_fd)
+
+
+def test_nested_font_bind_mount_is_alias_not_separate_backup_source(
+    monkeypatch, tmp_path
+):
+    """Regression from Pegasus: /home/arezki/.local/share/fonts is a bind mount."""
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    root = "/"
+    home = "/home"
+    font_alias = "/home/arezki/.local/share/fonts"
+    mounts = (
+        "/dev/mapper/system / btrfs rw,subvol=/@,subvolid=256 0 0\n"
+        "/dev/mapper/system /home btrfs rw,subvol=/@home,subvolid=257 0 0\n"
+        "/dev/mapper/system /home/arezki/.local/share/fonts "
+        "btrfs rw,subvol=/@home,subvolid=257 0 0\n"
+        "/dev/nvme0n1p1 /boot/efi vfat rw 0 0\n"
+    )
+    report = DetectionResult(
+        subvolumes=[
+            subvol("/dev/mapper/system", 256, "/@", "/", SubvolumeClass.SYSTEM_ROOT),
+            # scanner can mistakenly prefer the bind alias to the real root
+            subvol(
+                "/dev/mapper/system",
+                257,
+                "/@home",
+                font_alias,
+                SubvolumeClass.USER_DATA,
+            ),
+        ]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kwargs: report)
+    monkeypatch.setattr(
+        inventory,
+        "_is_real_subvolume_root",
+        lambda path: path in (root, home),
+    )
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mounts)
+    found = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert found["inventory_complete"]
+    assert found["included_btrfs_count"] == 2
+    assert [item["mount_point"] for item in found["sources"]] == ["/", "/home"]
+    assert not any(
+        item.get("mount_point") == font_alias and item.get("included_by_default")
+        for item in found["sources"]
+    )
+    assert found["bind_mounts"] == [
+        {
+            "mount_point": font_alias,
+            "filesystem": "btrfs",
+            "device": "/dev/mapper/system",
+            "subvolume_id": "257",
+            "reason": "bind_alias_of_verified_btrfs_root",
+        }
+    ]
+    from btrfs_backup_ng.cli import machine_set_v2
+
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: found)
+    sources, _ = machine_set_v2._sources_from_inventory()
+    assert sources == ["/", "/home"]
+
+
+def test_uncovered_btrfs_bind_mount_is_not_silently_skipped(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+    from btrfs_backup_ng.cli import machine_set_v2
+
+    bind = "/home/arezki/.local/share/fonts"
+    mounts = (
+        "/dev/nvme0n1p2 / btrfs rw,subvol=/@,subvolid=256 0 0\n"
+        "/dev/sdb1 " + bind + " btrfs rw,subvol=/@external,subvolid=300 0 0\n"
+    )
+    report = DetectionResult(
+        subvolumes=[
+            subvol("/dev/nvme0n1p2", 256, "/@", "/"),
+            subvol("/dev/sdb1", 300, "/@external", bind),
+        ]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kwargs: report)
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: path == "/")
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mounts)
+    found = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert found["inventory_complete"] is False
+    assert found["included_btrfs_count"] == 1
+    assert found["bind_mounts"][0]["reason"] == "uncovered_nonroot_btrfs_mount"
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: found)
+    import pytest
+
+    with pytest.raises(ValueError, match="fonts.*complete-machine backup is blocked"):
+        machine_set_v2._sources_from_inventory()
+
+
+def test_two_mounts_of_same_actual_root_are_deduplicated(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    mounts = (
+        "/dev/sys /home btrfs rw,subvolid=257,subvol=/@home 0 0\n"
+        "/dev/sys /home/duplicate btrfs rw,subvolid=257,subvol=/@home 0 0\n"
+    )
+    report = DetectionResult(
+        subvolumes=[subvol("/dev/sys", 257, "/@home", "/home/duplicate")]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kwargs: report)
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: True)
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mounts)
+    found = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert found["included_btrfs_count"] == 1
+    assert found["sources"][0]["mount_point"] == "/home"
+
+
+def test_snapshot_marked_from_metadata_never_auto_included():
+    report = DetectionResult(
+        subvolumes=[
+            DetectedSubvolume(
+                id=256,
+                device="/dev/sys",
+                path="/@",
+                mount_point="/",
+                classification=SubvolumeClass.SYSTEM_ROOT,
+            ),
+            DetectedSubvolume(
+                id=311,
+                device="/dev/sys",
+                path="/odd_snapshot",
+                mount_point="/mnt/unrelated",
+                is_snapshot=True,
+            ),
+        ],
+    )
+    found = build_machine_inventory(report, [])
+    assert found["included_btrfs_count"] == 1
+    assert found["excluded_internal"][0]["reason"] == "snapshot"
+
+
+def test_invalid_nonroot_mount_predicate_is_read_only(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    directory = tmp_path / "regular-dir"
+    directory.mkdir()
+    invoked = []
+    monkeypatch.setattr(
+        inventory.subprocess, "run", lambda *_args, **_kw: invoked.append(True)
+    )
+    assert inventory._is_real_subvolume_root(str(directory)) is False
+    assert not invoked
+    assert inventory._is_real_subvolume_root(str(tmp_path / "missing")) is False
+
+
+def test_uncovered_mount_refuses_backup_before_any_snapshot_or_target_write(
+    monkeypatch, tmp_path
+):
+    import argparse
+    import pytest
+    from btrfs_backup_ng.cli import machine_set_v2
+
+    findings = {
+        "inventory_complete": False,
+        "warnings": [
+            "Btrfs directory mount has no accessible subvolume root: "
+            "/home/arezki/.local/share/fonts; complete-machine backup is blocked"
+        ],
+        "sources": [{"mount_point": "/", "included_by_default": True}],
+    }
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: findings)
+    monkeypatch.setattr(
+        machine_set_v2,
+        "create_native_snapshot",
+        lambda *a, **kw: pytest.fail("must not create any snapshot"),
+    )
+    monkeypatch.setattr(
+        machine_set_v2,
+        "_open_guard",
+        lambda *a, **kw: pytest.fail("must not touch destination"),
+    )
+    target = tmp_path / "untouched"
+    target.mkdir()
+    args = argparse.Namespace(
+        checkpoint_action="set-start",
+        target=str(target),
+        profile_id="55555555-5555-4555-8555-555555555555",
+        source=None,
+        snapshot_provider="harbor",
+        allow_local=True,
+        experimental=True,
+    )
+    with pytest.raises(ValueError, match="fonts"):
+        machine_set_v2._execute_machine_set_unlocked(args)
+    assert not list(target.iterdir())

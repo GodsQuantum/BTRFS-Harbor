@@ -38,9 +38,10 @@ jobs:
         run: |
           cd harbor/desktop
           pnpm install --frozen-lockfile
-          pnpm build
+          # A raw cargo build can select the devUrl (localhost) even in release mode.
+          # Use the same Tauri CLI production build path as actual installable packages.
+          pnpm tauri build --no-bundle
           cd ..
-          cargo build -p btrfs-harbor-desktop --locked --release
           test -x target/release/btrfs-harbor
       - name: Validate rendered first-run DOM in real Chromium
         run: bash packaging/tests/assert_first_run_dom.sh

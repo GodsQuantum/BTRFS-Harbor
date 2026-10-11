@@ -32,6 +32,14 @@ Btrfs Harbor turns **local Btrfs/Snapper snapshots into real off-host backups**.
 
 A local snapshot on the same disk is useful, but it is **not** an off-host backup. Harbor keeps that distinction visible everywhere.
 
+## Simple whole-computer flow — October 11, 2026 preview
+
+**Back up this computer → choose one destination folder → Back up now.** The ordinary UI no longer asks for a source or snapshot number. The machine-set engine automatically groups all detected, **mounted system Btrfs subvolumes** and mounted EFI/boot files when available, keeping the transfer resumable. Individual snapshots and rescue ISO creation are advanced options.
+
+**Restore → choose the folder containing the backups → latest completed machine set → choose an empty Btrfs staging directory → check and stage.** EFI/boot archives are staged if present. **This is not yet universally bootable one-click bare-metal recovery**: bootloader, GPT, LUKS and other hardware-specific recovery still require validation or ReaR.
+
+Unmounted subvolumes, external drives and non-Btrfs data volumes are not automatically included, and direct SSH is not a supported one-click destination. The published rc.11 release predates this UI change; use a build explicitly associated with the preview commit.
+
 ## Preview branch after rc.11 (UNRELEASED, experimental, October 10, 2026)
 
 This source branch contains newer work **not included in the published rc.11 packages**. Do not confuse CI success for a new stable release.

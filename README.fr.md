@@ -32,6 +32,14 @@ Btrfs Harbor transforme les **snapshots locaux Btrfs/Snapper en vraies sauvegard
 
 Un snapshot local sur le même disque est utile, mais ce n’est **pas** une sauvegarde hors machine. Harbor conserve cette distinction partout dans l’interface.
 
+## Parcours simplifié actuel — preview du 11 octobre 2026
+
+**Sauvegarder cet ordinateur → choisir un dossier → Sauvegarder maintenant.** Pas de menu de sous-volumes ni de numéros de snapshots à comprendre. Harbor détecte et sauvegarde en un seul ensemble les sous-volumes Btrfs **montés** et vérifiés du système et, lorsqu'ils sont montés, les fichiers EFI et /boot. Il reprend une sauvegarde complète interrompue au lieu de dupliquer l'envoi. Une ancienne sauvegarde individuelle inachevée doit d'abord être traitée dans les options expert.
+
+**Restaurer → choisir le dossier des sauvegardes → dernier ensemble complet → choisir un dossier Btrfs vide → vérifier puis restaurer.** Les fichiers de démarrage sont également préparés lorsqu'ils ont été archivés. **Il ne s'agit pas encore d'une restauration automatiquement amorçable sur tout matériel** : la reconstruction GPT/LUKS/chargeur de démarrage peut nécessiter ReaR et des vérifications supplémentaires.
+
+Le mode expert conserve l'envoi d'un snapshot individuel, mais ce n'est plus le parcours normal. Les disques externes, sous-volumes non montés et partitions de données non-Btrfs ne sont **pas** inclus automatiquement ; une destination SSH directe depuis le bouton principal reste indisponible. Les CI et l'AppImage preview ne remplacent pas les sauvegardes indépendantes existantes.
+
 ## Branche preview après rc.11 (NON PUBLIÉE, expérimentale, 10 octobre 2026)
 
 La branche de développement contient de nouvelles modifications **absentes des paquets rc.11 déjà publiés**. Les CI vertes ne constituent pas une nouvelle version stable.
@@ -161,7 +169,7 @@ La candidate supervisée **v0.2.6-rc.7** (artefacts à vérifier) sait utiliser 
 
 ## 📦 Télécharger et installer
 
-Le moyen le plus simple de **tester Harbor ou faire des sauvegardes manuelles** est l’**AppImage portable**. Elle reste portable : son lancement n’installe rien. Elle détecte Btrfs/Snapper, permet de choisir les sources et la destination, de la valider, de lancer **Sauvegarder maintenant**, de parcourir les snapshots sauvegardés et de préparer une restauration. Les opérations Btrfs privilégiées demandent polkit seulement quand c’est nécessaire.
+Le moyen le plus simple de **tester Harbor ou faire des sauvegardes manuelles** est l’**AppImage portable**. Elle reste portable : son lancement n’installe rien. Elle détecte automatiquement les volumes Btrfs du système ; choisis uniquement une destination puis **Sauvegarder maintenant** pour un envoi groupé. Les snapshots individuels restent dans les options avancées. Tu peux ensuite sélectionner le dernier ensemble complet pour préparer la restauration. Les opérations Btrfs privilégiées demandent polkit seulement quand c’est nécessaire.
 
 Si tu fermes la fenêtre Harbor pendant une sauvegarde manuelle en cours, Harbor indique que la sauvegarde **continue en arrière-plan**, masque la fenêtre et conserve un **tray temporaire**. Son menu permet de rouvrir Harbor ou **d’arrêter la sauvegarde active**. Le tray disparaît automatiquement à la fin.
 
@@ -208,17 +216,13 @@ La compilation source est destinée aux contributeurs et packagers et utilise la
 
 ## 🛟 Première sauvegarde
 
-1. Ouvre Harbor. Il identifie la machine courante et détecte ses **subvolumes Btrfs**, ses configurations Snapper et les snapshots read-only utilisables par `btrfs send`.
-2. Dans **Ce qui sera sauvegardé**, vérifie les subvolumes persistants détectés. Les libellés humains passent avant `@`, chemins et détails Snapper.
-3. Choisis la destination :
-   - **Dossier** — choisis un seul répertoire puis clique **Valider**. Harbor détecte local/NFS/SMB en interne sans afficher la plomberie de montage.
-   - **Serveur SSH** — renseigne hôte, utilisateur, port et dossier distant, puis teste la connexion.
-4. Clique **Sauvegarder maintenant**. Cela fonctionne depuis l’AppImage portable sans installer Harbor.
-5. Si tu veux des sauvegardes récurrentes/en arrière-plan, choisis la fréquence puis clique **Installer Harbor pour les sauvegardes automatiques**.
-6. Vérifie que le premier envoi passe à **SAUVEGARDÉ** puis **VÉRIFIÉ**.
-7. Ouvre **Récupérer**, choisis un vrai snapshot sauvegardé et fais un test de restauration en staging.
+1. Lance l'**AppImage** sur ton ordinateur Linux avec système Btrfs.
+2. Sous **Sauvegarder cet ordinateur**, clique **Parcourir…** pour choisir ton disque USB, dossier local ou partage NFS/SMB monté.
+3. Clique **Sauvegarder maintenant**. Harbor inclut automatiquement les sous-volumes Btrfs du système montés et les fichiers EFI/boot éligibles ; il reprend une sauvegarde complète interrompue. Aucune sélection de root, home, root-administrateur ou srv individuellement.
 
-Le premier lancement natif n’affiche aucune IP de démonstration, aucun dossier récent, aucun nom de machine ni chemin privé.
+Pour vérifier/récupérer : **Restaurer**, choisis le dossier contenant l'ensemble de sauvegarde, puis un dossier Btrfs de restauration **vide**. Effectue la vérification et la restauration de préparation. La remise en route d'un disque système sur un autre ordinateur n'est pas encore automatique dans tous les cas (bootloader, ESP, LUKS). Ne supprime pas ta sauvegarde de secours indépendante.
+
+Les tâches planifiées sont facultatives ; elles peuvent demander d'installer le service système. Le mode expert permet toujours un envoi d'un seul snapshot si nécessaire.
 
 ## 🧭 Comprendre les statuts
 

@@ -6,6 +6,7 @@ destination, so activating the CTA cannot start a production backup.
 """
 import sys
 import time
+import subprocess
 
 import pyatspi
 
@@ -46,7 +47,12 @@ if button is None:
     print("NATIVE FAIL: Back up now inaccessible in first-run window", file=sys.stderr)
     sys.exit(1)
 
-print("NATIVE PASS: real Tauri first-run window exposes Back up now button.", flush=True)
+enabled = button.getState().contains(pyatspi.STATE_ENABLED)
+print(f"NATIVE button exposed. Enabled: {enabled}", flush=True)
+if not enabled:
+    print("NATIVE FAIL: Back up now disabled and cannot be clicked.", file=sys.stderr)
+    sys.exit(1)
+print("NATIVE PASS: real Tauri first-run exposes an enabled Back up now button.", flush=True)
 try:
     action = button.queryAction()
     supported = [action.getName(i).lower() for i in range(action.nActions)]
@@ -57,12 +63,55 @@ except Exception as exc:
     print(f"NATIVE FAIL: could not activate Back up now: {exc}", file=sys.stderr)
     sys.exit(1)
 
-for _ in range(35):
-    names = [name for _obj, _role, name in visible_accessibles()]
-    if any("select btrfs volumes and a backup destination below" in name.casefold() for name in names):
-        print("NATIVE PASS: click displayed configuration guidance, without starting a backup.", flush=True)
-        sys.exit(0)
-    time.sleep(0.25)
-print("NATIVE FAIL: button clicked but configuration guidance did not render.", file=sys.stderr)
-print("Accessible names:", names[:70], file=sys.stderr)
+def all_accessible_texts():
+    values = []
+    for obj, role, name in visible_accessibles():
+        if name:
+            values.append(name)
+        try:
+            text = obj.queryText()
+            value = text.getText(0, min(text.characterCount, 2000)).strip()
+            if value:
+                values.append(value)
+        except Exception:
+            pass
+    return values
+
+
+def check_guidance():
+    names = []
+    for _ in range(18):
+        names = all_accessible_texts()
+        if any("select btrfs volumes and a backup destination below" in n.casefold() for n in names):
+            return True, names
+        time.sleep(0.25)
+    return False, names
+
+
+ok, names = check_guidance()
+if ok:
+    print("NATIVE PASS: button action displayed first-run configuration guidance.", flush=True)
+    sys.exit(0)
+
+try:
+    rect = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+    if rect.width <= 0 or rect.height <= 0:
+        raise RuntimeError(f"Invalid native button extent: {rect}")
+    x, y = rect.x + rect.width // 2, rect.y + rect.height // 2
+    print(f"NATIVE retry: physical mouse click at ({x}, {y})", flush=True)
+    subprocess.run(
+        ["xdotool", "mousemove", "--sync", str(x), str(y), "click", "1"],
+        check=True,
+        timeout=8,
+    )
+except Exception as exc:
+    print(f"NATIVE mouse click error: {exc}", file=sys.stderr)
+
+ok, names = check_guidance()
+if ok:
+    print("NATIVE PASS: physical click displayed first-run guidance.", flush=True)
+    sys.exit(0)
+
+print("NATIVE FAIL: no first-run guidance after native and pointer clicks.", file=sys.stderr)
+print("Accessible names/text:", names[:85], file=sys.stderr)
 sys.exit(1)

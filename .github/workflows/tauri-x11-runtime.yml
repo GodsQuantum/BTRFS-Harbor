@@ -71,7 +71,11 @@ jobs:
                 exit 1
               fi
               xdotool getwindowname "$found" | grep -F "Btrfs Harbor"
-              NO_AT_BRIDGE=0 /usr/bin/python3 packaging/tests/assert_native_backup_button.py
+              if ! NO_AT_BRIDGE=0 /usr/bin/python3 packaging/tests/assert_native_backup_button.py; then
+                import -display "$DISPLAY" -window "$found" -silent /tmp/btrfs-harbor-native.png || true
+                echo "Native action acceptance failed; failure screenshot recorded." >&2
+                exit 1
+              fi
               # Capture the app window after the button has been activated and
               # the setup guidance has been checked through native AT-SPI.
               xdotool windowactivate --sync "$found" || true

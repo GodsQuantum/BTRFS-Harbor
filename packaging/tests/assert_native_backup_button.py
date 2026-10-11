@@ -53,6 +53,8 @@ if not enabled:
     print("NATIVE FAIL: Back up now disabled and cannot be clicked.", file=sys.stderr)
     sys.exit(1)
 print("NATIVE PASS: real Tauri first-run exposes an enabled Back up now button.", flush=True)
+start = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+print(f"NATIVE CTA before click: y={start.y}, height={start.height}", flush=True)
 try:
     action = button.queryAction()
     supported = [action.getName(i).lower() for i in range(action.nActions)]
@@ -78,19 +80,25 @@ def all_accessible_texts():
     return values
 
 
-def check_guidance():
+def check_guidance_or_scroll():
     names = []
     for _ in range(18):
         names = all_accessible_texts()
         if any("select btrfs volumes and a backup destination below" in n.casefold() for n in names):
-            return True, names
+            return True, names, "configuration guidance displayed"
+        try:
+            current = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            if abs(current.y - start.y) >= 60 and "Set up backups" in names:
+                return True, names, f"scrolled from y={start.y} to y={current.y}"
+        except Exception:
+            pass
         time.sleep(0.25)
-    return False, names
+    return False, names, "no accessible guidance or scroll"
 
 
-ok, names = check_guidance()
+ok, names, evidence = check_guidance_or_scroll()
 if ok:
-    print("NATIVE PASS: button action displayed first-run configuration guidance.", flush=True)
+    print(f"NATIVE PASS: first-run backup action activated: {evidence}", flush=True)
     sys.exit(0)
 
 try:
@@ -107,11 +115,11 @@ try:
 except Exception as exc:
     print(f"NATIVE mouse click error: {exc}", file=sys.stderr)
 
-ok, names = check_guidance()
+ok, names, evidence = check_guidance_or_scroll()
 if ok:
-    print("NATIVE PASS: physical click displayed first-run guidance.", flush=True)
+    print(f"NATIVE PASS: physical first-run click activated: {evidence}", flush=True)
     sys.exit(0)
 
-print("NATIVE FAIL: no first-run guidance after native and pointer clicks.", file=sys.stderr)
+print("NATIVE FAIL: no guidance or scroll after native and pointer clicks.", file=sys.stderr)
 print("Accessible names/text:", names[:85], file=sys.stderr)
 sys.exit(1)

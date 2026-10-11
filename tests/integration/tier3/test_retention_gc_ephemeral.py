@@ -22,6 +22,8 @@ from btrfs_backup_ng.core.machine_retention_gc_v2 import (
 )
 from btrfs_backup_ng.endpoint.mount_guard_v2 import MountGuard, capture_mount_identity
 
+pytestmark = pytest.mark.tier3
+
 NOW = datetime(2026, 10, 10, tzinfo=timezone.utc)
 SET_OLD = "11111111-1111-4111-8111-111111111111"
 SET_NEW = "22222222-2222-4222-8222-222222222222"

@@ -31,4 +31,4 @@ jobs:
           GITHUB_ACTIONS: "true"
         run: |
           test "$GITHUB_ACTIONS" = "true"
-          uv run --frozen python tests/integration/tier3/test_retention_gc_ephemeral.py
+          uv run --frozen pytest -v -s -m tier3 tests/integration/tier3/test_retention_gc_ephemeral.py

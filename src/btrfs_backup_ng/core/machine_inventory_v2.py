@@ -214,7 +214,16 @@ def _select_live_subvolume_roots(
 
     # Prefer the shortest stable path for multiple mounts of the same subvol.
     preferred = {
-        identity: min(paths, key=lambda path: (len(Path(path).parts), len(path), path))
+        identity: min(
+            paths,
+            key=lambda path: (
+                path.startswith(EXTERNAL_PREFIXES)
+                or path in ("/mnt", "/media", "/run/media"),
+                len(Path(path).parts),
+                len(path),
+                path,
+            ),
+        )
         for identity, paths in roots.items()
     }
 
@@ -271,6 +280,31 @@ def inspect_live_machine(
     detection = scan_system(allow_partial=True, include_removable=True)
     ignored, uncovered = _select_live_subvolume_roots(detection, mounts_content)
     report = build_machine_inventory(detection, _mount_rows(mounts_content))
+    inventory_sources = report["sources"]
+    if not isinstance(inventory_sources, list):
+        raise ValueError("invalid machine inventory sources")
+    covered = {
+        (row["device"], str(row["subvolume_id"]))
+        for row in inventory_sources
+        if isinstance(row, dict) and row.get("included_by_default")
+    }
+    # A root under /mnt (or a snapshot/internal root) is NOT covered by the
+    # normal system backup. Its subdirectory bind alias under /home cannot be
+    # claimed as covered merely because the same Btrfs id exists somewhere.
+    for row in ignored:
+        path = row["mount_point"]
+        external = path.startswith(EXTERNAL_PREFIXES) or path in (
+            "/mnt",
+            "/media",
+            "/run/media",
+        )
+        if (
+            row["reason"] == "bind_alias_of_verified_btrfs_root"
+            and not external
+            and (row["device"], row["subvolume_id"]) not in covered
+        ):
+            row["reason"] = "uncovered_btrfs_bind_alias"
+            uncovered.append(row)
     report["bind_mounts"] = ignored
     if uncovered:
         report["inventory_complete"] = False

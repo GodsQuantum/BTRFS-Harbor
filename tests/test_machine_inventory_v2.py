@@ -402,3 +402,67 @@ def test_uncovered_mount_refuses_backup_before_any_snapshot_or_target_write(
     with pytest.raises(ValueError, match="fonts"):
         machine_set_v2._execute_machine_set_unlocked(args)
     assert not list(target.iterdir())
+
+
+def test_system_bind_from_external_btrfs_cannot_be_declared_covered(
+    monkeypatch, tmp_path
+):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+    from btrfs_backup_ng.cli import machine_set_v2
+
+    bind = "/home/arezki/.local/share/fonts"
+    external_root = "/mnt/portable-btrfs"
+    mounts = (
+        "/dev/system / btrfs rw,subvolid=256,subvol=/@ 0 0\n"
+        "/dev/portable "
+        + external_root
+        + " btrfs rw,subvolid=300,subvol=/@outside 0 0\n"
+        "/dev/portable " + bind + " btrfs rw,subvolid=300,subvol=/@outside 0 0\n"
+    )
+    report = DetectionResult(
+        subvolumes=[
+            subvol("/dev/system", 256, "/@", "/"),
+            subvol("/dev/portable", 300, "/@outside", bind),
+        ]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kw: report)
+    monkeypatch.setattr(
+        inventory, "_is_real_subvolume_root", lambda path: path in ("/", external_root)
+    )
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mounts)
+    result = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert result["included_btrfs_count"] == 1
+    assert result["inventory_complete"] is False
+    assert any(
+        row["reason"] == "uncovered_btrfs_bind_alias" for row in result["bind_mounts"]
+    )
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: result)
+    import pytest
+
+    with pytest.raises(ValueError, match="fonts"):
+        machine_set_v2._sources_from_inventory()
+
+
+def test_same_subvolume_mounted_system_and_external_prefers_system_root(
+    monkeypatch, tmp_path
+):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    mounts = (
+        "/dev/sys /mnt/x btrfs rw,subvolid=257,subvol=/@home 0 0\n"
+        "/dev/sys /home/workstation/data btrfs rw,subvolid=257,subvol=/@home 0 0\n"
+    )
+    report = DetectionResult(
+        subvolumes=[
+            subvol("/dev/sys", 257, "/@home", "/mnt/x"),
+        ]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kw: report)
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: True)
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mounts)
+    result = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert result["inventory_complete"]
+    assert result["included_btrfs_count"] == 1
+    assert result["sources"][0]["mount_point"] == "/home/workstation/data"

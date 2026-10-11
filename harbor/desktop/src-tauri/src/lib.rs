@@ -1425,7 +1425,7 @@ async fn checkpoint_action(
 ) -> Result<String, String> {
     let args = checkpoint_actions::action_arguments(&request)?;
     let executable = bundled_engine_candidate(&app)
-        .ok_or("The bundled v2 engine is unavailable; install the v0.2.6 package")?;
+        .ok_or("The bundled v2 engine is unavailable; install the v0.2.7 package")?;
     let long_running = matches!(
         request.action.as_str(),
         "start" | "resume" | "set-start" | "set-resume" | "set-restore" | "set-rescue-iso"

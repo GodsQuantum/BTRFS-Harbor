@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7-rc.1] — audited whole-computer backup coverage (unpublished preview)
+
+- Single machine backup source choices: Harbor live snapshot or latest existing Snapper.
+- Verify true Btrfs subvolume roots; de-duplicate bind aliases and fail closed if source data cannot be protected.
+- Refuse silent omission of local non-Btrfs persistent system volumes, while supported EFI/boot file systems are archived separately.
+- Skip external drives during mandatory internal Btrfs discovery, with truthful inventory warnings.
+- Preserve checkpoint-v2 on-disk protocol marker 0.2.6 for backward compatibility; desktop release is 0.2.7-rc.1.
+- Bare-metal universality, KDE Wayland tray, cross-computer import and direct SSH are not yet certified.
+
 ## [0.2.6-rc.11] — ReaR bridge and supervised rescue ISO (unpublished)
 
 - Included ReaR EXTERNAL restore hook/config in DEB/RPM/AppImage/universal installer.

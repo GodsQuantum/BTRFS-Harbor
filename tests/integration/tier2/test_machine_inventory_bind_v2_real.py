@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+from btrfs_backup_ng.detection.models import DetectedSubvolume, DetectionResult
 
 from .conftest import requires_btrfs
 
@@ -65,3 +66,58 @@ def test_real_btrfs_subvolume_root_and_bind_subdirectory_are_distinct(
         subprocess.run(
             ["umount", str(true_mount)], check=True, capture_output=True, timeout=20
         )
+
+
+def _btrfs_id(root: Path) -> int:
+    import re
+
+    result = subprocess.run(
+        ["btrfs", "subvolume", "show", str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    match = re.search(r"(?m)^\s*Subvolume ID:\s*(\d+)\s*$", result.stdout)
+    assert match is not None, result.stdout
+    return int(match.group(1))
+
+
+def test_nested_subvolume_without_separate_mount_is_not_omitted(
+    btrfs_volume: Path, tmp_path: Path, monkeypatch
+):
+    source = btrfs_volume / "real-system-root"
+    nested = source / "var" / "lib" / "valuable"
+    source.mkdir()
+    # A normal nested directory is NOT snapshotted independently.
+    (source / "var" / "lib").mkdir(parents=True)
+    subprocess.run(["btrfs", "subvolume", "create", str(nested)], check=True)
+    (nested / "user-data.txt").write_text("important nested files")
+    id_parent = 5
+    id_nested = _btrfs_id(nested)
+    fake_mounts = f"/dev/test-btrfs {btrfs_volume} btrfs rw,subvolid=5,subvol=/ 0 0\n"
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(fake_mounts)
+    report = DetectionResult(
+        subvolumes=[
+            DetectedSubvolume(
+                id=id_parent,
+                device="/dev/test-btrfs",
+                path="/",
+                mount_point=str(btrfs_volume),
+            ),
+            DetectedSubvolume(
+                id=id_nested,
+                device="/dev/test-btrfs",
+                path="/real-system-root/var/lib/valuable",
+                mount_point=None,
+            ),
+        ]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kw: report)
+    found = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert found["inventory_complete"]
+    assert {
+        row["mount_point"] for row in found["sources"] if row["included_by_default"]
+    } == {str(btrfs_volume), str(nested)}
+    assert inventory._is_real_subvolume_root(str(nested))

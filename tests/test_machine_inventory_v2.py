@@ -301,7 +301,7 @@ def test_uncovered_btrfs_bind_mount_is_not_silently_skipped(monkeypatch, tmp_pat
     monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: found)
     import pytest
 
-    with pytest.raises(ValueError, match="fonts.*complete-machine backup is blocked"):
+    with pytest.raises(ValueError, match="Uncovered Btrfs mount: .*fonts"):
         machine_set_v2._sources_from_inventory()
 
 
@@ -466,3 +466,148 @@ def test_same_subvolume_mounted_system_and_external_prefers_system_root(
     assert result["inventory_complete"]
     assert result["included_btrfs_count"] == 1
     assert result["sources"][0]["mount_point"] == "/home/workstation/data"
+
+
+def test_system_ext4_home_must_fail_before_backup(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+    from btrfs_backup_ng.cli import machine_set_v2
+    import pytest
+
+    data = (
+        "/dev/system / btrfs rw,subvolid=256,subvol=/@ 0 0\n"
+        "/dev/data /home ext4 rw,relatime 0 0\n"
+        "/dev/boot /boot/efi vfat rw,relatime 0 0\n"
+        "/dev/usb /mnt/usb ext4 rw 0 0\n"
+        "/dev/snap /snap/tool/42 squashfs ro 0 0\n"
+    )
+    discovered = DetectionResult(
+        subvolumes=[subvol("/dev/system", 256, "/@", "/", SubvolumeClass.SYSTEM_ROOT)]
+    )
+    monkeypatch.setattr(inventory, "scan_system", lambda **kw: discovered)
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: path == "/")
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(data)
+    report = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert not report["inventory_complete"]
+    assert report["included_btrfs_count"] == 1
+    assert report["uncovered_persistent_mounts"] == [
+        {"source": "/dev/data", "mount_point": "/home", "filesystem": "ext4"}
+    ]
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: report)
+    with pytest.raises(
+        ValueError, match=r"Non-Btrfs system data not covered: /home \(ext4\)"
+    ):
+        machine_set_v2._sources_from_inventory()
+
+
+def test_system_xfs_var_lib_is_not_silently_omitted(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    mount_info = "/dev/sys / btrfs rw,subvolid=256 0 0\n/dev/data /var/lib xfs rw 0 0\n"
+    detected = DetectionResult(subvolumes=[subvol("/dev/sys", 256, "/@", "/")])
+    monkeypatch.setattr(inventory, "scan_system", lambda **kw: detected)
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: path == "/")
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text(mount_info)
+    report = inventory.inspect_live_machine(mounts_path=mounts_file)
+    assert not report["inventory_complete"]
+    assert report["uncovered_persistent_mounts"][0]["mount_point"] == "/var/lib"
+
+
+def test_external_unreadable_btrfs_does_not_poison_system_scan(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+
+    mounts = (
+        "/dev/sys / btrfs rw,subvolid=256 0 0\n"
+        "/dev/backup /mnt/backup-drive btrfs rw,subvolid=301 0 0\n"
+    )
+    captured = []
+    monkeypatch.setattr(
+        inventory,
+        "scan_system",
+        lambda **kw: (
+            captured.append(kw)
+            or DetectionResult(subvolumes=[subvol("/dev/sys", 256, "/@", "/")])
+        ),
+    )
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda path: path == "/")
+    file = tmp_path / "mounts"
+    file.write_text(mounts)
+    found = inventory.inspect_live_machine(mounts_path=file)
+    assert captured == [{"allow_partial": True, "include_removable": False}]
+    assert found["inventory_complete"]
+    assert found["sources"][0]["mount_point"] == "/"
+    assert all(
+        not row.get("included_by_default")
+        for row in found["sources"]
+        if row.get("mount_point") == "/mnt/backup-drive"
+    )
+
+
+def test_inventory_error_prioritizes_actual_missing_mount(monkeypatch):
+    import pytest
+    from btrfs_backup_ng.cli import machine_set_v2
+
+    report = {
+        "inventory_complete": False,
+        "warnings": [f"Unimportant warning {i}" for i in range(16)],
+        "uncovered_persistent_mounts": [{"mount_point": "/home", "filesystem": "ext4"}],
+        "sources": [],
+    }
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: report)
+    with pytest.raises(ValueError, match="/home"):
+        machine_set_v2._sources_from_inventory()
+
+
+def test_missing_configured_btrfs_home_prevents_false_complete(monkeypatch, tmp_path):
+    from btrfs_backup_ng.core import machine_inventory_v2 as inventory
+    from btrfs_backup_ng.cli import machine_set_v2
+    import pytest
+
+    mounts_file = tmp_path / "mounts"
+    mounts_file.write_text("/dev/system / btrfs rw,subvolid=256,subvol=/@ 0 0\n")
+    fstab_file = tmp_path / "fstab"
+    fstab_file.write_text(
+        "UUID=os / btrfs defaults,subvol=@ 0 0\n"
+        "UUID=home /home btrfs defaults,nofail,subvol=@home 0 0\n"
+        "UUID=external /mnt/Backup btrfs nofail 0 0\n"
+        "UUID=efi /boot/efi vfat defaults 0 2\n"
+        "tmpfs /tmp tmpfs defaults 0 0\n"
+    )
+    monkeypatch.setattr(
+        inventory,
+        "scan_system",
+        lambda **kwargs: DetectionResult(
+            subvolumes=[subvol("/dev/system", 256, "/@", "/")]
+        ),
+    )
+    monkeypatch.setattr(inventory, "_is_real_subvolume_root", lambda p: p == "/")
+    found = inventory.inspect_live_machine(
+        mounts_path=mounts_file, fstab_path=fstab_file
+    )
+    assert found["inventory_complete"] is False
+    assert found["unmounted_configured_volumes"] == [
+        {"source": "UUID=home", "mount_point": "/home", "filesystem": "btrfs"}
+    ]
+    monkeypatch.setattr(machine_set_v2, "inspect_live_machine", lambda: found)
+    with pytest.raises(ValueError, match="Configured filesystem not mounted: /home"):
+        machine_set_v2._sources_from_inventory()
+
+
+def test_fstab_mount_with_escaped_spaces_and_bind_handled():
+    from btrfs_backup_ng.core.machine_inventory_v2 import (
+        _configured_unmounted_system_volumes,
+    )
+
+    rows = [
+        {"source": "/dev/os", "mount_point": "/", "filesystem": "btrfs"},
+    ]
+    items = _configured_unmounted_system_volumes(
+        rows,
+        "UUID=foo /var/my\\040data btrfs defaults 0 0\n"
+        "/mnt/common /srv/common none bind 0 0\n"
+        "server:/mnt /mnt/remote nfs4 nofail 0 0\n",
+    )
+    assert items == [
+        {"source": "UUID=foo", "mount_point": "/var/my data", "filesystem": "btrfs"}
+    ]

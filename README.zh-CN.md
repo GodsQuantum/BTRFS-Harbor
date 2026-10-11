@@ -49,6 +49,12 @@ Btrfs Harbor 把**本机 Btrfs/Snapper 快照变成真正的异机备份**。它
 - **事务保留实验室**：[临时 runner 崩溃恢复 CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) 验证持久日志、隔离区、保护外来文件和断点恢复。因应用的并发读写锁及计划清理尚未完全验证，**自动删除仍禁用**；实验性命令行现在支持人工确认的清理预览、执行和恢复，并使用目标目录读写锁。定时备份不会自动删除。。
 - **桌面仍未完成认证**：真实 KDE Wayland/X11 托盘关闭/重新打开、进度、独立 VM 安装包和不同 UEFI 引导程序。务必保留其他独立且验证过的备份。
 
+## v0.2.7-rc.1 — 整机备份覆盖完整性审计（未发布预览版）
+
+整机备份可选择 **创建 Harbor 新快照** 或 **使用现有最新 Snapper 快照**。该版本检查真正的 Btrfs 子卷根目录，排除字体目录等 bind 挂载重复来源，外接备份盘故障也不再阻断内部磁盘扫描。若系统存在不能由 Btrfs 引擎保护的独立持久化分区（例如 ext4 /home 或 XFS /var/lib），软件会拒绝声称完成整机备份。EFI/boot 文件有独立存档功能；嵌套 Btrfs 子卷不会递归包含在父快照中。
+
+已公开的 rc.11 是旧版本。新版本安装包仍需验证，暂不能保证所有硬件的裸机恢复、异机迁移、KDE Wayland 托盘、LUKS/Secure Boot 或无人值守操作。请保留独立且已验证的备份。
+
 ## v0.2.6-rc.11（已发布预览版）— ReaR 救援 ISO 与恢复
 
 **2026 年 10 月 10 日已发布：**[v0.2.6-rc.11 正式预发布页面](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11)，包含经过校验的 AppImage、DEB、RPM、.run 和 SHA256SUMS。稳定的 `main` 仍为 v0.2.5。**尚未认证**无人值守的通用系统恢复。

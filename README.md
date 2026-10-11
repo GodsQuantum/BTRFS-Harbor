@@ -49,6 +49,12 @@ This source branch contains newer work **not included in the published rc.11 pac
 - **Retention transaction laboratory**: [disposable GC crash CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) exercises a private quarantine/journal, foreign-file refusal and crash recovery. **Automatic deletion remains disabled**; the experimental CLI now provides manually confirmed plan/apply/resume transactions with the destination-wide lease, never as an automatic scheduled action. because application-level concurrent reader/writer coordination and safe scheduling are not yet qualified.
 - **Desktop qualification still required**: native KDE Wayland/X11 systray close/reopen, real UI progression, package installation in disposable distro VMs, and several bootloaders. Do not replace your independent verified backups with this experimental preview.
 
+## v0.2.7-rc.1 — audited whole-computer coverage (PREVIEW, unpublished)
+
+The Backup this computer flow supports either **new Harbor snapshots** or **latest existing Snapper snapshots**. This preview validates real Btrfs subvolume roots, deduplicates bind-mount aliases, avoids mandatory scans of external backup drives, and refuses a purported whole-computer backup if local persistent non-Btrfs data mounts (for example ext4 /home, XFS /var/lib) cannot be protected. Supported EFI and separate /boot volumes use the boot-file adapter. Nested Btrfs subvolumes are never included recursively in a parent snapshot.
+
+The public rc.11 is older; this candidate requires build verification. This does NOT universally certify bare-metal recovery, new-computer migration, KDE Wayland tray, LUKS/Secure Boot or unattended jobs. Retain an independent tested backup.
+
 ## v0.2.6-rc.11 (published prerelease) — supervised rescue ISO and ReaR recovery
 
 **Published October 10, 2026:** [official v0.2.6-rc.11 release](https://github.com/GodsQuantum/BTRFS-Harbor/releases/tag/v0.2.6-rc.11) with verified AppImage, DEB, RPM, .run and SHA256SUMS. Stable `main` remains v0.2.5. This candidate is **not** certified for unattended universal recovery.

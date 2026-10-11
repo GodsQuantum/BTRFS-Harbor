@@ -36,7 +36,7 @@ from ..core.boot_files_v2 import (
 )
 from ..core.machine_inventory_v2 import _mount_rows
 from ..endpoint.raw_metadata import discover_raw_snapshots
-from ..core.machine_inventory_v2 import inspect_live_machine
+from ..core.machine_inventory_v2 import inspect_live_machine, _is_real_subvolume_root
 from ..core.native_snapshots import (
     NATIVE_FOLDER,
     NAME_PATTERN,
@@ -721,7 +721,36 @@ def _sources_from_inventory() -> tuple[list[str], dict]:
         problems = inventory.get("warnings", [])
         if not isinstance(problems, list):
             raise ValueError("invalid Btrfs inventory warnings")
-        detail = "; ".join(str(problem) for problem in problems[:4])
+        priority: list[str] = []
+        unmounted = inventory.get("unmounted_configured_volumes", [])
+        if isinstance(unmounted, list):
+            priority.extend(
+                f"Configured filesystem not mounted: {row.get('mount_point')} "
+                f"({row.get('filesystem')})"
+                for row in unmounted
+                if isinstance(row, dict)
+            )
+        missing = inventory.get("uncovered_persistent_mounts", [])
+        if isinstance(missing, list):
+            priority.extend(
+                f"Non-Btrfs system data not covered: {row.get('mount_point')} "
+                f"({row.get('filesystem')})"
+                for row in missing
+                if isinstance(row, dict)
+            )
+        binds = inventory.get("bind_mounts", [])
+        if isinstance(binds, list):
+            priority.extend(
+                f"Uncovered Btrfs mount: {row.get('mount_point')}"
+                for row in binds
+                if isinstance(row, dict)
+                and row.get("reason")
+                in (
+                    "uncovered_btrfs_bind_alias",
+                    "uncovered_nonroot_btrfs_mount",
+                )
+            )
+        detail = "; ".join((priority or [str(p) for p in problems])[:5])
         raise ValueError(
             "Cannot safely cover the whole computer: "
             + (detail or "Btrfs enumeration is incomplete")
@@ -820,15 +849,12 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             live = Path(source)
             if not live.is_absolute() or live.is_symlink():
                 raise ValueError("machine source must be a real absolute subvolume")
-            result = subprocess.run(
-                ["btrfs", "subvolume", "show", str(live)],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-            )
-            if result.returncode != 0:
-                raise ValueError(f"not a Btrfs subvolume root: {source}")
+            if not _is_real_subvolume_root(str(live)):
+                raise ValueError(
+                    f"source is not a verified Btrfs subvolume root: {source}. "
+                    "A bind-mounted directory or unavailable subvolume cannot "
+                    "be snapshotted as a whole-machine backup."
+                )
         provider = getattr(args, "snapshot_provider", "harbor")
         if provider not in ("harbor", "snapper"):
             raise ValueError("unknown machine backup snapshot provider")

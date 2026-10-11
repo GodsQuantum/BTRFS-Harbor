@@ -70,5 +70,10 @@ arbitrary remote paths. Do NOT use `btrbk ssh_filter_btrbk.sh` versions before
   between hardlink publish and partial deletion, invalid SSH original command.
 - Server key restrictions must stay exact; never interpolate arbitrary remote
   shell commands. Make the receiver a dedicated account, not root.
-- Archive retention is still **read-only**; independently retain one known-good
-  backup until complete recovery on a second machine is demonstrated.
+- Retention remains disabled in scheduled jobs. The experimental preview
+  supports explicit manual whole-set cleanup: run set-retention-plan, review
+  its exact plan_sha256, then set-retention-apply with
+  --expected-plan-sha256, --experimental and --confirm. The destination
+  is exclusively locked across every pruning transaction. The interrupted
+  journal can be finished with set-retention-resume --confirm. Keep a
+  separate independently verified full-system backup.

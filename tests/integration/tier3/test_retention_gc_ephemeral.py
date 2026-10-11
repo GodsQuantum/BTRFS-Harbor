@@ -123,6 +123,22 @@ def test_resume_refuses_new_foreign_or_modified_archive(root: Path) -> None:
             assert not (root / name).exists()
 
 
+def test_rollback_empty_interrupted_gc_directory(root: Path) -> None:
+    import uuid
+
+    from btrfs_backup_ng.core.machine_retention_gc_v2 import TX_PREFIX
+
+    transaction = root / (TX_PREFIX + str(uuid.uuid4()))
+    transaction.mkdir()
+    (root / "valuable.txt").write_text("do not touch")
+    with MountGuard(root, capture_mount_identity(root)) as guard:
+        with destination_gc_lock(guard, exclusive=True):
+            recovered = collect_verified_files(root, guard, None, resume=True)
+            assert recovered["rolled_back_empty"] is True
+    assert not transaction.exists()
+    assert (root / "valuable.txt").read_text() == "do not touch"
+
+
 def test_incomplete_chain_not_eligible_for_prune(root: Path) -> None:
     sets = [
         SetPoint(SET_OLD, NOW, ("machine20261010T010000-11111111-000",), True),

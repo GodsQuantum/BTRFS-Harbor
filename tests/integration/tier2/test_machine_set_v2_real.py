@@ -277,6 +277,67 @@ def test_nested_root_and_home_machine_set_recovers_from_destination_only(
     )
     assert rechecked["status"] == "completed_btrfs_only"
 
+    # The two old sets are no longer needed because the newest set is an
+    # independent FULL anchor. Apply only the EXACT preview plan; any
+    # concurrent writer/reader, changed backup identity or stale policy
+    # must fail closed. This is an entirely disposable CI Btrfs volume.
+    stale = _run(
+        "set-retention-plan",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--keep",
+        "1",
+        "--min",
+        "0d",
+        "--allow-local",
+        "--experimental",
+    )
+    assert set(stale["retention_eligible_sets"]) == {
+        outcome["set_id"],
+        incremental_machine["set_id"],
+    }
+    result_gc = _run(
+        "set-retention-apply",
+        "--target",
+        str(archive),
+        "--profile-id",
+        PROFILE_ID,
+        "--keep",
+        "1",
+        "--min",
+        "0d",
+        "--expected-plan-sha256",
+        stale["plan_sha256"],
+        "--allow-local",
+        "--experimental",
+        "--confirm",
+    )
+    assert result_gc["resumed"] is False
+    for old_id in (outcome["set_id"], incremental_machine["set_id"]):
+        assert not (archive / f".harbor-machine-set-{old_id}.json").exists()
+    assert (archive / f".harbor-machine-set-{third['set_id']}.json").exists()
+    after_gc = btrfs_volume / "post-gc-restore"
+    after_gc.mkdir()
+    restored_latest = _run(
+        "set-restore",
+        "--target",
+        str(archive),
+        "--set-id",
+        third["set_id"],
+        "--staging",
+        str(after_gc),
+        "--allow-local",
+        "--experimental",
+        "--confirm",
+    )
+    assert restored_latest["restored"] is True
+    assert any(
+        f.read_text() == "root payload v3\n" for f in after_gc.rglob("system.txt")
+    )
+    assert any(f.read_text() == "home payload v3\n" for f in after_gc.rglob("user.txt"))
+
 
 def test_machine_set_recovery_after_snapshot_creation_crash(
     btrfs_volume: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

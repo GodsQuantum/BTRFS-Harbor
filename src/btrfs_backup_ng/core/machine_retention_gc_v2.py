@@ -50,19 +50,31 @@ def active_gc(guard: MountGuard) -> list[str]:
 
 
 @contextmanager
-def destination_gc_lock(guard: MountGuard, *, exclusive: bool) -> Iterator[None]:
+def destination_gc_lock(
+    guard: MountGuard, *, exclusive: bool, read_only: bool = False
+) -> Iterator[None]:
     """All participating v2 writers take SH; GC takes exclusive.
 
     Never remove the lock inode. A broken NFS lock refuses rather than
     permitting two concurrent destructive owners.
     """
     guard.validate_fd(guard.directory_fd)
-    fd = os.open(
-        ".harbor-retention-v2.lock",
-        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
-        0o600,
-        dir_fd=guard.directory_fd,
-    )
+    try:
+        fd = os.open(
+            ".harbor-retention-v2.lock",
+            (os.O_RDONLY if read_only else os.O_CREAT | os.O_RDWR) | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=guard.directory_fd,
+        )
+    except FileNotFoundError:
+        if not read_only:
+            raise
+        # Older/read-only backups may not contain a lock inode. A GC action
+        # must never use such an export: only writers can initialize a lock.
+        if active_gc(guard):
+            raise ValueError("retention transaction without lock on read-only archive")
+        yield
+        return
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
@@ -238,6 +250,25 @@ def collect_verified_files(
     try:
         if not stat.S_ISDIR(os.fstat(stagefd).st_mode):
             raise ValueError("invalid retention quarantine directory")
+        # The process may die between reserving an empty quarantine
+        # directory and writing its first durable journal. No user backup
+        # has moved yet. Recover ONLY an empty directory or its known
+        # uncommitted journal temp; all other contents require inspection.
+        if resume and JOURNAL not in os.listdir(stagefd):
+            pending = os.listdir(stagefd)
+            if any(
+                not re.fullmatch(r"\.transaction-[0-9a-f]{32}\.tmp", name)
+                for name in pending
+            ):
+                raise ValueError("interrupted GC has unknown unjournaled contents")
+            for name in pending:
+                _check_file(stagefd, name)
+                os.unlink(name, dir_fd=stagefd)
+            os.fsync(stagefd)
+            guard.validate_fd(rootfd)
+            os.rmdir(dirname, dir_fd=rootfd)
+            os.fsync(rootfd)
+            return {"deleted": [], "resumed": True, "rolled_back_empty": True}
         journal = _journal_read(stagefd)
         transaction_id = journal.get("id")
         if not isinstance(transaction_id, str) or dirname != TX_PREFIX + transaction_id:

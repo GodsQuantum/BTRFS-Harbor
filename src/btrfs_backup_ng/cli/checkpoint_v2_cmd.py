@@ -643,6 +643,26 @@ def _send_worker(
 def execute_checkpoint_v2(args: argparse.Namespace) -> int:
     """Public dispatcher for opt-in commands; error means no fake completion."""
     try:
+        action = args.checkpoint_action
+        locked = {
+            "start",
+            "resume",
+            "discard",
+            "ssh-mirror",
+            "schedule-run",
+            "list",
+            "status",
+        }
+        if action in locked:
+            from ..core.machine_retention_gc_v2 import destination_gc_lock
+            from ..endpoint.mount_guard_v2 import capture_mount_identity
+
+            root = _target_root(args.target)
+            with MountGuard(root, capture_mount_identity(root)) as guard:
+                with destination_gc_lock(
+                    guard, exclusive=False, read_only=action in ("list", "status")
+                ):
+                    return _execute(args)
         return _execute(args)
     except (OSError, RuntimeError, ValueError, PermissionError) as exc:
         print(f"checkpoint-v2: {exc}", file=sys.stderr)
@@ -808,6 +828,8 @@ def _execute(args: argparse.Namespace) -> int:
         "set-rescue-iso",
         "set-list",
         "set-retention-plan",
+        "set-retention-apply",
+        "set-retention-resume",
     ):
         from .machine_set_v2 import execute_machine_set
 

@@ -366,6 +366,29 @@ _btrfs_backup_ng() {
                                     '--keep[]:keep:' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--profile-id[]:file:_files' \
+                                    '--min[]:min:' \
+                                    '--hourly[]:hourly:' \
+                                    '--daily[]:daily:' \
+                                    '--weekly[]:weekly:' \
+                                    '--monthly[]:monthly:' \
+                                    '--yearly[]:yearly:' \
+                                    '--keep[]:keep:' \
+                                    '--expected-plan-sha256[]:expected_plan_sha256:' \
+                                    '--confirm[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
+                                    '--target[]:file:_files' \
+                                    '--allow-local[]' \
+                                    '--state-dir[]:file:_files' \
+                                    '--experimental[]' \
+                                    '--confirm[]' \
+                                    '-h[show this help message and exit]' \
+                                    '--help[show this help message and exit]' \
                                     '--root[]:root:' \
                                     '--allow-local[]' \
                                     '-h[show this help message and exit]' \

@@ -23,6 +23,8 @@ from typing import Iterator
 from .. import __util__
 from ..config import RetentionConfig
 from ..core.machine_retention_v2 import SetPoint, calculate_set_retention
+from ..core.machine_retention_gc_v2 import destination_gc_lock
+from ..endpoint.mount_guard_v2 import capture_mount_identity
 from ..core.boot_files_v2 import (
     assert_configured_boot_mounts_present,
     capture_boot_member,
@@ -361,7 +363,7 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
     return data
 
 
-def _retention_plan(root: Path, args: argparse.Namespace) -> int:
+def _retention_inventory(root: Path, args: argparse.Namespace):
     """Read-only, fail-closed policy preview; NEVER unlinks a backup."""
     profile = _canonical_uuid(args.profile_id)
     counts = [
@@ -456,11 +458,32 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
             points, graph, retention, now=datetime.now(timezone.utc)
         )
         guard.validate_fd(guard.directory_fd)
+    return plan, records, snapshots
+
+
+def _retention_plan_digest(root: Path, plan) -> str:
+    from hashlib import sha256
+    from ..core.native_send_v2 import destination_fingerprint
+    from ..endpoint.mount_guard_v2 import capture_mount_identity
+
+    # The operator must confirm the EXACT current plan AND destination.
+    material = {
+        "version": 1,
+        "target": destination_fingerprint(capture_mount_identity(root), root),
+        "eligible_sets": sorted(plan.eligible),
+        "kept_sets": sorted(plan.keep),
+    }
+    return sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
+def _retention_plan(root: Path, args: argparse.Namespace) -> int:
+    plan, records, _snapshots = _retention_inventory(root, args)
     print(
         json.dumps(
             {
                 "dry_run": True,
                 "deletion_performed": False,
+                "plan_sha256": _retention_plan_digest(root, plan),
                 "keep_sets": sorted(plan.keep),
                 "protected_incremental_sets": sorted(plan.protected_dependencies),
                 "retention_eligible_sets": sorted(plan.eligible),
@@ -476,6 +499,115 @@ def _retention_plan(root: Path, args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def _retention_apply(root: Path, args: argparse.Namespace) -> int:
+    """Explicit confirmed GC, never part of a scheduled backup.
+
+    The caller holds the destination-wide exclusive lock before planning.
+    An unfinished remote partial, rescue ISO, checksum mismatch, unknown
+    parent or profile fails closed before a single destructive rename.
+    """
+    from ..core.machine_retention_gc_v2 import collect_verified_files
+    from ..core.checkpoint_v2 import read_manifest
+    from .checkpoint_v2_cmd import _manifest_path
+
+    if not args.confirm:
+        raise ValueError("retention deletion requires explicit --confirm")
+    token = getattr(args, "expected_plan_sha256", None)
+    if not isinstance(token, str) or len(token) != 64:
+        raise ValueError("retention deletion requires preview --expected-plan-sha256")
+    plan, records, snapshots = _retention_inventory(root, args)
+    if _retention_plan_digest(root, plan) != token:
+        raise ValueError("retention plan/destination changed since preview")
+    if not plan.eligible:
+        print(json.dumps({"deleted": [], "note": "nothing eligible"}, sort_keys=True))
+        return 0
+    snapshot_by_name = {row.name: row for row in snapshots}
+    if len(snapshot_by_name) != len(snapshots):
+        raise ValueError("ambiguous snapshot names in retention inventory")
+    candidate_names: set[str] = set()
+    with MountGuard(root, capture_mount_identity(root)) as guard:
+        existing = set(os.listdir(guard.directory_fd))
+        if len(existing) > 8192:
+            raise ValueError("oversized retention inventory")
+        # Partials or unfinished atomic publications cannot be safely
+        # assigned to an eligible machine-set. Refuse all deletions.
+        if any(
+            name.endswith((".part", ".tmp")) or name.startswith(".transaction-")
+            for name in existing
+        ):
+            raise ValueError("uncommitted backup transaction blocks retention")
+        for record in records:
+            if record["set_id"] not in plan.eligible:
+                continue
+            sid = record["set_id"]
+            if any(name.startswith(f"harbor-rescue-{sid}-") for name in existing):
+                raise ValueError("eligible machine has rescue ISO, preserve it")
+            if record["status"] not in (
+                "completed_btrfs_only",
+                "completed_btrfs_and_boot_files",
+            ):
+                raise ValueError("retention attempted incomplete machine set")
+            catalog = f".harbor-machine-set-{sid}.json"
+            if catalog not in existing:
+                raise ValueError("eligible machine catalog absent")
+            candidate_names.add(catalog)
+            for member in record["members"]:
+                archive = member["archive"]
+                row = snapshot_by_name.get(archive)
+                if (
+                    member["status"] != "completed"
+                    or row is None
+                    or not _archive_valid(root, archive)
+                ):
+                    raise ValueError("candidate is not a fully verified archive")
+                for suffix in (".btrfs.zst", ".btrfs.zst.meta"):
+                    filename = archive + suffix
+                    if filename not in existing:
+                        raise ValueError("missing sealed archive file")
+                    candidate_names.add(filename)
+                transfer = member.get("transfer_id")
+                if not isinstance(transfer, str):
+                    raise ValueError(
+                        "eligible machine lacks completed checkpoint journal"
+                    )
+                manifest = read_manifest(_manifest_path(root, transfer))
+                if (
+                    manifest.state != "completed"
+                    or manifest.identity.get("profile_id") != args.profile_id
+                    or manifest.identity.get("archive_name") != archive
+                ):
+                    raise ValueError("checkpoint journal mismatches eligible archive")
+                journal_name = f".harbor-resume-{transfer}.json"
+                if journal_name not in existing:
+                    raise ValueError("completed checkpoint journal missing")
+                candidate_names.add(journal_name)
+            for member in record.get("boot_members", []):
+                if member.get("status") != "completed" or not verify_boot_member(
+                    root, member
+                ):
+                    raise ValueError("boot archive failed verification")
+                candidate_names.add(member["archive"])
+        if len(candidate_names) > 4096:
+            raise ValueError("too many files for one retention transaction")
+        guard.validate_fd(guard.directory_fd)
+        # A second mount guard remains inside the already-held destination
+        # lease; only the controlled quarantine can rename/unlink these files.
+        result = collect_verified_files(root, guard, sorted(candidate_names))
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
+
+def _retention_resume(root: Path, args: argparse.Namespace) -> int:
+    from ..core.machine_retention_gc_v2 import collect_verified_files
+
+    if not args.confirm:
+        raise ValueError("resume of interrupted retention requires --confirm")
+    with MountGuard(root, capture_mount_identity(root)) as guard:
+        result = collect_verified_files(root, guard, None, resume=True)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 
@@ -500,7 +632,7 @@ def _sources_from_inventory() -> tuple[list[str], dict]:
     return rows, inventory
 
 
-def execute_machine_set(args: argparse.Namespace) -> int:
+def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
     if not getattr(args, "experimental", False) and args.checkpoint_action not in (
         "set-status",
         "set-list",
@@ -512,6 +644,10 @@ def execute_machine_set(args: argparse.Namespace) -> int:
     action = args.checkpoint_action
     if action == "set-retention-plan":
         return _retention_plan(root, args)
+    if action == "set-retention-apply":
+        return _retention_apply(root, args)
+    if action == "set-retention-resume":
+        return _retention_resume(root, args)
     if action == "set-list":
         # Destination-only catalog browsing is always read-only and portable,
         # including a foreign NFS mount or USB disk with a different path.
@@ -707,6 +843,31 @@ def execute_machine_set(args: argparse.Namespace) -> int:
                 return 0
 
     raise ValueError("unknown machine-set action")
+
+
+def execute_machine_set(args: argparse.Namespace) -> int:
+    """One destination-wide shared lease covering complete Btrfs I/O/restore.
+
+    Locks are nonblocking. GC takes the exclusive counterpart and refuses
+    every active producer, reader, rescue ISO, SSH mirror, and scheduled run.
+    """
+    action = args.checkpoint_action
+    read_only = action in (
+        "set-status",
+        "set-list",
+        "set-restore",
+        "set-rear-copy",
+        "set-rear-recover",
+        "set-retention-plan",
+    )
+    root = _target_root(args.target)
+    with MountGuard(root, capture_mount_identity(root)) as guard:
+        with destination_gc_lock(
+            guard,
+            exclusive=action in ("set-retention-apply", "set-retention-resume"),
+            read_only=read_only,
+        ):
+            return _execute_machine_set_unlocked(args)
 
 
 def _read_only_machine_action(root: Path, data: dict, args: argparse.Namespace) -> int:

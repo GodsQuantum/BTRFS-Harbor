@@ -532,6 +532,8 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         "set-rescue-iso",
         "set-list",
         "set-retention-plan",
+        "set-retention-apply",
+        "set-retention-resume",
     ):
         set_parser = v2_actions.add_parser(
             set_action, help="Portable Btrfs-only multi-subvolume backup set"
@@ -544,9 +546,14 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             set_parser.add_argument("--max-incremental-depth", type=int, default=7)
             set_parser.add_argument("--profile-id", required=True)
             set_parser.add_argument("--source", action="append")
-        elif set_action not in ("set-list", "set-retention-plan"):
+        elif set_action not in (
+            "set-list",
+            "set-retention-plan",
+            "set-retention-apply",
+            "set-retention-resume",
+        ):
             set_parser.add_argument("--set-id", required=True)
-        if set_action == "set-retention-plan":
+        if set_action in ("set-retention-plan", "set-retention-apply"):
             set_parser.add_argument("--profile-id", required=True)
             set_parser.add_argument("--min", default="1d")
             for bucket, default in (
@@ -558,6 +565,11 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             ):
                 set_parser.add_argument(f"--{bucket}", type=int, default=default)
             set_parser.add_argument("--keep", type=int, default=0)
+        if set_action == "set-retention-apply":
+            set_parser.add_argument("--expected-plan-sha256", required=True)
+            set_parser.add_argument("--confirm", action="store_true")
+        if set_action == "set-retention-resume":
+            set_parser.add_argument("--confirm", action="store_true")
         if set_action in ("set-restore", "set-rear-copy"):
             set_parser.add_argument("--staging", required=True)
             set_parser.add_argument("--confirm", action="store_true")

@@ -249,6 +249,33 @@ A \fBraw+ssh://\fR target is a POSIX-shell-remote model: btrfs-backup-ng runs
 \fBsh\fR, \fBcat\fR, \fBmv\fR, and \fBstat\fR over SSH on the remote host. For a
 non-POSIX or SMB/NFS/cloud destination, mount it locally and use a \fBraw://\fR
 path instead.
+.SS Confirmed retention and interrupted-GC recovery (EXPERIMENTAL)
+Run
+.B raw checkpoint-v2 set-retention-plan
+with the selected retention buckets and
+\fB\-\-profile-id\fR to inspect whole-set dependency closure. The read-only
+JSON preview includes a plan_sha256 identifying the selected keep/delete sets
+and destination mount fingerprint.
+.PP
+.B raw checkpoint-v2 set-retention-apply
+requires the SAME policy options, \fB\-\-expected-plan-sha256\fR from the
+preview, \fB\-\-profile-id\fR, \fB\-\-target\fR, \fB\-\-experimental\fR,
+and explicit \fB\-\-confirm\fR. \fB\-\-min\fR sets a retention horizon;
+\fB\-\-keep\fR and hourly/daily/weekly/monthly/yearly buckets select points.
+The command takes a nonblocking exclusive destination-wide lock, rechecks
+the mount and policy, verifies eligible streams with full checksum tests,
+refuses unknown profiles, incomplete transfers, attached rescue ISO images,
+and corrupt dependencies. Exact files are staged into a journaled quarantine
+then deleted. This is NOT automatically called from the scheduler.
+.PP
+If interrupted, new v2 jobs refuse that destination. Run
+.B raw checkpoint-v2 set-retention-resume
+with \fB\-\-target\fR, \fB\-\-experimental\fR, explicit
+\fB\-\-confirm\fR and \fB\-\-allow-local\fR on local disks. The exclusive
+lease checks mount identity and committed file digests before completing.
+Never manually delete a quarantine or its journal. Independently preserve
+a verified full-system backup.
+.PP
 .SS SSH-v2 archive mirror (EXPERIMENTAL)
 The dedicated restricted SSH receiver is an adapter for sealed checkpoint-v2
 machine-set archive files, not a separate Btrfs send engine or arbitrary SSH

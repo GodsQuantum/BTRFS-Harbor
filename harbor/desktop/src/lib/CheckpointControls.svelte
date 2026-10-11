@@ -350,16 +350,20 @@
 			await machineTransfer('set-resume', choice.id);
 			return;
 		}
-		if (choice.kind === 'resume-stream') {
-			const item = entries.find((entry) => entry.transfer_id === choice.id);
-			if (item) await command('resume', item);
-			return;
-		}
-		if (choice.kind === 'choose-set' || choice.kind === 'choose-stream') {
+		if (choice.kind === 'resume-stream' || choice.kind === 'choose-stream') {
+			// Never misrepresent a legacy SINGLE snapshot transfer as a
+			// resumed WHOLE-COMPUTER backup. The expert section can manage it.
 			error =
 				locale === 'fr'
-					? 'Plusieurs sauvegardes interrompues : choisissez celle à reprendre ci-dessous.'
-					: 'Multiple interrupted backups: choose which one to resume below.';
+					? 'Un ancien envoi de snapshot individuel est interrompu. Terminez-le ou abandonnez-le dans les options expert avant de sauvegarder tout cet ordinateur.'
+					: 'An old single-snapshot transfer is unfinished. Finish or discard it in Advanced options before starting a whole-computer backup.';
+			return;
+		}
+		if (choice.kind === 'choose-set') {
+			error =
+				locale === 'fr'
+					? 'Plusieurs sauvegardes complètes interrompues : choisissez celle à reprendre ci-dessous.'
+					: 'Several whole-computer backups are unfinished; choose which one to resume below.';
 			return;
 		}
 		await machineTransfer('set-start');
@@ -582,7 +586,7 @@
 					? locale === 'fr'
 						? 'Sauvegarde en cours…'
 						: 'Backing up…'
-					: unfinishedMachine || unfinished
+					: unfinishedMachine
 						? locale === 'fr'
 							? 'Reprendre la sauvegarde'
 							: 'Resume backup'

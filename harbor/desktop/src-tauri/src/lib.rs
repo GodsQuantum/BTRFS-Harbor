@@ -1417,11 +1417,86 @@ async fn snapper_snapshot_choices(
     serde_json::to_string(&parsed).map_err(|err| format!("Snapshot serialization failed: {err}"))
 }
 
+/// Stream live machine-set events without waiting for the whole backup.
+/// Only the final JSON summary is retained as command output; progress events
+/// never contaminate the JSON response expected by existing GUI callers.
+async fn wait_machine_checkpoint_progress(
+    mut child: tokio::process::Child,
+    on_event: Channel<Value>,
+) -> Result<String, String> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Checkpoint engine stdout unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("Checkpoint engine stderr unavailable")?;
+
+    let output_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        let mut output = String::new();
+        while let Some(line) = reader
+            .next_line()
+            .await
+            .map_err(|err| format!("Cannot read checkpoint output: {err}"))?
+        {
+            if let Ok(event) = serde_json::from_str::<Value>(&line)
+                && event.get("event").and_then(Value::as_str) == Some("machine_progress")
+            {
+                let _ = on_event.send(event);
+                continue;
+            }
+            if output.len().saturating_add(line.len()) <= 1_000_000 {
+                output.push_str(&line);
+                output.push('\n');
+            } else {
+                return Err("Checkpoint engine output exceeded the safe limit".into());
+            }
+        }
+        Ok::<String, String>(output)
+    });
+
+    let errors_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut errors = String::new();
+        while let Some(line) = lines.next_line().await.map_err(|err| err.to_string())? {
+            if errors.len() + line.len() > 128_000 {
+                errors.replace_range(..errors.len().min(64_000), "");
+            }
+            errors.push_str(&line);
+            errors.push('\n');
+        }
+        Ok::<String, String>(errors)
+    });
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|err| format!("Cannot wait for checkpoint engine: {err}"))?;
+    let output = output_task
+        .await
+        .map_err(|err| format!("Checkpoint output task crashed: {err}"))??;
+    let errors = errors_task
+        .await
+        .map_err(|err| format!("Checkpoint stderr task crashed: {err}"))??;
+    if status.success() {
+        Ok(output.trim().to_owned())
+    } else {
+        Err(if errors.trim().is_empty() {
+            format!("Checkpoint operation failed: {status}")
+        } else {
+            errors.trim().to_owned()
+        })
+    }
+}
+
 #[tauri::command]
 async fn checkpoint_action(
     app: tauri::AppHandle,
     state: tauri::State<'_, BackupRuntimeState>,
     request: checkpoint_actions::CheckpointRequest,
+    on_event: Channel<Value>,
 ) -> Result<String, String> {
     let args = checkpoint_actions::action_arguments(&request)?;
     let executable = bundled_engine_candidate(&app)
@@ -1447,6 +1522,11 @@ async fn checkpoint_action(
         // transaction alone, not unrelated processes or other backups.
         command.process_group(0);
     }
+    let progress_channel = if matches!(request.action.as_str(), "set-start" | "set-resume") {
+        Some(on_event)
+    } else {
+        None
+    };
     let result = match command.spawn() {
         Ok(child) => {
             if long_running {
@@ -1457,22 +1537,26 @@ async fn checkpoint_action(
                 // the controlling window open rather than killing the worker.
                 let _ = ensure_backup_tray(&app);
             }
-            child
-                .wait_with_output()
-                .await
-                .map_err(|err| format!("Cannot wait for privileged checkpoint engine: {err}"))
-                .and_then(|output| {
-                    if output.status.success() {
-                        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-                    } else {
-                        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-                        Err(if error.is_empty() {
-                            format!("Checkpoint operation failed: {}", output.status)
+            if let Some(channel) = progress_channel {
+                wait_machine_checkpoint_progress(child, channel).await
+            } else {
+                child
+                    .wait_with_output()
+                    .await
+                    .map_err(|err| format!("Cannot wait for privileged checkpoint engine: {err}"))
+                    .and_then(|output| {
+                        if output.status.success() {
+                            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
                         } else {
-                            error
-                        })
-                    }
-                })
+                            let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+                            Err(if error.is_empty() {
+                                format!("Checkpoint operation failed: {}", output.status)
+                            } else {
+                                error
+                            })
+                        }
+                    })
+            }
         }
         Err(err) => Err(format!("Cannot invoke privileged checkpoint engine: {err}")),
     };

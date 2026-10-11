@@ -15,6 +15,8 @@ import re
 import stat
 import subprocess
 import sys
+import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -245,6 +247,115 @@ def _archive_valid(root: Path, archive: str) -> bool:
     if not stream.exists() or not meta.exists():
         return False
     return verify_checkpoint_index(meta, stream, full=True).status == "ok"
+
+
+def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
+    """Report bytes actually on destination, NOT guessed source size or ETA.
+
+    A checkpoint .part may be overwritten on resume; report only the current
+    archive plus completed members, and let the UI reset its throughput window
+    if the measured size drops. Never follow symlinks.
+    """
+    members = data["members"]
+    total = len(members)
+    completed = sum(m.get("status") == "completed" for m in members)
+    current = next((m for m in members if m.get("status") != "completed"), None)
+    written = 0
+    for member in members:
+        archive = member["archive"]
+        final_name = f"{archive}.btrfs.zst"
+        try:
+            with os.scandir(root) as directory:
+                for entry in directory:
+                    if entry.name != final_name and not (
+                        entry.name.startswith(f"{final_name}.")
+                        and entry.name.endswith(".part")
+                    ):
+                        continue
+                    if entry.is_file(follow_symlinks=False):
+                        written += entry.stat(follow_symlinks=False).st_size
+        except (FileNotFoundError, PermissionError, OSError):
+            # A detached destination is an error for the transfer guard. The
+            # telemetry channel never bypasses that error or invents bytes.
+            return {
+                "event": "machine_progress",
+                "completed_members": completed,
+                "total_members": total,
+                "current_mount": current["original_mount"] if current else None,
+                "bytes_written": None,
+                "bytes_per_second": None,
+                "eta_seconds": None,
+                "percent": None,
+            }
+    return {
+        "event": "machine_progress",
+        "completed_members": completed,
+        "total_members": total,
+        "current_mount": current["original_mount"] if current else None,
+        "bytes_written": written,
+        "bytes_per_second": None,
+        "eta_seconds": None,
+        "percent": None,
+    }
+
+
+@contextmanager
+def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
+    """Emit inexpensive read-only progress from the existing privileged job.
+
+    No new privilege request, disk traversal of source, or writes to the
+    backup target. Worker stops before the main command reports its result.
+    """
+    stop = threading.Event()
+    started = time.monotonic()
+
+    def monitor() -> None:
+        last_time: float | None = None
+        last_bytes: int | None = None
+        while not stop.is_set():
+            payload = _machine_progress_measure(root, data)
+            now = time.monotonic()
+            current = payload["bytes_written"]
+            if (
+                isinstance(current, int)
+                and last_bytes is not None
+                and last_time is not None
+                and now > last_time
+                and current >= last_bytes
+            ):
+                payload["bytes_per_second"] = round(
+                    (current - last_bytes) / (now - last_time)
+                )
+            payload["elapsed_seconds"] = round(now - started)
+            # Btrfs send size is unknown until the producer finishes. ETA and
+            # bytes-complete percentage cannot be inferred from source disk
+            # usage, checkpoints, or arbitrary per-volume weights.
+            print(json.dumps(payload, sort_keys=True), flush=True)
+            last_bytes = current if isinstance(current, int) else None
+            last_time = now
+            if stop.wait(2):
+                break
+
+    worker = threading.Thread(
+        target=monitor, name="harbor-machine-progress", daemon=True
+    )
+    worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        worker.join(timeout=1)
+        print(
+            json.dumps(
+                {
+                    **_machine_progress_measure(root, data),
+                    "elapsed_seconds": round(time.monotonic() - started),
+                    "bytes_per_second": None,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
 
 def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) -> dict:
@@ -1029,11 +1140,14 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
         }
         with guard, _exclusive_set_lock(guard, set_id):
             _write(root, data, allow_local=args.allow_local)
-            return _result(
-                _drive(
-                    root, data, allow_local=args.allow_local, state_dir=args.state_dir
+            with _live_machine_progress(root, data):
+                result = _drive(
+                    root,
+                    data,
+                    allow_local=args.allow_local,
+                    state_dir=args.state_dir,
                 )
-            )
+            return _result(result)
     set_id = _canonical_uuid(args.set_id)
     guard, stable = _open_guard(root, allow_local=args.allow_local)
     with guard:
@@ -1057,14 +1171,14 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             raise ValueError("machine-set destination fingerprint changed")
         with _exclusive_set_lock(guard, set_id):
             if action == "set-resume":
-                return _result(
-                    _drive(
+                with _live_machine_progress(root, data):
+                    result = _drive(
                         root,
                         data,
                         allow_local=args.allow_local,
                         state_dir=args.state_dir,
                     )
-                )
+                return _result(result)
             if action == "set-rescue-iso":
                 _check_catalog(data)
                 if not args.confirm:

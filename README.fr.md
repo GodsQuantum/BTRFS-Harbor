@@ -49,6 +49,12 @@ La branche de développement contient de nouvelles modifications **absentes des 
 - **Laboratoire de rétention transactionnelle** : [CI de crash sur runner jetable](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910), journal durable, quarantaine privée, refus des fichiers étrangers et reprise. **Suppression automatique désactivée** ; la CLI expérimentale permet une purge manuelle confirmée (plan/application/reprise) avec verrouillage global de la destination, jamais lors des sauvegardes planifiées. tant que l'exclusion des lectures/écritures concurrentes et la planification ne sont pas qualifiées.
 - **GUI non encore certifiée** : systray KDE Wayland/X11 en vraie session, progression, installation des paquets dans des VM jetables et autres chargeurs UEFI. Conserver une sauvegarde indépendante et vérifiée.
 
+## v0.2.7-rc.3 — progression réelle de la sauvegarde ordinateur (preview)
+
+Le bouton Sauvegarder maintenant (ou Reprendre) affiche en direct toutes les 2 secondes : volumes terminés/total, volume courant, octets réellement écrits sur la destination, débit mesuré et durée écoulée. La jauge avec numérateur représente le nombre de volumes terminés et non un faux pourcentage d'octets. Les snapshots Snapper/Harbor et leurs transferts sont inchangés.
+
+**ETA :** la taille totale du flux Btrfs send n'est pas déterminable à l'avance de manière fiable, notamment en incrémental ; une ETA exacte ou un pourcentage d'octets n'est donc pas inventé. L'interface l'indique explicitement. Les mesures utilisent les fichiers de transfert de la destination ; aucun nouveau sudo, traversée des données source, ni opération destructive pour mesurer. L'application antérieure ne peut pas changer son affichage pendant qu'elle tourne : utiliser cette nouvelle AppImage pour le prochain transfert/reprise.
+
 ## v0.2.7-rc.2 — priorité aux snapshots Snapper et /swap correct (preview non publiée)
 
 Sauvegarder cet ordinateur : le choix « Snapper de préférence » réutilise les derniers snapshots Snapper admissibles des sous-volumes configurés. Les autres sous-volumes de données sont couverts avec une nouvelle capture Harbor, clairement identifiée « Snapper + Harbor » dans le catalogue. Il n'est pas nécessaire de configurer Snapper pour chaque sous-volume Btrfs.

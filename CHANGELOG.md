@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7-rc.3] — live measured machine-backup progress (supervised preview)
+
+- Stream measured in-progress destination bytes, throughput, elapsed time and current/completed Btrfs subvolumes to the native GUI via a Tauri IPC channel for both Start and Resume.
+- Preserve the correct final JSON status and existing resumable checkpoint behavior; read only destination output, no extra authorization or traversal of source snapshots.
+- Progress bar explicitly measures completed volumes. Since Btrfs send cannot accurately promise total compressed bytes before end-of-stream, do not invent a byte percentage or ETA.
+
 ## [0.2.7-rc.2] — Snapper-first machine-set and volatile swap exclusions (supervised preview)
 
 - Replace all-or-nothing per-subvolume Snapper requirement with existing readonly Snapper snapshots wherever available; missing configurations use separately labeled Harbor snapshots of actual data.

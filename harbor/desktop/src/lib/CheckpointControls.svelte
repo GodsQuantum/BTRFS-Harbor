@@ -10,12 +10,13 @@
 		loadCheckpointTransfers,
 		loadMachineSetCatalog,
 		runCheckpointAction,
+		type MachineProgressEvent,
 		type NativeSnapshotChoice,
 		type SnapperSnapshotChoice
 	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
 	import { chooseBackupNow, isMachineSetFinished, machineBackupOrigin } from './backup-now';
-	import { formatBytesBinary } from './status';
+	import { formatBytesBinary, formatDuration, formatRateBinary } from './status';
 	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
 	import type { Locale } from './i18n';
 
@@ -149,6 +150,7 @@
 		source_snapshot_dates?: string[];
 	}
 	let machineSets: MachineSetEntry[] = [];
+	let machineProgress: MachineProgressEvent | null = null;
 	$: machineTarget = destination.path ?? '';
 	$: unfinishedMachine = machineSets.some((item) => !isMachineSetFinished(item.status));
 	$: latestCompleteMachine =
@@ -263,6 +265,7 @@
 			return;
 		}
 		running = true;
+		machineProgress = null;
 		error = '';
 		info = '';
 		try {
@@ -290,14 +293,21 @@
 					: locale === 'zh-CN'
 						? '正在备份 Btrfs 卷…'
 						: 'Backing up Btrfs volumes…';
-			const response = await runCheckpointAction({
-				action,
-				target: machineTarget,
-				allow_local: allowLocal,
-				profile_id: action === 'set-start' ? profile.id : null,
-				snapshot_provider: action === 'set-start' ? snapshotProvider : null,
-				set_id: action === 'set-resume' ? setId : null
-			});
+			const response = await runCheckpointAction(
+				{
+					action,
+					target: machineTarget,
+					allow_local: allowLocal,
+					profile_id: action === 'set-start' ? profile.id : null,
+					snapshot_provider: action === 'set-start' ? snapshotProvider : null,
+					set_id: action === 'set-resume' ? setId : null
+				},
+				(event) => {
+					if (event.total_members > 0 && event.completed_members <= event.total_members) {
+						machineProgress = event;
+					}
+				}
+			);
 			const lines = response.trim().split('\n');
 			const summary = JSON.parse(lines[lines.length - 1]) as {
 				members: unknown[];
@@ -674,11 +684,66 @@
 				</p>
 			{/if}
 			{#if running}
-				<progress
-					aria-label={locale === 'fr'
-						? 'Sauvegarde complète en cours'
-						: 'Whole-computer backup in progress'}
-				></progress>
+				{#if machineProgress && machineProgress.total_members > 0}
+					<div
+						class="machine-progress"
+						role="status"
+						aria-live="polite"
+						data-testid="machine-progress"
+					>
+						<strong>
+							{machineProgress.completed_members} / {machineProgress.total_members}
+							{locale === 'fr'
+								? 'volumes terminés'
+								: locale === 'zh-CN'
+									? '个卷已完成'
+									: 'volumes completed'}
+						</strong>
+						<progress
+							value={machineProgress.completed_members}
+							max={machineProgress.total_members}
+							aria-label={locale === 'fr'
+								? 'Volumes terminés (pas pourcentage des octets)'
+								: 'Completed volumes, not percentage of bytes'}
+						></progress>
+						{#if machineProgress.current_mount}
+							<p>
+								{locale === 'fr' ? 'Volume en cours : ' : 'Current volume: '}<code
+									>{machineProgress.current_mount}</code
+								>
+							</p>
+						{:else}
+							<p>
+								{locale === 'fr' ? 'Finalisation et vérification…' : 'Finalizing and verifying…'}
+							</p>
+						{/if}
+						<p>
+							{machineProgress.bytes_written === null
+								? '—'
+								: formatBytesBinary(machineProgress.bytes_written)}
+							{locale === 'fr' ? 'écrits sur la destination' : 'written to destination'}
+							· {machineProgress.bytes_per_second === null
+								? '—'
+								: formatRateBinary(machineProgress.bytes_per_second)}
+							· {formatDuration(machineProgress.elapsed_seconds)}
+							{locale === 'fr' ? 'écoulé' : 'elapsed'}
+						</p>
+						<p class="machine-detail">
+							ETA : {locale === 'fr'
+								? 'non calculable pour ce premier flux : taille finale Btrfs inconnue. La barre représente les volumes terminés, pas les octets.'
+								: 'unknown until Btrfs reports the final stream size. This bar tracks completed volumes, not bytes.'}
+						</p>
+					</div>
+				{:else}
+					<progress
+						aria-label={locale === 'fr' ? 'Préparation de la sauvegarde' : 'Preparing backup'}
+					></progress>
+					<p class="machine-detail">
+						{locale === 'fr'
+							? 'Analyse des volumes ; mesures de transfert en attente…'
+							: 'Inspecting volumes; transfer measurements pending…'}
+					</p>
+				{/if}
 			{/if}
 			<p class="machine-detail">
 				{locale === 'fr'

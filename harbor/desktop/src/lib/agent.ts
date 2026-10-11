@@ -113,9 +113,28 @@ export async function loadMachineSetCatalog(target: string): Promise<string> {
 	return invoke<string>('machine_set_catalog', { target });
 }
 
-export async function runCheckpointAction(request: CheckpointActionRequest): Promise<string> {
+export interface MachineProgressEvent {
+	event: 'machine_progress';
+	completed_members: number;
+	total_members: number;
+	current_mount: string | null;
+	bytes_written: number | null;
+	bytes_per_second: number | null;
+	elapsed_seconds: number;
+	percent: null;
+	eta_seconds: null;
+}
+
+export async function runCheckpointAction(
+	request: CheckpointActionRequest,
+	onProgress?: (event: MachineProgressEvent) => void
+): Promise<string> {
 	if (!isTauri()) throw new Error('Checkpoint controls require the native application');
-	return invoke<string>('checkpoint_action', { request });
+	const onEvent = new Channel<MachineProgressEvent>();
+	onEvent.onmessage = (event) => {
+		if (event.event === 'machine_progress') onProgress?.(event);
+	};
+	return invoke<string>('checkpoint_action', { request, onEvent });
 }
 
 /** Read-only local manifest preview; no invented records in browser demo mode. */

@@ -302,3 +302,78 @@ def test_one_click_snapper_with_swap_and_unconfigured_home_catalog_is_mixed(
     assert ".btrfs-harbor-snapshots" in doc["members"][1]["snapshot_path"]
     assert doc["excluded_technical_subvolumes"] == omitted
     assert len(doc["members"]) == 2
+
+
+def test_machine_progress_uses_destination_file_sizes_without_fabricated_eta(tmp_path):
+    from btrfs_backup_ng.cli.machine_set_v2 import _machine_progress_measure
+
+    completed = tmp_path / "machine-000.btrfs.zst"
+    completed.write_bytes(b"x" * 1024)
+    unfinished = tmp_path / "machine-001.btrfs.zst.id-uuid.part"
+    unfinished.write_bytes(b"y" * 4096)
+    # An attacker-controlled symlink that looks like a checkpoint is never read.
+    (tmp_path / "machine-001.btrfs.zst.malicious.part").symlink_to(completed)
+    data = {
+        "members": [
+            {"archive": "machine-000", "original_mount": "/", "status": "completed"},
+            {"archive": "machine-001", "original_mount": "/home", "status": "sending"},
+        ]
+    }
+    output = _machine_progress_measure(tmp_path, data)
+    assert output == {
+        "event": "machine_progress",
+        "completed_members": 1,
+        "total_members": 2,
+        "current_mount": "/home",
+        "bytes_written": 5120,
+        "bytes_per_second": None,
+        "eta_seconds": None,
+        "percent": None,
+    }
+
+
+def test_machine_progress_handles_missing_destination_without_invented_bytes(tmp_path):
+    from btrfs_backup_ng.cli.machine_set_v2 import _machine_progress_measure
+
+    missing = tmp_path / "disconnected-nfs"
+    data = {
+        "members": [
+            {
+                "archive": "backup-000",
+                "original_mount": "/",
+                "status": "pending",
+            }
+        ]
+    }
+    result = _machine_progress_measure(missing, data)
+    assert result["bytes_written"] is None
+    assert result["eta_seconds"] is None
+
+
+def test_machine_progress_final_line_remains_machine_result(capsys, tmp_path):
+    from btrfs_backup_ng.cli.machine_set_v2 import _live_machine_progress, _result
+
+    record = {
+        "set_id": SET_ID,
+        "status": "pending",
+        "coverage": "btrfs-only",
+        "members": [
+            {
+                "archive": "archive-000",
+                "original_mount": "/",
+                "status": "pending",
+            }
+        ],
+    }
+    with _live_machine_progress(tmp_path, record):
+        (tmp_path / "archive-000.btrfs.zst.uuid.part").write_bytes(b"x" * 22)
+        record["members"][0]["status"] = "completed"
+        record["status"] = "completed_btrfs_only"
+    assert _result(record) == 0
+    lines = capsys.readouterr().out.splitlines()
+    parsed = [json.loads(line) for line in lines]
+    assert parsed[0]["event"] == "machine_progress"
+    assert parsed[-2]["bytes_written"] == 22
+    assert parsed[-2]["completed_members"] == 1
+    assert parsed[-1]["status"] == "completed_btrfs_only"
+    assert parsed[-1]["members"][0]["status"] == "completed"

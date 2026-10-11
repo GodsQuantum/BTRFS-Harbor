@@ -85,7 +85,6 @@
 	};
 	$: t = translation[locale];
 	$: sources = profile.sources;
-	$: unavailableSources = profile.sources.filter((s) => s.path !== source?.path);
 	let sourcePath = '';
 	$: source = sources.find((s) => s.path === sourcePath) ?? sources[0];
 	$: target = source ? (checkpointTargetPath(destination.path, source.target_subdir) ?? '') : '';
@@ -329,6 +328,15 @@
 	 */
 	export async function backupNow(): Promise<void> {
 		if (running) return;
+		if (!machineTarget || !destination.mount_point || !destination.expected_mount_source) {
+			error =
+				locale === 'fr'
+					? 'Choisissez un dossier de destination puis cliquez sur Sauvegarder maintenant.'
+					: locale === 'zh-CN'
+						? '请先选择备份目标文件夹，然后点击立即备份。'
+						: 'Choose a backup destination folder, then click Back up now.';
+			return;
+		}
 		// Reload the durable destination journal before deciding start vs resume.
 		// A stale cached list must NEVER trigger a duplicate new machine set.
 		if (!(await refreshMachineSets())) return;
@@ -358,13 +366,13 @@
 	let info = '';
 	let choosingDestination = false;
 	async function chooseDestination() {
-		if (running || choosingDestination || !source) return;
+		if (running || choosingDestination) return;
 		choosingDestination = true;
 		error = '';
 		try {
 			const selected = await chooseDestinationDirectory(destination.path || undefined);
 			if (selected) {
-				await onChooseDestination(selected, source.target_subdir);
+				await onChooseDestination(selected, '');
 				entries = [];
 				await tick();
 				await refresh();
@@ -500,93 +508,34 @@
 	}
 </script>
 
-{#if sources.length > 0 && destination.kind !== 'ssh'}
+{#if destination.kind !== 'ssh'}
 	<article class="panel checkpoint-controls">
-		<h3>
+		<h3 data-testid="whole-computer-backup-title">
 			{locale === 'fr'
-				? 'Envoyer un snapshot'
+				? 'Sauvegarder cet ordinateur'
 				: locale === 'zh-CN'
-					? '发送快照'
-					: 'Send a snapshot'}
+					? '备份整台电脑'
+					: 'Back up this computer'}
 		</h3>
-		<div class="quick-choices">
-			<label>
-				{locale === 'fr' ? 'Source' : locale === 'zh-CN' ? '来源' : 'Source'}
-				<select bind:value={sourcePath} disabled={running} onchange={() => void sourceChanged()}>
-					{#each sources as choice (choice.path)}
-						<option value={choice.path}>{choice.path}</option>
-					{/each}
-				</select>
-			</label>
-			<label>
-				{locale === 'fr' ? 'Snapshot' : locale === 'zh-CN' ? '快照' : 'Snapshot'}
-				<select
-					bind:value={mode}
-					disabled={running}
-					onchange={() => {
-						if (mode === 'selected-snapper' || mode === 'selected-native') void loadSnapshots();
-					}}
-				>
-					{#if source?.snapper_config}
-						<option value="latest-snapper">{t[10]}</option>
-						<option value="selected-snapper">{t[11]}</option>
-						<option value="create-snapper">{t[12]}</option>
-					{:else}
-						<option value="latest-native"
-							>{locale === 'fr'
-								? 'Dernier (ou créer)'
-								: locale === 'zh-CN'
-									? '最新（或创建）'
-									: 'Latest (or create)'}</option
-						>
-						<option value="selected-native">{t[11]}</option>
-						<option value="create-native">{t[12]}</option>
-					{/if}
-				</select>
-			</label>
-			{#if mode === 'selected-snapper' || mode === 'selected-native'}
-				<label>
-					{t[13]}
-					{#if snapshotLoading}
-						<span
-							>{locale === 'fr' ? 'Chargement…' : locale === 'zh-CN' ? '加载中…' : 'Loading…'}</span
-						>
-					{:else if mode === 'selected-snapper' && snapshotChoices.length > 0}
-						<select bind:value={number} disabled={running}>
-							{#each snapshotChoices as choice (choice.number)}
-								<option value={choice.number}
-									>#{choice.number} · {new Date(choice.date).toLocaleDateString(locale)}
-									{choice.description}</option
-								>
-							{/each}
-						</select>
-					{:else if mode === 'selected-native' && nativeChoices.length > 0}
-						<select bind:value={nativeName} disabled={running}>
-							{#each nativeChoices as item (item.name)}
-								<option value={item.name}
-									>{new Date(item.date).toLocaleString(locale)} · {item.name}</option
-								>
-							{/each}
-						</select>
-					{:else}
-						<span role="status"
-							>{snapshotListError ||
-								(locale === 'fr'
-									? 'Aucun snapshot disponible'
-									: locale === 'zh-CN'
-										? '没有可用快照'
-										: 'No snapshot available')}</span
-						>
-					{/if}
-				</label>
-			{/if}
-		</div>
+		<p class="machine-intro">
+			{locale === 'fr'
+				? 'Un seul envoi pour tous les sous-volumes Btrfs du système montés et détectés, avec les fichiers EFI /boot si présents. Pas besoin de choisir /, /home, /root ou /srv.'
+				: locale === 'zh-CN'
+					? '一次备份所有已挂载且检测到的系统 Btrfs 子卷，以及已挂载的 EFI 和 /boot 引导文件。无需逐个选择。'
+					: 'One backup for all detected, mounted system Btrfs subvolumes, plus mounted EFI and /boot files when present. No individual volume selection.'}
+		</p>
 		<div class="destination-summary">
 			<strong
-				>{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}</strong
+				>{locale === 'fr'
+					? 'Où enregistrer la sauvegarde ?'
+					: locale === 'zh-CN'
+						? '备份保存位置'
+						: 'Where to save the backup?'}</strong
 			>
 			<div class="destination-picker">
-				<code>{target || '—'}</code>
+				<code
+					>{machineTarget || (locale === 'fr' ? 'Choisir un dossier…' : 'Choose a folder…')}</code
+				>
 				<button
 					class="secondary compact"
 					disabled={running || choosingDestination}
@@ -602,78 +551,50 @@
 				</button>
 			</div>
 		</div>
-		{#if source && !target}
+		{#if !machineTarget}
 			<p class="source-warning" role="alert">
 				{locale === 'fr'
-					? 'Aucune destination valide. Configurez un dossier avant l’envoi.'
+					? 'Choisissez une destination pour la sauvegarde complète.'
 					: locale === 'zh-CN'
 						? '目标文件夹无效，请先配置。'
-						: 'No valid destination. Configure a folder before sending.'}
+						: 'Choose a destination for the whole-computer backup.'}
 			</p>
 		{/if}
-		{#if unavailableSources.length > 0}
-			<p class="source-warning" role="status">
-				{locale === 'fr'
-					? 'Non inclus dans cet envoi :'
-					: locale === 'zh-CN'
-						? '此次未包含：'
-						: 'Not included in this send:'}
-				{unavailableSources.map((s) => s.path).join(', ')}
-			</p>
-		{/if}
-		<details class="advanced">
-			<summary
-				>{locale === 'fr'
-					? 'Réglages avancés'
-					: locale === 'zh-CN'
-						? '高级设置'
-						: 'Advanced settings'}</summary
-			>
-			<label class="performance-setting">
-				CPU / I/O
-				<select bind:value={performance} disabled={running}>
-					<option value="balanced"
-						>{locale === 'fr' ? 'Équilibré' : locale === 'zh-CN' ? '均衡' : 'Balanced'}</option
-					>
-					<option value="fast"
-						>{locale === 'fr' ? 'Rapide' : locale === 'zh-CN' ? '快速' : 'Fast'}</option
-					>
-				</select>
-			</label>
-		</details>
 		<div class="machine-set">
 			<button
-				class="secondary compact"
+				class="primary"
+				data-testid="backup-now-primary"
 				type="button"
-				disabled={!isTauri() ||
-					running ||
-					!machineTarget ||
-					!machineSets.some((item) => item.status === 'completed_btrfs_and_boot_files')}
-				onclick={() => void makeRescueIso()}
+				disabled={!isTauri() || running}
+				onclick={() => void backupNow()}
 			>
-				{locale === 'fr'
-					? 'Créer ISO de secours'
-					: locale === 'zh-CN'
-						? '创建救援 ISO'
-						: 'Create rescue ISO'}
+				{running
+					? locale === 'fr'
+						? 'Sauvegarde en cours…'
+						: 'Backing up…'
+					: unfinishedMachine || unfinished
+						? locale === 'fr'
+							? 'Reprendre la sauvegarde'
+							: 'Resume backup'
+						: locale === 'fr'
+							? 'Sauvegarder maintenant'
+							: locale === 'zh-CN'
+								? '立即备份'
+								: 'Back up now'}
 			</button>
-			<button
-				class="secondary compact"
-				disabled={!isTauri() || running || unfinished || unfinishedMachine || !machineTarget}
-				onclick={() => void machineTransfer('set-start')}
-			>
+			{#if running}
+				<progress
+					aria-label={locale === 'fr'
+						? 'Sauvegarde complète en cours'
+						: 'Whole-computer backup in progress'}
+				></progress>
+			{/if}
+			<p class="machine-detail">
 				{locale === 'fr'
-					? 'Sauvegarder tous les volumes Btrfs'
+					? 'Une seule sauvegarde groupée, vérifiable et reprenable. Les disques externes, systèmes non-Btrfs hors EFI/boot et sous-volumes non montés ne sont pas inclus automatiquement.'
 					: locale === 'zh-CN'
-						? '备份全部 Btrfs 卷'
-						: 'Back up all Btrfs volumes'}
-			</button>
-			<p class="source-warning">
-				{locale === 'fr'
-					? 'Les volumes Btrfs et les partitions EFI /boot montées sont sauvegardés ; le redémarrage depuis un disque vierge reste à valider.'
-					: locale === 'zh-CN'
-						? '仅包含 Btrfs 卷；EFI 等其他分区未包含，暂不支持可启动恢复。'
-						: 'Btrfs volumes and mounted separate EFI/boot partitions are saved; bootable bare-metal recovery is not yet certified.'}
+						? '一次备份，可验证和续传。未挂载卷、外部磁盘和非 Btrfs 数据卷不自动包含。'
+						: 'One resumable, verifiable backup. Unmounted subvolumes, external disks and non-Btrfs data volumes are not automatically included.'}
 			</p>
 			{#each machineSets.filter((item) => !isMachineSetFinished(item.status)) as item (item.set_id)}
 				<div class="actions">
@@ -686,93 +607,255 @@
 				</div>
 			{/each}
 		</div>
-		<div class="actions">
-			<button
-				class="primary compact"
-				onclick={start}
-				disabled={!ready ||
-					running ||
-					unfinished ||
-					(mode === 'selected-snapper' && number < 1) ||
-					(mode === 'selected-native' && !nativeName)}
-				>{mode === 'latest-snapper'
-					? t[2]
-					: locale === 'fr'
-						? 'Envoyer'
-						: locale === 'zh-CN'
-							? '发送'
-							: 'Send'}</button
-			>
-		</div>
 		{#if info}<p class="operation-status" role="status">{info}</p>{/if}
 		{#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
-		{#each visibleEntries as item (item.transfer_id)}
-			<div class="entry" aria-live="polite">
-				<div class="identity">
-					<strong class="transfer-state">{checkpointStateLabel(item.state, locale)}</strong>
-					<span class="transfer-bytes">
-						{formatBytesBinary(item.committed_raw_bytes)}
-						{locale === 'fr' ? 'envoyés' : locale === 'zh-CN' ? '已发送' : 'sent'}
-					</span>
-					{#if ['preparing', 'uploading', 'replaying', 'pause_requested', 'finalizing'].includes(item.state)}
-						<progress
-							aria-label={locale === 'fr'
-								? 'Transfert en cours, taille totale inconnue'
-								: locale === 'zh-CN'
-									? '传输进行中，总量未知'
-									: 'Transfer in progress, total size unknown'}
-						></progress>
-					{/if}
-				</div>
-				<div class="actions">
-					{#if item.resumable && item.name}
-						<button
-							class="primary compact"
+		<details class="advanced rescue-tools">
+			<summary
+				>{locale === 'fr'
+					? 'Créer un support de secours (optionnel)'
+					: 'Create rescue media (optional)'}</summary
+			>
+			<button
+				class="secondary compact"
+				type="button"
+				disabled={!isTauri() ||
+					running ||
+					!machineTarget ||
+					!machineSets.some((item) => item.status === 'completed_btrfs_and_boot_files')}
+				onclick={() => void makeRescueIso()}
+			>
+				{locale === 'fr' ? 'Créer une ISO de secours' : 'Create rescue ISO'}
+			</button>
+		</details>
+		<details class="advanced expert-panel">
+			<summary>
+				{locale === 'fr'
+					? 'Expert : envoyer un snapshot individuel'
+					: locale === 'zh-CN'
+						? '高级：发送单个快照'
+						: 'Advanced: send an individual snapshot'}
+			</summary>
+			{#if sources.length > 0}
+				<div class="quick-choices">
+					<label>
+						{locale === 'fr' ? 'Source' : locale === 'zh-CN' ? '来源' : 'Source'}
+						<select
+							bind:value={sourcePath}
 							disabled={running}
-							onclick={() => command('resume', item)}>{t[4]}</button
+							onchange={() => void sourceChanged()}
 						>
-					{/if}
-					{#if ['preparing', 'uploading', 'replaying', 'pause_requested'].includes(item.state)}
-						<button class="secondary compact" onclick={() => command('pause', item)}>{t[5]}</button>
-						<button class="secondary compact" onclick={() => command('stop', item)}>{t[6]}</button>
-					{/if}
-					{#if item.resumable && item.name}
-						<details class="advanced">
-							<summary
-								>{locale === 'fr' ? 'Abandonner' : locale === 'zh-CN' ? '丢弃' : 'Discard'}</summary
-							>
-							<button
-								class="secondary compact"
-								disabled={running}
-								onclick={() => command('discard', item)}>{t[7]}</button
-							>
-						</details>
+							{#each sources as choice (choice.path)}
+								<option value={choice.path}>{choice.path}</option>
+							{/each}
+						</select>
+					</label>
+					<label>
+						{locale === 'fr' ? 'Snapshot' : locale === 'zh-CN' ? '快照' : 'Snapshot'}
+						<select
+							bind:value={mode}
+							disabled={running}
+							onchange={() => {
+								if (mode === 'selected-snapper' || mode === 'selected-native') void loadSnapshots();
+							}}
+						>
+							{#if source?.snapper_config}
+								<option value="latest-snapper">{t[10]}</option>
+								<option value="selected-snapper">{t[11]}</option>
+								<option value="create-snapper">{t[12]}</option>
+							{:else}
+								<option value="latest-native"
+									>{locale === 'fr'
+										? 'Dernier (ou créer)'
+										: locale === 'zh-CN'
+											? '最新（或创建）'
+											: 'Latest (or create)'}</option
+								>
+								<option value="selected-native">{t[11]}</option>
+								<option value="create-native">{t[12]}</option>
+							{/if}
+						</select>
+					</label>
+					{#if mode === 'selected-snapper' || mode === 'selected-native'}
+						<label>
+							{t[13]}
+							{#if snapshotLoading}
+								<span
+									>{locale === 'fr'
+										? 'Chargement…'
+										: locale === 'zh-CN'
+											? '加载中…'
+											: 'Loading…'}</span
+								>
+							{:else if mode === 'selected-snapper' && snapshotChoices.length > 0}
+								<select bind:value={number} disabled={running}>
+									{#each snapshotChoices as choice (choice.number)}
+										<option value={choice.number}
+											>#{choice.number} · {new Date(choice.date).toLocaleDateString(locale)}
+											{choice.description}</option
+										>
+									{/each}
+								</select>
+							{:else if mode === 'selected-native' && nativeChoices.length > 0}
+								<select bind:value={nativeName} disabled={running}>
+									{#each nativeChoices as item (item.name)}
+										<option value={item.name}
+											>{new Date(item.date).toLocaleString(locale)} · {item.name}</option
+										>
+									{/each}
+								</select>
+							{:else}
+								<span role="status"
+									>{snapshotListError ||
+										(locale === 'fr'
+											? 'Aucun snapshot disponible'
+											: locale === 'zh-CN'
+												? '没有可用快照'
+												: 'No snapshot available')}</span
+								>
+							{/if}
+						</label>
 					{/if}
 				</div>
-			</div>
-		{/each}
+				<details class="advanced">
+					<summary
+						>{locale === 'fr'
+							? 'Réglages avancés'
+							: locale === 'zh-CN'
+								? '高级设置'
+								: 'Advanced settings'}</summary
+					>
+					<label class="performance-setting">
+						CPU / I/O
+						<select bind:value={performance} disabled={running}>
+							<option value="balanced"
+								>{locale === 'fr' ? 'Équilibré' : locale === 'zh-CN' ? '均衡' : 'Balanced'}</option
+							>
+							<option value="fast"
+								>{locale === 'fr' ? 'Rapide' : locale === 'zh-CN' ? '快速' : 'Fast'}</option
+							>
+						</select>
+					</label>
+				</details>
+				<div class="actions">
+					<button
+						class="primary compact"
+						onclick={start}
+						disabled={!ready ||
+							running ||
+							unfinished ||
+							(mode === 'selected-snapper' && number < 1) ||
+							(mode === 'selected-native' && !nativeName)}
+						>{mode === 'latest-snapper'
+							? t[2]
+							: locale === 'fr'
+								? 'Envoyer'
+								: locale === 'zh-CN'
+									? '发送'
+									: 'Send'}</button
+					>
+				</div>
+				{#each visibleEntries as item (item.transfer_id)}
+					<div class="entry" aria-live="polite">
+						<div class="identity">
+							<strong class="transfer-state">{checkpointStateLabel(item.state, locale)}</strong>
+							<span class="transfer-bytes">
+								{formatBytesBinary(item.committed_raw_bytes)}
+								{locale === 'fr' ? 'envoyés' : locale === 'zh-CN' ? '已发送' : 'sent'}
+							</span>
+							{#if ['preparing', 'uploading', 'replaying', 'pause_requested', 'finalizing'].includes(item.state)}
+								<progress
+									aria-label={locale === 'fr'
+										? 'Transfert en cours, taille totale inconnue'
+										: locale === 'zh-CN'
+											? '传输进行中，总量未知'
+											: 'Transfer in progress, total size unknown'}
+								></progress>
+							{/if}
+						</div>
+						<div class="actions">
+							{#if item.resumable && item.name}
+								<button
+									class="primary compact"
+									disabled={running}
+									onclick={() => command('resume', item)}>{t[4]}</button
+								>
+							{/if}
+							{#if ['preparing', 'uploading', 'replaying', 'pause_requested'].includes(item.state)}
+								<button class="secondary compact" onclick={() => command('pause', item)}
+									>{t[5]}</button
+								>
+								<button class="secondary compact" onclick={() => command('stop', item)}
+									>{t[6]}</button
+								>
+							{/if}
+							{#if item.resumable && item.name}
+								<details class="advanced">
+									<summary
+										>{locale === 'fr'
+											? 'Abandonner'
+											: locale === 'zh-CN'
+												? '丢弃'
+												: 'Discard'}</summary
+									>
+									<button
+										class="secondary compact"
+										disabled={running}
+										onclick={() => command('discard', item)}>{t[7]}</button
+									>
+								</details>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			{:else}
+				<p class="machine-detail">
+					{locale === 'fr'
+						? 'Aucune source individuelle configurée. La sauvegarde complète utilise la détection automatique.'
+						: 'No individual snapshot source configured. The whole-computer backup uses automatic discovery.'}
+				</p>
+			{/if}
+		</details>
 	</article>
 {:else}
 	<article class="panel checkpoint-controls">
 		<h3>
 			{locale === 'fr'
-				? 'Configuration Snapper nécessaire'
+				? 'Destination SSH directe non disponible'
 				: locale === 'zh-CN'
 					? '需要配置 Snapper'
 					: 'Snapper setup required'}
 		</h3>
 		<p class="source-warning">
 			{locale === 'fr'
-				? 'Aucune source de ce profil ne dispose de Snapper. Aucun envoi ne sera lancé avant une configuration explicite.'
+				? 'Cette version ne peut pas lancer directement une sauvegarde complète vers SSH. Choisissez un dossier local, USB ou un partage NFS/SMB monté.'
 				: locale === 'zh-CN'
 					? '此配置尚无 Snapper 来源，在设置前不会启动传输。'
-					: 'No source in this profile has a Snapper configuration. No send will be started until the source is configured.'}
+					: 'Direct SSH whole-computer backup is not available in this version. Choose a local, USB, or mounted NFS/SMB destination.'}
 		</p>
 	</article>
 {/if}
 
 <style>
+	.machine-intro,
+	.machine-detail {
+		font-size: 14px;
+		line-height: 1.6;
+		margin: 0;
+	}
+	.machine-detail {
+		color: var(--text-muted, #999);
+		font-size: 12px;
+	}
+	.machine-set {
+		display: grid;
+		gap: 12px;
+	}
+	.machine-set > button.primary {
+		justify-self: start;
+		font-size: 16px;
+		padding: 13px 22px;
+	}
 	.operation-status {
 		font-size: 14px;
 		font-weight: 600;

@@ -84,7 +84,14 @@ def check_guidance_or_scroll():
     names = []
     for _ in range(18):
         names = all_accessible_texts()
-        if any("select btrfs volumes and a backup destination below" in n.casefold() for n in names):
+        if any(
+            phrase in n.casefold()
+            for n in names
+            for phrase in (
+                "select btrfs volumes and a backup destination below",
+                "choose a backup destination folder, then click back up now",
+            )
+        ):
             return True, names, "configuration guidance displayed"
         try:
             current = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)

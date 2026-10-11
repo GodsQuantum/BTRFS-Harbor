@@ -13,7 +13,6 @@ describe('Btrfs Harbor primary backup action regression', () => {
 				const { body } = render(Page);
 				expect(body).toContain('data-testid="backup-now-primary"');
 				expect(body).toContain('Back up now');
-				expect(body).toContain('Destination');
 				expect(body).toContain('Restore');
 				if (status === 'setup') {
 					expect(body).toContain('id="harbor-source-setup"');

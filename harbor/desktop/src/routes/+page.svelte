@@ -113,7 +113,7 @@
 	let backupSetupHint: 'sources' | 'destination' | null = null;
 	async function backupNow() {
 		if (backupNowRunning || !isTauri()) return;
-		if (!harborConfig || !activeProfile || !activeProfile.sources.length) {
+		if (!harborConfig || !activeProfile) {
 			backupSetupHint = 'sources';
 			active = dashboard.source === 'setup' ? 'overview' : 'protection';
 			await tick();
@@ -179,7 +179,9 @@
 		) {
 			throw new Error('Previous network destination is disconnected or changed');
 		}
-		await prepareCheckpointDirectory(path, subdir, probe);
+		// A full-machine set writes into the selected existing destination itself.
+		// Do not create a per-source rootfs folder when the user selects a destination.
+		if (subdir) await prepareCheckpointDirectory(path, subdir, probe);
 		const kind = probe.kind === 'nfs' || probe.kind === 'smb' ? probe.kind : 'local';
 		const next = profileWithDestination(
 			harborConfig,
@@ -541,30 +543,29 @@
 								: 'Backup or restore'}
 					</h2>
 					<div style="display: flex; flex-wrap: wrap; gap: 10px;">
-						<button
-							class="primary"
-							data-testid="backup-now-primary"
-							type="button"
-							onclick={() => void backupNow()}
-							disabled={!isTauri() || backupNowRunning}
-						>
-							<DatabaseBackup size={18} />
-							{backupNowRunning
-								? locale === 'fr'
-									? 'Sauvegarde en cours…'
-									: locale === 'zh-CN'
-										? '正在备份…'
-										: 'Backing up…'
-								: locale === 'fr'
-									? 'Sauvegarder maintenant'
-									: locale === 'zh-CN'
-										? '立即备份'
-										: 'Back up now'}
-						</button>
-						<button class="secondary" onclick={() => (active = 'destinations')}>
-							<HardDrive size={18} />
-							{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}
-						</button>
+						{#if !activeProfile}
+							<button
+								class="primary"
+								data-testid="backup-now-primary"
+								type="button"
+								onclick={() => void backupNow()}
+								disabled={!isTauri() || backupNowRunning}
+							>
+								<DatabaseBackup size={18} />
+								{backupNowRunning
+									? locale === 'fr'
+										? 'Sauvegarde en cours…'
+										: locale === 'zh-CN'
+											? '正在备份…'
+											: 'Backing up…'
+									: locale === 'fr'
+										? 'Sauvegarder maintenant'
+										: locale === 'zh-CN'
+											? '立即备份'
+											: 'Back up now'}
+							</button>
+						{/if}
+
 						<button class="secondary" onclick={() => (active = 'recover')}>
 							<LifeBuoy size={18} />
 							{locale === 'fr' ? 'Restaurer' : locale === 'zh-CN' ? '恢复' : 'Restore'}
@@ -623,21 +624,7 @@
 					</article>
 				{/if}
 				{#if harborConfig}
-					<ProtectionEditor
-						bind:config={harborConfig}
-						{locale}
-						runtime={null}
-						onRecover={() => {
-							active = 'recover';
-						}}
-						onApplied={async () => {
-							dashboard = await loadDashboardStatus();
-							installationState = await loadInstallationState().catch(() => installationState);
-							harborConfig = await loadHarborConfiguration();
-							await refreshJobRuntimes(harborConfig, installationState);
-						}}
-					/>
-					{#if activeProfile && activeProfile.sources.length > 0}
+					{#if activeProfile}
 						<CheckpointControls
 							bind:this={checkpointControls}
 							onChooseDestination={saveChosenCheckpointDestination}
@@ -646,6 +633,27 @@
 							{locale}
 						/>
 					{/if}
+					<details class="advanced configuration-extra">
+						<summary
+							>{locale === 'fr'
+								? 'Configuration avancée (sources, automatisation)'
+								: 'Advanced setup (sources and schedules)'}</summary
+						>
+						<ProtectionEditor
+							bind:config={harborConfig}
+							{locale}
+							runtime={null}
+							onRecover={() => {
+								active = 'recover';
+							}}
+							onApplied={async () => {
+								dashboard = await loadDashboardStatus();
+								installationState = await loadInstallationState().catch(() => installationState);
+								harborConfig = await loadHarborConfiguration();
+								await refreshJobRuntimes(harborConfig, installationState);
+							}}
+						/>
+					</details>
 				{:else}
 					<article class="callout danger">
 						<CircleAlert size={21} />
@@ -658,17 +666,7 @@
 			</section>
 		{:else if active === 'overview'}
 			<section class="overview-grid">
-				{#if !harborConfig || !activeProfile || activeProfile.sources.length === 0}
-					<article class="panel" style="grid-column: 1 / -1; padding: 18px;">
-						{locale === 'fr'
-							? 'Aucune source Btrfs configurée. Ajoutez des volumes dans les paramètres.'
-							: locale === 'zh-CN'
-								? '尚未配置 Btrfs 来源，请在设置中添加卷。'
-								: 'No Btrfs source configured. Add volumes in settings.'}
-					</article>
-				{/if}
-
-				{#if harborConfig && activeProfile && activeProfile.sources.length > 0}
+				{#if harborConfig && activeProfile}
 					<div style="grid-column: 1 / -1; min-width: 0">
 						<CheckpointControls
 							bind:this={checkpointControls}

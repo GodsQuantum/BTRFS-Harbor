@@ -25,6 +25,7 @@
 		set_id: string;
 		status: string;
 		members: number;
+		created_utc?: string;
 	}
 	let machineSets: MachineSetRecord[] = [];
 	let selectedSet = '';
@@ -49,17 +50,37 @@
 			const chosen = await chooseDestinationDirectory(backupFolder || undefined);
 			if (!chosen) return;
 			busy = true;
-			const response = await invoke<string>('archive_restore_catalog', { source: chosen });
-			const items: unknown = JSON.parse(response);
-			if (!Array.isArray(items)) throw new Error('Invalid backup archive catalog');
-			points = items.filter(
-				(item): item is ArchiveRecord =>
-					item && typeof item === 'object' && typeof item.name === 'string'
-			);
+			// New whole-computer backups are machine sets and need not contain
+			// any old-style per-snapshot archives. Their folder must still open.
+			let legacyError = '';
+			try {
+				const response = await invoke<string>('archive_restore_catalog', { source: chosen });
+				const items: unknown = JSON.parse(response);
+				if (!Array.isArray(items)) throw new Error('Invalid backup archive catalog');
+				points = items.filter(
+					(item): item is ArchiveRecord =>
+						item && typeof item === 'object' && typeof item.name === 'string'
+				);
+			} catch (reason) {
+				points = [];
+				legacyError = String(reason);
+			}
 			points.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
 			backupFolder = chosen;
 			selected = points[0]?.name ?? '';
-			const groupJSON = await loadMachineSetCatalog(chosen);
+			let groupJSON: string;
+			try {
+				groupJSON = await loadMachineSetCatalog(chosen);
+			} catch (reason) {
+				// A broken machine manifest is a real failure; never mislabel it
+				// as 'no backups'. Only legacy archives may be listed without it.
+				throw new Error(
+					'Cannot inspect whole-computer backup catalog: ' +
+						String(reason) +
+						(legacyError ? ' (legacy: ' + legacyError + ')' : ''),
+					{ cause: reason }
+				);
+			}
 			const groupData: unknown = JSON.parse(groupJSON);
 			if (!Array.isArray(groupData)) throw new Error('Invalid machine-set catalog');
 			machineSets = groupData.filter(
@@ -70,6 +91,7 @@
 					typeof value.status === 'string' &&
 					typeof value.members === 'number'
 			);
+			machineSets.sort((a, b) => (b.created_utc ?? '').localeCompare(a.created_utc ?? ''));
 			selectedSet = machineSets.find((set) => isMachineSetFinished(set.status))?.set_id ?? '';
 			machinePlan = '';
 			machineResult = '';
@@ -199,23 +221,45 @@
 	{#if backupFolder}
 		{#if machineSets.some((item) => isMachineSetFinished(item.status))}
 			<div class="recovery-section">
-				<label class="field">
-					{label('Complete Btrfs volume set', 'Ensemble de volumes Btrfs', '完整的 Btrfs 卷组')}
-					<select
-						bind:value={selectedSet}
-						disabled={busy}
-						onchange={() => {
-							machinePlan = '';
-							machineResult = '';
-						}}
+				<div class="field">
+					<strong>{label('Restore this computer', 'Restaurer cet ordinateur', '恢复此电脑')}</strong
 					>
-						{#each machineSets.filter( (item) => isMachineSetFinished(item.status) ) as item (item.set_id)}
-							<option value={item.set_id}>
-								{item.members} Btrfs · {item.set_id.slice(0, 8)}
-							</option>
-						{/each}
-					</select>
-				</label>
+					<p>
+						{label('Latest complete backup', 'Dernière sauvegarde complète', '最近一次完整备份')}
+						· {machineSets.find((item) => item.set_id === selectedSet)?.created_utc
+							? new Date(
+									machineSets.find((item) => item.set_id === selectedSet)?.created_utc ?? ''
+								).toLocaleString(locale)
+							: selectedSet.slice(0, 8)}
+					</p>
+				</div>
+				{#if machineSets.filter((item) => isMachineSetFinished(item.status)).length > 1}
+					<details class="recovery-advanced">
+						<summary
+							>{label(
+								'Choose an older backup',
+								'Choisir une sauvegarde plus ancienne',
+								'选择旧备份'
+							)}</summary
+						>
+						<select
+							bind:value={selectedSet}
+							disabled={busy}
+							onchange={() => {
+								machinePlan = '';
+								machineResult = '';
+							}}
+						>
+							{#each machineSets.filter( (item) => isMachineSetFinished(item.status) ) as item (item.set_id)}
+								<option value={item.set_id}>
+									{item.created_utc
+										? new Date(item.created_utc).toLocaleString(locale)
+										: item.set_id.slice(0, 8)} · {item.members} Btrfs
+								</option>
+							{/each}
+						</select>
+					</details>
+				{/if}
 				<p class="warning">
 					{label(
 						'Btrfs and archived boot/EFI files can be staged; rebuilding the disk bootloader remains manual and is not yet certified.',

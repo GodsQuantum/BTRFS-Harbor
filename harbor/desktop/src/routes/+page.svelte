@@ -110,27 +110,41 @@
 	let editingJobId: string | null = null;
 	let checkpointControls: CheckpointControls | undefined;
 	let backupNowRunning = false;
-	let backupSetupHint = false;
+	let backupSetupHint: 'sources' | 'destination' | null = null;
 	async function backupNow() {
 		if (backupNowRunning || !isTauri()) return;
 		if (!harborConfig || !activeProfile || !activeProfile.sources.length) {
-			backupSetupHint = true;
-			active = 'overview';
+			backupSetupHint = 'sources';
+			active = dashboard.source === 'setup' ? 'overview' : 'protection';
 			await tick();
 			document
 				.getElementById('harbor-source-setup')
 				?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			return;
 		}
-		if (resolveDestination(harborConfig, activeProfile).kind === 'ssh') {
+		const destination = resolveDestination(harborConfig, activeProfile);
+		if (destination.kind === 'ssh') {
 			active = 'destinations';
 			return;
 		}
-		if (!checkpointControls) {
-			backupSetupHint = true;
+		if (
+			!destination.path.trim() ||
+			!destination.mount_point ||
+			!destination.expected_mount_source
+		) {
+			backupSetupHint = 'destination';
+			active = 'overview';
+			await tick();
+			document
+				.querySelector('.destination-picker')
+				?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 			return;
 		}
-		backupSetupHint = false;
+		if (!checkpointControls) {
+			backupSetupHint = 'destination';
+			return;
+		}
+		backupSetupHint = null;
 		backupNowRunning = true;
 		try {
 			await checkpointControls.backupNow();
@@ -559,11 +573,17 @@
 				</article>
 				{#if backupSetupHint}
 					<p class="error-text" role="status">
-						{locale === 'fr'
-							? 'Choisissez les volumes Btrfs et une destination ci-dessous.'
-							: locale === 'zh-CN'
-								? '请先选择 Btrfs 卷和备份目标。'
-								: 'Select Btrfs volumes and a backup destination below.'}
+						{backupSetupHint === 'destination'
+							? locale === 'fr'
+								? 'Choisissez un dossier de destination valide avant de sauvegarder.'
+								: locale === 'zh-CN'
+									? '请先选择有效的备份目标文件夹。'
+									: 'Select a valid backup destination folder before backing up.'
+							: locale === 'fr'
+								? 'Choisissez les volumes Btrfs et une destination ci-dessous.'
+								: locale === 'zh-CN'
+									? '请先选择 Btrfs 卷和备份目标。'
+									: 'Select Btrfs volumes and a backup destination below.'}
 					</p>
 				{/if}
 			</section>

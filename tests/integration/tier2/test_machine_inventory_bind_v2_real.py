@@ -121,3 +121,39 @@ def test_nested_subvolume_without_separate_mount_is_not_omitted(
         row["mount_point"] for row in found["sources"] if row["included_by_default"]
     } == {str(btrfs_volume), str(nested)}
     assert inventory._is_real_subvolume_root(str(nested))
+
+
+def test_real_swap_only_btrfs_subvolume_is_not_snapshotted(
+    btrfs_volume: Path, tmp_path: Path
+):
+    from btrfs_backup_ng.cli.machine_set_v2 import _exclude_verified_volatile_swap
+
+    swap = btrfs_volume / "separate-swap-subvolume"
+    subprocess.run(
+        ["btrfs", "subvolume", "create", str(swap)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (swap / "swapfile").write_bytes(b"synthetic-swap-test-file")
+    swaps = tmp_path / "proc-swaps"
+    swaps.write_text(
+        "Filename Type Size Used Priority\n"
+        + str(swap / "swapfile")
+        + " file 4096 0 -2\n"
+    )
+    fstab = tmp_path / "fstab"
+    fstab.write_text("")
+    keep, omitted = _exclude_verified_volatile_swap(
+        [str(swap)], swaps_path=swaps, fstab_path=fstab
+    )
+    assert keep == []
+    assert [item["reason"] for item in omitted] == ["verified_volatile_swap_only"]
+    assert omitted[0]["mount_point"] == str(swap)
+    assert (swap / "swapfile").exists()
+    (swap / "critical-data.txt").write_text("do not omit")
+    keep, omitted = _exclude_verified_volatile_swap(
+        [str(swap)], swaps_path=swaps, fstab_path=fstab
+    )
+    assert keep == [str(swap)]
+    assert omitted == []

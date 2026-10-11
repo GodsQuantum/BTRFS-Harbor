@@ -49,6 +49,14 @@ This source branch contains newer work **not included in the published rc.11 pac
 - **Retention transaction laboratory**: [disposable GC crash CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) exercises a private quarantine/journal, foreign-file refusal and crash recovery. **Automatic deletion remains disabled**; the experimental CLI now provides manually confirmed plan/apply/resume transactions with the destination-wide lease, never as an automatic scheduled action. because application-level concurrent reader/writer coordination and safe scheduling are not yet qualified.
 - **Desktop qualification still required**: native KDE Wayland/X11 systray close/reopen, real UI progression, package installation in disposable distro VMs, and several bootloaders. Do not replace your independent verified backups with this experimental preview.
 
+## v0.2.7-rc.2 — Snapper-first whole-machine backup and safe swap handling (unpublished preview)
+
+Back up this computer with Prefer existing Snapper sends the latest eligible Snapper snapshot for each configured source. Other data subvolumes receive explicitly labeled Harbor snapshots rather than requiring a Snapper configuration on every Btrfs mount. History identifies mixed-source sets as Snapper + Harbor.
+
+Only a proven swap-only Btrfs subvolume, whose files are explicitly registered in /proc/swaps or /etc/fstab, is excluded as volatile, without disabling swap or snapshotting an active swapfile. This technical exclusion is recorded; swapfiles and hibernation offset must be recreated or verified during recovery. A subvolume containing other data is never omitted solely because it is named /swap. Btrfs send, checksums, checkpoint resumption and archive compatibility are preserved.
+
+Supervised preview, not universal bare-metal certification. Keep an independently verified backup.
+
 ## v0.2.7-rc.1 — audited whole-computer coverage (PREVIEW, unpublished)
 
 The Backup this computer flow supports either **new Harbor snapshots** or **latest existing Snapper snapshots**. This preview validates real Btrfs subvolume roots, deduplicates bind-mount aliases, avoids mandatory scans of external backup drives, and refuses a purported whole-computer backup if local persistent non-Btrfs data mounts (for example ext4 /home, XFS /var/lib) cannot be protected. Supported EFI and separate /boot volumes use the boot-file adapter. Nested Btrfs subvolumes are never included recursively in a parent snapshot.

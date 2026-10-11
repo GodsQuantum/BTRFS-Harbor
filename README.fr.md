@@ -49,6 +49,14 @@ La branche de développement contient de nouvelles modifications **absentes des 
 - **Laboratoire de rétention transactionnelle** : [CI de crash sur runner jetable](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910), journal durable, quarantaine privée, refus des fichiers étrangers et reprise. **Suppression automatique désactivée** ; la CLI expérimentale permet une purge manuelle confirmée (plan/application/reprise) avec verrouillage global de la destination, jamais lors des sauvegardes planifiées. tant que l'exclusion des lectures/écritures concurrentes et la planification ne sont pas qualifiées.
 - **GUI non encore certifiée** : systray KDE Wayland/X11 en vraie session, progression, installation des paquets dans des VM jetables et autres chargeurs UEFI. Conserver une sauvegarde indépendante et vérifiée.
 
+## v0.2.7-rc.2 — priorité aux snapshots Snapper et /swap correct (preview non publiée)
+
+Sauvegarder cet ordinateur : le choix « Snapper de préférence » réutilise les derniers snapshots Snapper admissibles des sous-volumes configurés. Les autres sous-volumes de données sont couverts avec une nouvelle capture Harbor, clairement identifiée « Snapper + Harbor » dans le catalogue. Il n'est pas nécessaire de configurer Snapper pour chaque sous-volume Btrfs.
+
+Un sous-volume contenant exclusivement des fichiers swap explicitement déclarés dans /proc/swaps ou /etc/fstab est exclu en tant que données volatiles, sans swapoff ni snapshot impossible d'un swap actif. Son exclusion est documentée dans l'archive ; après restauration, les fichiers swap et paramètres d'hibernation doivent être recréés/vérifiés. Les sous-volumes contenant de véritables données ne sont pas ignorés, même nommés /swap. Les archives existantes restent compatibles. Les transferts sont des flux Btrfs send vérifiés et reprenables.
+
+Cette preview reste destinée aux essais supervisés. Ce n'est pas une certification universelle de restauration bootable sur tout matériel ; conserver une sauvegarde indépendante.
+
 ## v0.2.7-rc.1 — audit de couverture des sauvegardes (PREVIEW, non publiée)
 
 Le bouton Sauvegarder cet ordinateur permet **nouveaux snapshots Harbor** ou **derniers snapshots Snapper**. La détection distingue désormais les vraies racines Btrfs de leurs alias bind (par exemple des répertoires de polices), et les disques externes ne bloquent plus la découverte de la machine. Si une partition persistante non-Btrfs séparée (par exemple /home en ext4 ou /var/lib en XFS) ne peut pas être incluse, Harbor refuse la sauvegarde annoncée complète au lieu d'ignorer ses données. La sauvegarde des fichiers EFI et /boot montés reste assurée par un adaptateur dédié. Les sous-volumes Btrfs imbriqués ne sont pas copiés récursivement par leur parent.

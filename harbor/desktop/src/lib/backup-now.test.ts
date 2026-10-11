@@ -71,6 +71,7 @@ describe('Source provenance shown in a unified restore history', () => {
 		expect(
 			machineBackupOrigin({ snapshot_provider: 'harbor', backup_trigger: 'automatic' }, 'fr')
 		).toBe('Harbor automatique');
+		expect(machineBackupOrigin({ snapshot_provider: 'mixed' }, 'fr')).toBe('Snapper + Harbor');
 		expect(machineBackupOrigin({}, 'fr')).toBe('Harbor manuel');
 	});
 });

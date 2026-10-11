@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7-rc.2] — Snapper-first machine-set and volatile swap exclusions (supervised preview)
+
+- Replace all-or-nothing per-subvolume Snapper requirement with existing readonly Snapper snapshots wherever available; missing configurations use separately labeled Harbor snapshots of actual data.
+- Exclude only explicitly identified swap-only Btrfs volumes; never disable swap, silently drop user files, or snapshot active swapfiles.
+- Record immutable Snapper metadata, selected source provenance and technical swap exclusions in catalogs and GUI, with restore caveats.
+- Keep checkpoint-v2 archive compatibility, resumable sends, boot archives and destination-only restores.
+
 ## [0.2.7-rc.1] — audited whole-computer backup coverage (unpublished preview)
 
 - Single machine backup source choices: Harbor live snapshot or latest existing Snapper.

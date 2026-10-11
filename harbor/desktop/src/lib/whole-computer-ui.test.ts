@@ -48,7 +48,7 @@ describe('One-button whole-computer backup UX', () => {
 		expect(body).toContain('Sauvegarder cet ordinateur');
 		expect(body).toContain('Sauvegarder maintenant');
 		expect(body).toContain('Créer une nouvelle capture Harbor');
-		expect(body).toContain('Réutiliser les derniers snapshots Snapper');
+		expect(body).toContain('Privilégier les derniers snapshots Snapper existants');
 		expect(body).toContain('value="harbor"');
 		expect(body).toContain('value="snapper"');
 		expect(body).toContain('data-testid="backup-now-primary"');

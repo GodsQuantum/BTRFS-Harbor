@@ -143,7 +143,8 @@
 		status: string;
 		members: number;
 		created_utc?: string;
-		snapshot_provider?: 'harbor' | 'snapper';
+		snapshot_provider?: 'harbor' | 'snapper' | 'mixed';
+		excluded_technical_subvolumes?: Array<{ mount_point: string; reason: string }>;
 		backup_trigger?: 'manual' | 'automatic';
 		source_snapshot_dates?: string[];
 	}
@@ -616,16 +617,16 @@
 						bind:group={snapshotProvider}
 					/>
 					{locale === 'fr'
-						? 'Réutiliser les derniers snapshots Snapper (état antérieur)'
+						? 'Privilégier les derniers snapshots Snapper existants'
 						: locale === 'zh-CN'
-							? '使用已有的最新 Snapper 快照（以前状态）'
-							: 'Reuse latest Snapper snapshots (earlier state)'}
+							? '优先使用现有最新 Snapper 快照'
+							: 'Prefer latest existing Snapper snapshots'}
 				</label>
 				{#if snapshotProvider === 'snapper'}
 					<p class="machine-detail" role="status">
 						{locale === 'fr'
-							? 'Tous les volumes système doivent disposer d’un snapshot Snapper admissible en lecture seule. Aucune capture Harbor ne sera créée ; sinon l’opération sera refusée.'
-							: 'Every system Btrfs volume must have an eligible readonly Snapper snapshot. No Harbor snapshot will be created; otherwise the backup is refused.'}
+							? 'Harbor envoie les derniers snapshots Snapper disponibles. Pour les volumes de données non gérés par Snapper, il crée une capture Harbor. Un volume /swap contenant seulement du swap identifié est exclu : son fichier sera à recréer en restauration.'
+							: 'Existing Snapper snapshots are reused. For data volumes not managed by Snapper, Harbor creates a separate snapshot. A verified swap-only /swap volume is omitted; recreate swap on restore.'}
 					</p>
 				{/if}
 			</fieldset>
@@ -660,6 +661,16 @@
 						latestCompleteMachine,
 						locale
 					)}
+				</p>
+			{/if}
+			{#if latestCompleteMachine?.excluded_technical_subvolumes?.length}
+				<p class="source-warning" role="status">
+					{locale === 'fr'
+						? 'Volumes techniques exclus (swap à recréer après restauration) : '
+						: 'Excluded technical volumes (recreate swap on restore): '}
+					{latestCompleteMachine.excluded_technical_subvolumes
+						.map((item) => item.mount_point)
+						.join(', ')}
 				</p>
 			{/if}
 			{#if running}

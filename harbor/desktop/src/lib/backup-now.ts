@@ -26,10 +26,19 @@ export function chooseBackupNow(
 
 /** Display historical source and trigger separately; never invent an automated backup. */
 export function machineBackupOrigin(
-	record: { snapshot_provider?: 'harbor' | 'snapper'; backup_trigger?: 'manual' | 'automatic' },
+	record: {
+		snapshot_provider?: 'harbor' | 'snapper' | 'mixed';
+		backup_trigger?: 'manual' | 'automatic';
+	},
 	locale: 'fr' | 'en' | 'zh-CN'
 ): string {
 	if (record.snapshot_provider === 'snapper') return 'Snapper';
+	if (record.snapshot_provider === 'mixed')
+		return locale === 'fr'
+			? 'Snapper + Harbor'
+			: locale === 'zh-CN'
+				? 'Snapper + Harbor'
+				: 'Snapper + Harbor';
 	if (record.backup_trigger === 'automatic')
 		return locale === 'fr'
 			? 'Harbor automatique'

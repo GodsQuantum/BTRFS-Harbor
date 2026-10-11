@@ -655,11 +655,13 @@ def _retention_resume(root: Path, args: argparse.Namespace) -> int:
 
 
 def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
-    """All-or-nothing source resolution without creating any snapshots.
+    """Prefer immutable existing Snapper snapshots, preserving all data mounts.
 
-    A Snapper snapshot must belong to a configuration matching EACH selected
-    Btrfs mount exactly. Never cover /home by silently sending an older /
-    snapshot or creating an unrequested native replacement.
+    Snapper is configured per subvolume; a system with /swap, /var/log,
+    /home or other Btrfs subvolumes may have only a single Snapper config.
+    Reuse Snapper where available, and explicitly create Harbor snapshots
+    only for otherwise uncovered *data* subvolumes. Never misrepresent a
+    new Harbor snapshot as an existing Snapper snapshot in the set catalog.
     """
     scanner = SnapperScanner()
     configs = scanner.list_configs()
@@ -670,21 +672,21 @@ def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
             for config in configs
             if config.subvolume == Path(source) and config.fstype == "btrfs"
         ]
-        if len(eligible) != 1:
+        if len(eligible) > 1:
             raise ValueError(
-                f"Snapper cannot cover {source}: expected exactly one Snapper "
-                "configuration for this Btrfs mount. Choose Harbor capture "
-                "instead, or configure Snapper for the missing volume."
+                f"Ambiguous Snapper configurations for {source}; "
+                "cannot choose a source safely."
             )
+        if not eligible:
+            chosen.append({"source": source, "snapshot_provider": "harbor"})
+            continue
         config = eligible[0]
         if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", config.name):
             raise ValueError("invalid Snapper configuration name")
         decision = select_source(scanner.get_snapshots(config), mode="latest")
         if decision is None or decision.snapshot is None or not decision.source_uuid:
-            raise ValueError(
-                f"Snapper has no eligible stable readonly snapshot for {source}. "
-                "Use Harbor capture or create an appropriate Snapper snapshot first."
-            )
+            chosen.append({"source": source, "snapshot_provider": "harbor"})
+            continue
         candidate = decision.snapshot
         path = getattr(candidate, "subvolume_path", None)
         expected = Path(source) / ".snapshots" / str(candidate.number) / "snapshot"
@@ -701,6 +703,7 @@ def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
         chosen.append(
             {
                 "source": source,
+                "snapshot_provider": "snapper",
                 "snapshot_path": str(path),
                 "snapshot_uuid": decision.source_uuid,
                 "snapper_config": config.name,
@@ -713,6 +716,64 @@ def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
     if len(chosen) != len(sources):
         raise ValueError("Snapper coverage is incomplete")
     return chosen
+
+
+def _exclude_verified_volatile_swap(
+    sources: list[str],
+    *,
+    swaps_path: Path = Path("/proc/swaps"),
+    fstab_path: Path = Path("/etc/fstab"),
+    swap_mounts: tuple[str, ...] = ("/swap",),
+) -> tuple[list[str], list[dict[str, object]]]:
+    """Exclude ONLY proven swap-only subvolumes from data streams.
+
+    Btrfs cannot snapshot an active swapfile subvolume; its contents are
+    volatile. NEVER deactivate swap and NEVER ignore unrecognized data.
+    """
+    declared: set[str] = set()
+    for raw in swaps_path.read_text(encoding="utf-8").splitlines()[1:]:
+        columns = raw.rsplit(None, 4)
+        if len(columns) == 5 and columns[1].lower() == "file":
+            declared.add(__util__.unescape_mount_field(columns[0]))
+    if fstab_path.exists():
+        for raw in fstab_path.read_text(encoding="utf-8").splitlines():
+            columns = raw.split("#", 1)[0].split()
+            if len(columns) >= 3 and columns[2] == "swap":
+                declared.add(__util__.unescape_mount_field(columns[0]))
+
+    kept: list[str] = []
+    excluded: list[dict[str, object]] = []
+    for source in sources:
+        root = Path(source)
+        # Ordinary home/system volumes are not even traversed. An unusual
+        # swap mount is eligible only if a known swapfile lives immediately
+        # inside it; arbitrary data must never be silently omitted.
+        if source not in swap_mounts and not any(
+            Path(file).parent == root for file in declared
+        ):
+            kept.append(source)
+            continue
+        with os.scandir(root) as iterator:
+            entries = list(iterator)
+        if (not entries and source not in swap_mounts) or not all(
+            entry.is_file(follow_symlinks=False) and str(root / entry.name) in declared
+            for entry in entries
+        ):
+            kept.append(source)
+            continue
+        if not _is_real_subvolume_root(source):
+            raise ValueError(f"swap source is not a Btrfs subvolume root: {source}")
+        # Restore must recreate swapfile/subvolume, not paging data.
+        excluded.append(
+            {
+                "mount_point": source,
+                "reason": "verified_volatile_swap_only",
+                "swapfiles": sorted(str(root / entry.name) for entry in entries),
+                "restore": "Recreate swap subvolume/file on target; "
+                "check fstab and hibernation resume offset.",
+            }
+        )
+    return kept, excluded
 
 
 def _sources_from_inventory() -> tuple[list[str], dict]:
@@ -819,6 +880,9 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
                         "created_utc": data.get("created_utc"),
                         "snapshot_provider": data.get("snapshot_provider", "harbor"),
                         "backup_trigger": data.get("backup_trigger", "manual"),
+                        "excluded_technical_subvolumes": data.get(
+                            "excluded_technical_subvolumes", []
+                        ),
                         "source_snapshot_dates": [
                             member["snapshot_created_utc"]
                             for member in data["members"]
@@ -836,6 +900,9 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
         sources, inventory = (
             (requested, None) if requested else _sources_from_inventory()
         )
+        excluded_technical: list[dict[str, object]] = []
+        if not requested:
+            sources, excluded_technical = _exclude_verified_volatile_swap(sources)
         if len(sources) > 1024:
             raise ValueError("too many machine-set source subvolumes")
         if not sources or len(set(sources)) != len(sources):
@@ -863,8 +930,8 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
                 "Snapper complete-machine mode requires automatic inventory, "
                 "not selected individual sources"
             )
-        # Resolve ALL Snapper snapshots read-only BEFORE creating the durable
-        # set. If even one required volume lacks Snapper coverage, fail closed.
+        # Use existing Snapper for configured sources. Non-Snapper data
+        # volumes receive Harbor captures, labeled per member.
         snapper_sources = (
             _snapper_latest_for_machine_sources(sources)
             if provider == "snapper"
@@ -873,14 +940,20 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
         # Journal Harbor-owned reservations before snapshot creation.
         # Snapper mode journals verified, existing UUID identities instead.
         for i, source in enumerate(sources):
+            member_provider = (
+                snapper_sources[i]["snapshot_provider"]
+                if snapper_sources is not None
+                else "harbor"
+            )
             member = {
                 "archive": f"machine{timestamp}-{set_id[:8]}-{i:03d}",
                 "original_mount": source,
-                "snapshot_provider": provider,
+                "snapshot_provider": member_provider,
                 "status": "pending",
                 "transfer_id": None,
             }
-            if snapper_sources is None:
+            selected_snapper = snapper_sources[i] if snapper_sources is not None else {}
+            if member_provider == "harbor":
                 reserved_name = reserve_native_snapshot_name()
                 member.update(
                     {
@@ -893,7 +966,7 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             else:
                 member.update(
                     {
-                        key: snapper_sources[i][key]
+                        key: selected_snapper[key]
                         for key in (
                             "snapshot_path",
                             "snapshot_uuid",
@@ -937,7 +1010,13 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             "set_id": set_id,
             "profile_id": args.profile_id,
             "destination_fingerprint": stable,
-            "snapshot_provider": provider,
+            "snapshot_provider": (
+                "mixed"
+                if len({member["snapshot_provider"] for member in members}) > 1
+                else members[0]["snapshot_provider"]
+            ),
+            "snapshot_requested_provider": provider,
+            "excluded_technical_subvolumes": excluded_technical,
             "backup_trigger": "manual",
             "coverage": "btrfs-and-boot-files" if boot_members else "btrfs-only",
             "bootable": False,

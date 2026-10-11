@@ -71,10 +71,13 @@ jobs:
                 exit 1
               fi
               xdotool getwindowname "$found" | grep -F "Btrfs Harbor"
-              NO_AT_BRIDGE=0 /usr/bin/python3 packaging/tests/assert_native_backup_button.py ||
-                echo "WebKitGTK AT-SPI tree unavailable in this Xvfb run; Chromium checked the setup DOM."
-              import -display "$DISPLAY" -window root -silent /tmp/btrfs-harbor-native.png
-              sleep 3
+              NO_AT_BRIDGE=0 /usr/bin/python3 packaging/tests/assert_native_backup_button.py
+              # Capture the app window after the button has been activated and
+              # the setup guidance has been checked through native AT-SPI.
+              xdotool windowactivate --sync "$found" || true
+              sleep 2
+              import -display "$DISPLAY" -window "$found" -silent /tmp/btrfs-harbor-native.png
+              sleep 1
               kill -0 "$pid"
               echo "Native GUI PASS: real visible window, X11 display and live process."
             '

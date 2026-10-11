@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { isTauri } from '@tauri-apps/api/core';
 	import Activity from 'lucide-svelte/icons/activity';
 	import Anchor from 'lucide-svelte/icons/anchor';
@@ -110,8 +110,27 @@
 	let editingJobId: string | null = null;
 	let checkpointControls: CheckpointControls | undefined;
 	let backupNowRunning = false;
+	let backupSetupHint = false;
 	async function backupNow() {
-		if (!checkpointControls || backupNowRunning) return;
+		if (backupNowRunning || !isTauri()) return;
+		if (!harborConfig || !activeProfile || !activeProfile.sources.length) {
+			backupSetupHint = true;
+			active = 'overview';
+			await tick();
+			document
+				.getElementById('harbor-source-setup')
+				?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			return;
+		}
+		if (resolveDestination(harborConfig, activeProfile).kind === 'ssh') {
+			active = 'destinations';
+			return;
+		}
+		if (!checkpointControls) {
+			backupSetupHint = true;
+			return;
+		}
+		backupSetupHint = false;
 		backupNowRunning = true;
 		try {
 			await checkpointControls.backupNow();
@@ -493,8 +512,65 @@
 			</div>
 		{/if}
 
+		{#if active === 'overview'}
+			<!-- Keep the primary action visible even before a helper or profile is configured. -->
+			<section class="overview-primary-actions" aria-label="Backup or restore">
+				<article
+					class="panel"
+					style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px;"
+				>
+					<h2 style="margin: 0; font-size: 23px;">
+						{locale === 'fr'
+							? 'Sauvegarder ou restaurer'
+							: locale === 'zh-CN'
+								? '备份或恢复'
+								: 'Backup or restore'}
+					</h2>
+					<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+						<button
+							class="primary"
+							data-testid="backup-now-primary"
+							type="button"
+							onclick={() => void backupNow()}
+							disabled={!isTauri() || backupNowRunning}
+						>
+							<DatabaseBackup size={18} />
+							{backupNowRunning
+								? locale === 'fr'
+									? 'Sauvegarde en cours…'
+									: locale === 'zh-CN'
+										? '正在备份…'
+										: 'Backing up…'
+								: locale === 'fr'
+									? 'Sauvegarder maintenant'
+									: locale === 'zh-CN'
+										? '立即备份'
+										: 'Back up now'}
+						</button>
+						<button class="secondary" onclick={() => (active = 'destinations')}>
+							<HardDrive size={18} />
+							{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}
+						</button>
+						<button class="secondary" onclick={() => (active = 'recover')}>
+							<LifeBuoy size={18} />
+							{locale === 'fr' ? 'Restaurer' : locale === 'zh-CN' ? '恢复' : 'Restore'}
+						</button>
+					</div>
+				</article>
+				{#if backupSetupHint}
+					<p class="error-text" role="status">
+						{locale === 'fr'
+							? 'Choisissez les volumes Btrfs et une destination ci-dessous.'
+							: locale === 'zh-CN'
+								? '请先选择 Btrfs 卷和备份目标。'
+								: 'Select Btrfs volumes and a backup destination below.'}
+					</p>
+				{/if}
+			</section>
+		{/if}
+
 		{#if active === 'overview' && dashboard.source === 'setup'}
-			<section class="content-stack setup-stack">
+			<section class="content-stack setup-stack" id="harbor-source-setup">
 				<div class="page-intro">
 					<div class="intro-icon"><Laptop size={24} /></div>
 					<div>
@@ -541,6 +617,15 @@
 							await refreshJobRuntimes(harborConfig, installationState);
 						}}
 					/>
+					{#if activeProfile && activeProfile.sources.length > 0}
+						<CheckpointControls
+							bind:this={checkpointControls}
+							onChooseDestination={saveChosenCheckpointDestination}
+							profile={activeProfile}
+							destination={resolveDestination(harborConfig, activeProfile)}
+							{locale}
+						/>
+					{/if}
 				{:else}
 					<article class="callout danger">
 						<CircleAlert size={21} />
@@ -553,53 +638,6 @@
 			</section>
 		{:else if active === 'overview'}
 			<section class="overview-grid">
-				<article
-					class="panel"
-					style="grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px;"
-				>
-					<h2 style="margin: 0; font-size: 23px;">
-						{locale === 'fr'
-							? 'Sauvegarder ou restaurer'
-							: locale === 'zh-CN'
-								? '备份或恢复'
-								: 'Backup or restore'}
-					</h2>
-					<div style="display: flex; flex-wrap: wrap; gap: 10px;">
-						<button
-							class="primary"
-							type="button"
-							onclick={() => void backupNow()}
-							disabled={!isTauri() ||
-								!checkpointControls ||
-								backupNowRunning ||
-								!activeProfile ||
-								activeProfile.sources.length === 0 ||
-								!harborConfig ||
-								resolveDestination(harborConfig, activeProfile).kind === 'ssh'}
-						>
-							<DatabaseBackup size={18} />
-							{backupNowRunning
-								? locale === 'fr'
-									? 'Sauvegarde en cours…'
-									: locale === 'zh-CN'
-										? '正在备份…'
-										: 'Backing up…'
-								: locale === 'fr'
-									? 'Sauvegarder maintenant'
-									: locale === 'zh-CN'
-										? '立即备份'
-										: 'Back up now'}
-						</button>
-						<button class="secondary" onclick={() => (active = 'destinations')}>
-							<HardDrive size={18} />
-							{locale === 'fr' ? 'Destination' : locale === 'zh-CN' ? '目标目录' : 'Destination'}
-						</button>
-						<button class="secondary" onclick={() => (active = 'recover')}>
-							<LifeBuoy size={18} />
-							{locale === 'fr' ? 'Restaurer' : locale === 'zh-CN' ? '恢复' : 'Restore'}
-						</button>
-					</div>
-				</article>
 				{#if !harborConfig || !activeProfile || activeProfile.sources.length === 0}
 					<article class="panel" style="grid-column: 1 / -1; padding: 18px;">
 						{locale === 'fr'

@@ -137,9 +137,9 @@
 			if (dryRun) machinePlan = output;
 			else {
 				machineResult = label(
-					'All Btrfs volumes staged; EFI/bootloader recovery not included.',
-					'Volumes Btrfs restaurés ; EFI et chargeur d’amorçage non inclus.',
-					'Btrfs 卷恢复到暂存目录，未恢复 EFI 与引导程序。'
+					'Btrfs volumes staged. Archived EFI/boot files, if present, are staged separately. Bootloader is not installed: this is not yet a bootable recovery.',
+					'Volumes Btrfs restaurés en préparation. Les fichiers EFI/boot archivés, s’ils existent, sont préparés séparément. Chargeur non installé : ce n’est pas encore un système amorçable.',
+					'Btrfs 子卷已恢复至暂存目录。EFI/boot 文件（如有）另行暂存；未安装引导加载程序，尚不可直接启动。'
 				);
 				machinePlan = '';
 			}

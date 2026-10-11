@@ -147,6 +147,10 @@
 	let machineSets: MachineSetEntry[] = [];
 	$: machineTarget = destination.path ?? '';
 	$: unfinishedMachine = machineSets.some((item) => !isMachineSetFinished(item.status));
+	$: latestCompleteMachine =
+		machineSets
+			.filter((item) => isMachineSetFinished(item.status))
+			.sort((a, b) => (b.created_utc ?? '').localeCompare(a.created_utc ?? ''))[0] ?? null;
 	async function refreshMachineSets(): Promise<boolean> {
 		if (!isTauri() || !machineTarget || !machineTarget.startsWith('/')) {
 			machineSets = [];
@@ -442,7 +446,13 @@
 			const result = await loadCheckpointTransfers(requestedTarget);
 			if (target === requestedTarget) entries = result;
 		} catch (e) {
-			if (target === requestedTarget) error = String(e);
+			// The old per-snapshot subfolder may not exist at all on a machine
+			// using ONLY the new grouped backup path. Do not display a false
+			// whole-computer backup error because this expert catalog is absent.
+			if (target === requestedTarget) {
+				entries = [];
+				snapshotListError = String(e);
+			}
 		} finally {
 			busy = false;
 		}
@@ -582,6 +592,15 @@
 								? '立即备份'
 								: 'Back up now'}
 			</button>
+			{#if latestCompleteMachine}
+				<p class="machine-detail" data-testid="latest-whole-machine-backup">
+					{locale === 'fr' ? 'Dernière sauvegarde enregistrée' : 'Last saved backup'}
+					· {latestCompleteMachine.created_utc
+						? new Date(latestCompleteMachine.created_utc).toLocaleString(locale)
+						: latestCompleteMachine.set_id.slice(0, 8)}
+					· {latestCompleteMachine.members} Btrfs
+				</p>
+			{/if}
 			{#if running}
 				<progress
 					aria-label={locale === 'fr'

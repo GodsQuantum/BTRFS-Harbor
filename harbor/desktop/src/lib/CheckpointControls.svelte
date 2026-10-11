@@ -143,6 +143,9 @@
 		status: string;
 		members: number;
 		created_utc?: string;
+		snapshot_provider?: 'harbor' | 'snapper';
+		backup_trigger?: 'manual' | 'automatic';
+		source_snapshot_dates?: string[];
 	}
 	let machineSets: MachineSetEntry[] = [];
 	$: machineTarget = destination.path ?? '';
@@ -291,6 +294,7 @@
 				target: machineTarget,
 				allow_local: allowLocal,
 				profile_id: action === 'set-start' ? profile.id : null,
+				snapshot_provider: action === 'set-start' ? snapshotProvider : null,
 				set_id: action === 'set-resume' ? setId : null
 			});
 			const lines = response.trim().split('\n');
@@ -368,6 +372,7 @@
 		}
 		await machineTransfer('set-start');
 	}
+	let snapshotProvider: 'harbor' | 'snapper' = 'harbor';
 	let running = false;
 	let busy = false;
 	let error = '';
@@ -575,6 +580,52 @@
 			</p>
 		{/if}
 		<div class="machine-set">
+			<fieldset
+				class="snapshot-provider"
+				data-testid="complete-backup-snapshot-options"
+				disabled={running}
+			>
+				<legend
+					>{locale === 'fr'
+						? 'Source des snapshots'
+						: locale === 'zh-CN'
+							? '快照来源'
+							: 'Snapshot source'}</legend
+				>
+				<label>
+					<input
+						type="radio"
+						name="whole-computer-snapshot-provider"
+						value="harbor"
+						bind:group={snapshotProvider}
+					/>
+					{locale === 'fr'
+						? 'Créer une nouvelle capture Harbor (état actuel)'
+						: locale === 'zh-CN'
+							? '新建 Harbor 快照（当前状态）'
+							: 'Create new Harbor snapshots (current state)'}
+				</label>
+				<label>
+					<input
+						type="radio"
+						name="whole-computer-snapshot-provider"
+						value="snapper"
+						bind:group={snapshotProvider}
+					/>
+					{locale === 'fr'
+						? 'Réutiliser les derniers snapshots Snapper (état antérieur)'
+						: locale === 'zh-CN'
+							? '使用已有的最新 Snapper 快照（以前状态）'
+							: 'Reuse latest Snapper snapshots (earlier state)'}
+				</label>
+				{#if snapshotProvider === 'snapper'}
+					<p class="machine-detail" role="status">
+						{locale === 'fr'
+							? 'Tous les volumes système doivent disposer d’un snapshot Snapper admissible en lecture seule. Aucune capture Harbor ne sera créée ; sinon l’opération sera refusée.'
+							: 'Every system Btrfs volume must have an eligible readonly Snapper snapshot. No Harbor snapshot will be created; otherwise the backup is refused.'}
+					</p>
+				{/if}
+			</fieldset>
 			<button
 				class="primary"
 				data-testid="backup-now-primary"
@@ -602,7 +653,10 @@
 					· {latestCompleteMachine.created_utc
 						? new Date(latestCompleteMachine.created_utc).toLocaleString(locale)
 						: latestCompleteMachine.set_id.slice(0, 8)}
-					· {latestCompleteMachine.members} Btrfs
+					· {latestCompleteMachine.members} Btrfs · {latestCompleteMachine.snapshot_provider ===
+					'snapper'
+						? 'Snapper'
+						: 'Harbor'}
 				</p>
 			{/if}
 			{#if running}
@@ -873,6 +927,19 @@
 	.machine-set {
 		display: grid;
 		gap: 12px;
+	}
+	.snapshot-provider {
+		display: grid;
+		gap: 8px;
+		border: 1px solid var(--border, #444);
+		padding: 12px;
+		border-radius: 8px;
+		margin: 0;
+	}
+	.snapshot-provider label {
+		display: flex;
+		gap: 8px;
+		align-items: baseline;
 	}
 	.machine-set > button.primary {
 		justify-self: start;

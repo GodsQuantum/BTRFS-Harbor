@@ -545,6 +545,13 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
         if set_action == "set-start":
             set_parser.add_argument("--max-incremental-depth", type=int, default=7)
             set_parser.add_argument("--profile-id", required=True)
+            set_parser.add_argument(
+                "--snapshot-provider",
+                choices=("harbor", "snapper"),
+                default="harbor",
+                help="Harbor: create new readonly snapshots; Snapper: reuse latest "
+                "stable readonly snapshots for EVERY system Btrfs volume.",
+            )
             set_parser.add_argument("--source", action="append")
         elif set_action not in (
             "set-list",

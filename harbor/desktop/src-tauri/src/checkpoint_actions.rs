@@ -23,6 +23,7 @@ pub struct CheckpointRequest {
     pub performance: Option<String>,
     pub set_id: Option<String>,
     pub sources: Option<Vec<String>>,
+    pub snapshot_provider: Option<String>,
     pub staging: Option<String>,
     #[serde(default)]
     pub confirm: bool,
@@ -209,6 +210,21 @@ fn set_action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
         let profile = req.profile_id.as_deref().ok_or("Missing profile ID")?;
         Uuid::parse_str(profile).map_err(|_| "Invalid profile ID")?;
         args.extend(["--profile-id".into(), profile.into()]);
+        let provider = req.snapshot_provider.as_deref().unwrap_or("harbor");
+        if !matches!(provider, "harbor" | "snapper") {
+            return Err("Unsupported machine snapshot provider".into());
+        }
+        args.extend(["--snapshot-provider".into(), provider.into()]);
+        if provider == "snapper"
+            && req
+                .sources
+                .as_ref()
+                .is_some_and(|sources| !sources.is_empty())
+        {
+            return Err(
+                "Snapper machine backup must cover the automatic complete inventory".into(),
+            );
+        }
         if let Some(sources) = &req.sources {
             if sources.len() > 1024 {
                 return Err("Too many selected Btrfs subvolumes".into());
@@ -326,6 +342,30 @@ mod tests {
         assert!(action_arguments(&req).is_err());
     }
 
+    #[test]
+    fn machine_snapshot_provider_refuses_unknown_and_partial_snapper_modes() {
+        let mut request = base("set-start");
+        request.snapshot_provider = Some("snapper".into());
+        assert!(
+            set_action_arguments(&request)
+                .unwrap()
+                .windows(2)
+                .any(|w| w[0] == "--snapshot-provider" && w[1] == "snapper")
+        );
+        request.sources = Some(vec!["/".into()]);
+        assert!(set_action_arguments(&request).is_err());
+        request.sources = None;
+        request.snapshot_provider = Some("../../unsafe".into());
+        assert!(set_action_arguments(&request).is_err());
+        request.snapshot_provider = None;
+        assert!(
+            set_action_arguments(&request)
+                .unwrap()
+                .windows(2)
+                .any(|w| w[0] == "--snapshot-provider" && w[1] == "harbor")
+        );
+    }
+
     fn base(action: &str) -> CheckpointRequest {
         CheckpointRequest {
             action: action.into(),
@@ -342,6 +382,7 @@ mod tests {
             performance: None,
             set_id: Some("3b88e8c1-5cb8-4f67-aa10-f9544b6228f0".into()),
             sources: None,
+            snapshot_provider: None,
             staging: None,
             confirm: false,
         }

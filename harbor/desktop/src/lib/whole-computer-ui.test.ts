@@ -47,6 +47,10 @@ describe('One-button whole-computer backup UX', () => {
 		const body = renderCard();
 		expect(body).toContain('Sauvegarder cet ordinateur');
 		expect(body).toContain('Sauvegarder maintenant');
+		expect(body).toContain('Créer une nouvelle capture Harbor');
+		expect(body).toContain('Réutiliser les derniers snapshots Snapper');
+		expect(body).toContain('value="harbor"');
+		expect(body).toContain('value="snapper"');
 		expect(body).toContain('data-testid="backup-now-primary"');
 		expect(body).toContain('Où enregistrer la sauvegarde');
 		expect(body).toContain('/mnt/Cloud9/backup-local/Workstations/Pegasus');

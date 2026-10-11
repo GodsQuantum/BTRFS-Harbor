@@ -11,6 +11,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -46,6 +47,8 @@ from ..core.native_snapshots import (
 from ..core.rear_bridge_v2 import apply_rear_restore, plan_rear_restore
 from ..core.rear_iso_v2 import build_rescue_iso, _check_catalog
 from ..core.native_send_v2 import inspect_readonly_btrfs_source
+from ..snapper.scanner import SnapperScanner
+from ..snapper.source_policy import select_source
 from ..core.verify_v2 import verify_checkpoint_index
 from ..endpoint.mount_guard_v2 import MountGuard
 from .checkpoint_v2_cmd import (
@@ -108,18 +111,35 @@ def _read(root: Path, set_id: str) -> dict:
             raise ValueError("invalid recorded Btrfs source")
         source_root = Path(original)
         snap_path = Path(snapshot)
-        if (
-            not source_root.is_absolute()
-            or not snap_path.is_absolute()
-            or source_root.is_symlink()
-            or snap_path.is_symlink()
-            or snap_path.parent.is_symlink()
-            or snap_path.parent != source_root / NATIVE_FOLDER
-            or not NAME_PATTERN.fullmatch(snap_path.name)
-        ):
-            raise ValueError(
-                "machine set source is not a Harbor-owned readonly snapshot"
-            )
+        provider = member.get("snapshot_provider", "harbor")
+        if provider not in ("harbor", "snapper"):
+            raise ValueError("unsupported machine-set snapshot provider")
+        if not source_root.is_absolute() or not snap_path.is_absolute():
+            raise ValueError("machine set source must be absolute")
+        if provider == "harbor":
+            if (
+                source_root.is_symlink()
+                or snap_path.is_symlink()
+                or snap_path.parent.is_symlink()
+                or snap_path.parent != source_root / NATIVE_FOLDER
+                or not NAME_PATTERN.fullmatch(snap_path.name)
+            ):
+                raise ValueError(
+                    "machine set source is not a Harbor-owned readonly snapshot"
+                )
+        else:
+            config = member.get("snapper_config")
+            number = member.get("snapper_number")
+            if (
+                not isinstance(config, str)
+                or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", config)
+                or type(number) is not int
+                or number <= 0
+                or snap_path != source_root / ".snapshots" / str(number) / "snapshot"
+            ):
+                raise ValueError("unsafe Snapper machine-set snapshot identity")
+            if member.get("snapshot_uuid") is None:
+                raise ValueError("Snapper machine-set requires immutable source UUID")
         if member.get("status") not in ("pending", "sending", "completed"):
             raise ValueError("invalid machine-set member state")
     boot_members = data.get("boot_members", [])
@@ -251,8 +271,27 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
             )
         ):
             raise ValueError("machine set source snapshot changed")
+        provider = member.get("snapshot_provider", "harbor")
+        if provider == "snapper":
+            config = member["snapper_config"]
+            number = member["snapper_number"]
+            scanner = SnapperScanner()
+            snap = next(
+                (
+                    candidate
+                    for candidate in scanner.get_snapshots(config)
+                    if candidate.number == number
+                ),
+                None,
+            )
+            if snap is None or snap.subvolume_path != snapshot_path:
+                raise ValueError("Snapper snapshot disappeared or was replaced")
         recorded_uuid = member.get("snapshot_uuid")
-        if recorded_uuid is None and member["status"] == "pending":
+        if (
+            recorded_uuid is None
+            and member["status"] == "pending"
+            and provider == "harbor"
+        ):
             # A process may have died before, during, or after the snapshot
             # ioctl. The manifest already names its only permitted target.
             # Reuse that exact readonly snapshot or create it under that name.
@@ -307,17 +346,21 @@ def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) 
                 target=str(root),
                 name=archive,
                 profile_id=data["profile_id"],
-                source=member["snapshot_path"],
-                source_mode="path",
-                # Harbor-owned readonly native snapshots can reuse verified
-                # remote parent chains, instead of sending fulls forever.
-                native_root=member["original_mount"],
+                source=None if provider == "snapper" else member["snapshot_path"],
+                source_mode="selected-snapper" if provider == "snapper" else "path",
+                # Native snapshots use the verified native parent chain.
+                # Snapper transfers use existing checkpoint-v2 Snapper pins.
+                native_root=member["original_mount"] if provider == "harbor" else None,
                 parent=None,
                 checkpoint_size_mib=128,
                 performance="balanced",
                 max_incremental_depth=data.get("max_incremental_depth", 7),
-                snapper_config=None,
-                snapper_number=None,
+                snapper_config=member.get("snapper_config")
+                if provider == "snapper"
+                else None,
+                snapper_number=member.get("snapper_number")
+                if provider == "snapper"
+                else None,
                 native_name=None,
                 allow_local=allow_local,
                 experimental=True,
@@ -611,6 +654,67 @@ def _retention_resume(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def _snapper_latest_for_machine_sources(sources: list[str]) -> list[dict]:
+    """All-or-nothing source resolution without creating any snapshots.
+
+    A Snapper snapshot must belong to a configuration matching EACH selected
+    Btrfs mount exactly. Never cover /home by silently sending an older /
+    snapshot or creating an unrequested native replacement.
+    """
+    scanner = SnapperScanner()
+    configs = scanner.list_configs()
+    chosen: list[dict] = []
+    for source in sources:
+        eligible = [
+            config
+            for config in configs
+            if config.subvolume == Path(source) and config.fstype == "btrfs"
+        ]
+        if len(eligible) != 1:
+            raise ValueError(
+                f"Snapper cannot cover {source}: expected exactly one Snapper "
+                "configuration for this Btrfs mount. Choose Harbor capture "
+                "instead, or configure Snapper for the missing volume."
+            )
+        config = eligible[0]
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", config.name):
+            raise ValueError("invalid Snapper configuration name")
+        decision = select_source(scanner.get_snapshots(config), mode="latest")
+        if decision is None or decision.snapshot is None or not decision.source_uuid:
+            raise ValueError(
+                f"Snapper has no eligible stable readonly snapshot for {source}. "
+                "Use Harbor capture or create an appropriate Snapper snapshot first."
+            )
+        candidate = decision.snapshot
+        path = getattr(candidate, "subvolume_path", None)
+        expected = Path(source) / ".snapshots" / str(candidate.number) / "snapshot"
+        if (
+            not isinstance(path, Path)
+            or path != expected
+            or path.is_symlink()
+            or not path.is_dir()
+        ):
+            raise ValueError(f"Snapper snapshot path changed for {source}")
+        details = inspect_readonly_btrfs_source(path)
+        if details.uuid != decision.source_uuid:
+            raise ValueError(f"Snapper readonly UUID changed for {source}")
+        chosen.append(
+            {
+                "source": source,
+                "snapshot_path": str(path),
+                "snapshot_uuid": decision.source_uuid,
+                "snapper_config": config.name,
+                "snapper_number": candidate.number,
+                "snapshot_created_utc": candidate.date.astimezone(
+                    timezone.utc
+                ).isoformat(),
+            }
+        )
+    if len(chosen) != len(sources):
+        raise ValueError("Snapper coverage is incomplete")
+    return chosen
+
+
 def _sources_from_inventory() -> tuple[list[str], dict]:
     inventory = inspect_live_machine()
     if not inventory["inventory_complete"]:
@@ -678,6 +782,13 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
                         "coverage": data["coverage"],
                         "bootable": False,
                         "created_utc": data.get("created_utc"),
+                        "snapshot_provider": data.get("snapshot_provider", "harbor"),
+                        "backup_trigger": data.get("backup_trigger", "manual"),
+                        "source_snapshot_dates": [
+                            member["snapshot_created_utc"]
+                            for member in data["members"]
+                            if isinstance(member.get("snapshot_created_utc"), str)
+                        ],
                         "members": len(data["members"]),
                         "boot_partitions": len(data.get("boot_members", [])),
                     }
@@ -712,21 +823,55 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             )
             if result.returncode != 0:
                 raise ValueError(f"not a Btrfs subvolume root: {source}")
-        # Durable write-ahead reservation BEFORE creating any snapshot.
-        # A killed process leaves only a known, recoverable pending member,
-        # never an untracked native Btrfs snapshot.
-        for i, source in enumerate(sources):
-            reserved_name = reserve_native_snapshot_name()
-            members.append(
-                {
-                    "archive": f"machine{timestamp}-{set_id[:8]}-{i:03d}",
-                    "original_mount": source,
-                    "snapshot_path": str(Path(source) / NATIVE_FOLDER / reserved_name),
-                    "snapshot_uuid": None,
-                    "status": "pending",
-                    "transfer_id": None,
-                }
+        provider = getattr(args, "snapshot_provider", "harbor")
+        if provider not in ("harbor", "snapper"):
+            raise ValueError("unknown machine backup snapshot provider")
+        if provider == "snapper" and requested:
+            raise ValueError(
+                "Snapper complete-machine mode requires automatic inventory, "
+                "not selected individual sources"
             )
+        # Resolve ALL Snapper snapshots read-only BEFORE creating the durable
+        # set. If even one required volume lacks Snapper coverage, fail closed.
+        snapper_sources = (
+            _snapper_latest_for_machine_sources(sources)
+            if provider == "snapper"
+            else None
+        )
+        # Journal Harbor-owned reservations before snapshot creation.
+        # Snapper mode journals verified, existing UUID identities instead.
+        for i, source in enumerate(sources):
+            member = {
+                "archive": f"machine{timestamp}-{set_id[:8]}-{i:03d}",
+                "original_mount": source,
+                "snapshot_provider": provider,
+                "status": "pending",
+                "transfer_id": None,
+            }
+            if snapper_sources is None:
+                reserved_name = reserve_native_snapshot_name()
+                member.update(
+                    {
+                        "snapshot_path": str(
+                            Path(source) / NATIVE_FOLDER / reserved_name
+                        ),
+                        "snapshot_uuid": None,
+                    }
+                )
+            else:
+                member.update(
+                    {
+                        key: snapper_sources[i][key]
+                        for key in (
+                            "snapshot_path",
+                            "snapshot_uuid",
+                            "snapper_config",
+                            "snapper_number",
+                            "snapshot_created_utc",
+                        )
+                    }
+                )
+            members.append(member)
         max_depth = getattr(args, "max_incremental_depth", 7)
         if type(max_depth) is not int or not 1 <= max_depth <= 256:
             raise ValueError("max incremental depth must be 1..256")
@@ -760,6 +905,8 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             "set_id": set_id,
             "profile_id": args.profile_id,
             "destination_fingerprint": stable,
+            "snapshot_provider": provider,
+            "backup_trigger": "manual",
             "coverage": "btrfs-and-boot-files" if boot_members else "btrfs-only",
             "bootable": False,
             "status": "pending",

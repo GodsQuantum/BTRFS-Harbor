@@ -861,6 +861,16 @@ def execute_machine_set(args: argparse.Namespace) -> int:
         "set-retention-plan",
     )
     root = _target_root(args.target)
+    if action in ("set-resume", "set-rescue-iso"):
+        # A new global lease must NOT leave even its lock inode on a changed
+        # or missing destination export. Validate the saved set fingerprint
+        # before any write, exactly as the earlier mutation guard did.
+        preflight, stable = _open_guard(root, allow_local=args.allow_local)
+        with preflight:
+            data = _read(root, _canonical_uuid(args.set_id))
+            if stable != data.get("destination_fingerprint"):
+                raise ValueError("machine-set destination fingerprint changed")
+            preflight.validate_fd(preflight.directory_fd)
     with MountGuard(root, capture_mount_identity(root)) as guard:
         with destination_gc_lock(
             guard,

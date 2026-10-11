@@ -48,8 +48,27 @@ def test_machine_lease_protects_entire_operation(
     # writer. Foreign legacy read-only archives without it cannot be pruned.
     (tmp_path / ".harbor-retention-v2.lock").touch()
     monkeypatch.setattr(machine_set_v2, "_execute_machine_set_unlocked", fake_unlocked)
+    if action in ("set-resume", "set-rescue-iso"):
+        monkeypatch.setattr(
+            machine_set_v2,
+            "_open_guard",
+            lambda root, **kwargs: (
+                MountGuard(root, capture_mount_identity(root)),
+                "expected-export",
+            ),
+        )
+        monkeypatch.setattr(
+            machine_set_v2,
+            "_read",
+            lambda *_args: {"destination_fingerprint": "expected-export"},
+        )
     result = machine_set_v2.execute_machine_set(
-        argparse.Namespace(checkpoint_action=action, target=str(tmp_path))
+        argparse.Namespace(
+            checkpoint_action=action,
+            target=str(tmp_path),
+            set_id="11111111-1111-4111-8111-111111111111",
+            allow_local=True,
+        )
     )
     assert result == 43
 

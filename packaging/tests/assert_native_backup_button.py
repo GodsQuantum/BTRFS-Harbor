@@ -1,8 +1,8 @@
 #!/usr/bin/python3
-\"\"\"Assert the *native* Tauri window exposes its primary backup CTA.
+"""Assert the *native* Tauri window exposes its primary backup CTA.
 
 Runs only on an isolated CI virtual desktop; never starts any backup.
-\"\"\"
+"""
 import sys
 import time
 

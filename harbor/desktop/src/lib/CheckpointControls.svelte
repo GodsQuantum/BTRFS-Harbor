@@ -14,7 +14,7 @@
 		type SnapperSnapshotChoice
 	} from './agent';
 	import { checkpointStateLabel, type CheckpointTransfer } from './checkpoint';
-	import { chooseBackupNow, isMachineSetFinished } from './backup-now';
+	import { chooseBackupNow, isMachineSetFinished, machineBackupOrigin } from './backup-now';
 	import { formatBytesBinary } from './status';
 	import { checkpointTargetPath, type BackupProfile, type DestinationSpec } from './config';
 	import type { Locale } from './i18n';
@@ -653,10 +653,10 @@
 					· {latestCompleteMachine.created_utc
 						? new Date(latestCompleteMachine.created_utc).toLocaleString(locale)
 						: latestCompleteMachine.set_id.slice(0, 8)}
-					· {latestCompleteMachine.members} Btrfs · {latestCompleteMachine.snapshot_provider ===
-					'snapper'
-						? 'Snapper'
-						: 'Harbor'}
+					· {latestCompleteMachine.members} Btrfs · {machineBackupOrigin(
+						latestCompleteMachine,
+						locale
+					)}
 				</p>
 			{/if}
 			{#if running}

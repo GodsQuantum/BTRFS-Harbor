@@ -23,3 +23,18 @@ export function chooseBackupNow(
 		return { kind: 'resume-stream', id: pendingStreams[0].transfer_id };
 	return { kind: 'start' };
 }
+
+/** Display historical source and trigger separately; never invent an automated backup. */
+export function machineBackupOrigin(
+	record: { snapshot_provider?: 'harbor' | 'snapper'; backup_trigger?: 'manual' | 'automatic' },
+	locale: 'fr' | 'en' | 'zh-CN'
+): string {
+	if (record.snapshot_provider === 'snapper') return 'Snapper';
+	if (record.backup_trigger === 'automatic')
+		return locale === 'fr'
+			? 'Harbor automatique'
+			: locale === 'zh-CN'
+				? 'Harbor 自动'
+				: 'Harbor automatic';
+	return locale === 'fr' ? 'Harbor manuel' : locale === 'zh-CN' ? 'Harbor 手动' : 'Harbor manual';
+}

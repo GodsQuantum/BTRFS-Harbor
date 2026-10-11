@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseBackupNow } from './backup-now';
+import { chooseBackupNow, machineBackupOrigin } from './backup-now';
 
 import { isMachineSetFinished } from './backup-now';
 
@@ -57,5 +57,20 @@ describe('Back up now - durable selection', () => {
 				[{ transfer_id: 'stream', resumable: true }]
 			)
 		).toEqual({ kind: 'resume-set', id: 'machine' });
+	});
+});
+
+describe('Source provenance shown in a unified restore history', () => {
+	it('labels Snapper, Harbor manual and future Harbor automatic distinctly', () => {
+		expect(
+			machineBackupOrigin({ snapshot_provider: 'snapper', backup_trigger: 'manual' }, 'fr')
+		).toBe('Snapper');
+		expect(
+			machineBackupOrigin({ snapshot_provider: 'harbor', backup_trigger: 'manual' }, 'fr')
+		).toBe('Harbor manuel');
+		expect(
+			machineBackupOrigin({ snapshot_provider: 'harbor', backup_trigger: 'automatic' }, 'fr')
+		).toBe('Harbor automatique');
+		expect(machineBackupOrigin({}, 'fr')).toBe('Harbor manuel');
 	});
 });

@@ -7,7 +7,7 @@
 		runCheckpointAction
 	} from './agent';
 	import type { Locale } from './i18n';
-	import { isMachineSetFinished } from './backup-now';
+	import { isMachineSetFinished, machineBackupOrigin } from './backup-now';
 	export let locale: Locale;
 
 	interface ArchiveRecord {
@@ -234,10 +234,10 @@
 									machineSets.find((item) => item.set_id === selectedSet)?.created_utc ?? ''
 								).toLocaleString(locale)
 							: selectedSet.slice(0, 8)}
-						· {machineSets.find((item) => item.set_id === selectedSet)?.snapshot_provider ===
-						'snapper'
-							? 'Snapper'
-							: label('Harbor snapshot', 'Snapshot Harbor', 'Harbor 快照')}
+						· {machineBackupOrigin(
+							machineSets.find((item) => item.set_id === selectedSet) ?? {},
+							locale
+						)}
 						{#if machineSets.find((item) => item.set_id === selectedSet)?.source_snapshot_dates?.length}
 							· {label('Snapshot dates', 'Dates des snapshots', '快照日期')}
 							{machineSets
@@ -268,10 +268,10 @@
 								<option value={item.set_id}>
 									{item.created_utc
 										? new Date(item.created_utc).toLocaleString(locale)
-										: item.set_id.slice(0, 8)} · {item.members} Btrfs · {item.snapshot_provider ===
-									'snapper'
-										? 'Snapper'
-										: 'Harbor'}
+										: item.set_id.slice(0, 8)} · {item.members} Btrfs · {machineBackupOrigin(
+										item,
+										locale
+									)}
 								</option>
 							{/each}
 						</select>

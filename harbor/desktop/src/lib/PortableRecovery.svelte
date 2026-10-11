@@ -26,6 +26,9 @@
 		status: string;
 		members: number;
 		created_utc?: string;
+		snapshot_provider?: 'harbor' | 'snapper';
+		backup_trigger?: 'manual' | 'automatic';
+		source_snapshot_dates?: string[];
 	}
 	let machineSets: MachineSetRecord[] = [];
 	let selectedSet = '';
@@ -231,6 +234,17 @@
 									machineSets.find((item) => item.set_id === selectedSet)?.created_utc ?? ''
 								).toLocaleString(locale)
 							: selectedSet.slice(0, 8)}
+						· {machineSets.find((item) => item.set_id === selectedSet)?.snapshot_provider ===
+						'snapper'
+							? 'Snapper'
+							: label('Harbor snapshot', 'Snapshot Harbor', 'Harbor 快照')}
+						{#if machineSets.find((item) => item.set_id === selectedSet)?.source_snapshot_dates?.length}
+							· {label('Snapshot dates', 'Dates des snapshots', '快照日期')}
+							{machineSets
+								.find((item) => item.set_id === selectedSet)
+								?.source_snapshot_dates?.map((d) => new Date(d).toLocaleDateString(locale))
+								.join(' / ')}
+						{/if}
 					</p>
 				</div>
 				{#if machineSets.filter((item) => isMachineSetFinished(item.status)).length > 1}
@@ -254,7 +268,10 @@
 								<option value={item.set_id}>
 									{item.created_utc
 										? new Date(item.created_utc).toLocaleString(locale)
-										: item.set_id.slice(0, 8)} · {item.members} Btrfs
+										: item.set_id.slice(0, 8)} · {item.members} Btrfs · {item.snapshot_provider ===
+									'snapper'
+										? 'Snapper'
+										: 'Harbor'}
 								</option>
 							{/each}
 						</select>

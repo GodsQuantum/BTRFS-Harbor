@@ -405,6 +405,14 @@ match single-source checkpoint v2.
 A portable set catalog records each independently committed backup.
 Machine-wide Btrfs sets also archive separately mounted EFI and /boot files\nwhen present, verify their SHA-256 and stage them safely for recovery.\nThe command does NOT create a bootable ISO or automatically reconstruct GPT,\nbootloader, Secure Boot or encrypted block devices on a blank disk.
 --max-incremental-depth N (1..256, default 7) starts a fresh independent
+\fB\-\-snapshot\-provider\fR harbor|snapper (machine \fBset\-start\fR):
+harbor creates new readonly Btrfs source snapshots; snapper reuses the newest
+stable readonly snapshot from EACH mounted system Btrfs volume's own Snapper
+configuration. Snapper mode fails if any included volume lacks a qualified
+snapshot; it never silently creates a Harbor fallback snapshot. A retained
+Snapper source is pinned during checkpoint-v2 transmission and its original
+cleanup policy is restored on completion. Sources may represent differing
+times; the archival set is one backup operation, not a simultaneous capture.
 FULL Btrfs backup after N incremental parents in the previous chain.
 .PP
 .B btrfs-backup-ng raw checkpoint-v2 set-resume

@@ -505,7 +505,7 @@ def _new_manifest(
     identity: dict[str, str | int | None] = {
         "profile_id": args.profile_id,
         "archive_name": args.name,
-        "source_volume": getattr(args, "native_root", args.source),
+        "source_volume": getattr(args, "native_root", None) or args.source,
         "source_uuid": source.uuid,
         "source_path": source.path,
         "parent_uuid": source.parent_uuid,

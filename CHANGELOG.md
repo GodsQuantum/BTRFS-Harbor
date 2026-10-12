@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7-rc.4] — bounded destination progress
+
+- One target directory scan per sample instead of once per member; ignore symlinks and malformed checkpoint parts.
+- On stalled NFS metadata calls, final result no longer waits or accepts late progress events.
+- Added deterministic directory-count and delayed-readdir regression tests.
+- No invented ETA or byte percentage.
+
 ## [0.2.7-rc.3] — live measured machine-backup progress (supervised preview)
 
 - Stream measured in-progress destination bytes, throughput, elapsed time and current/completed Btrfs subvolumes to the native GUI via a Tauri IPC channel for both Start and Resume.

@@ -309,7 +309,9 @@ def test_machine_progress_uses_destination_file_sizes_without_fabricated_eta(tmp
 
     completed = tmp_path / "machine-000.btrfs.zst"
     completed.write_bytes(b"x" * 1024)
-    unfinished = tmp_path / "machine-001.btrfs.zst.id-uuid.part"
+    unfinished = (
+        tmp_path / "machine-001.btrfs.zst.12345678-1234-4234-8234-123456789abc.part"
+    )
     unfinished.write_bytes(b"y" * 4096)
     # An attacker-controlled symlink that looks like a checkpoint is never read.
     (tmp_path / "machine-001.btrfs.zst.malicious.part").symlink_to(completed)
@@ -373,7 +375,88 @@ def test_machine_progress_final_line_remains_machine_result(capsys, tmp_path):
     lines = capsys.readouterr().out.splitlines()
     parsed = [json.loads(line) for line in lines]
     assert parsed[0]["event"] == "machine_progress"
-    assert parsed[-2]["bytes_written"] == 22
+    assert parsed[-2]["bytes_written"] in (None, 0, 22)
     assert parsed[-2]["completed_members"] == 1
     assert parsed[-1]["status"] == "completed_btrfs_only"
     assert parsed[-1]["members"][0]["status"] == "completed"
+
+
+def test_machine_progress_single_scandir_and_ignores_noncanonical_part(
+    tmp_path, monkeypatch
+):
+    import os
+    from btrfs_backup_ng.cli.machine_set_v2 import _machine_progress_measure
+
+    data = {
+        "members": [
+            {
+                "archive": f"machine-{i:03d}",
+                "status": "sending",
+                "original_mount": f"/{i}",
+            }
+            for i in range(64)
+        ]
+    }
+    (tmp_path / "machine-001.btrfs.zst.bad.part").write_bytes(b"x" * 99)
+    (
+        tmp_path / "machine-002.btrfs.zst.12345678-1234-4234-8234-123456789abc.part"
+    ).write_bytes(b"y" * 17)
+    calls = 0
+    original_scandir = os.scandir
+
+    def count_scandir(path):
+        nonlocal calls
+        calls += 1
+        return original_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", count_scandir)
+    result = _machine_progress_measure(tmp_path, data)
+    assert calls == 1
+    assert result["bytes_written"] == 17
+    assert result["eta_seconds"] is None
+
+
+def test_machine_progress_final_does_not_stat_stalled_nfs(
+    tmp_path, monkeypatch, capsys
+):
+    import os
+    import threading
+    import time
+    from btrfs_backup_ng.cli.machine_set_v2 import _live_machine_progress, _result
+
+    entered = threading.Event()
+    release = threading.Event()
+    original_scandir = os.scandir
+
+    def stalled_scandir(path):
+        entered.set()
+        release.wait(3)
+        return original_scandir(path)
+
+    record = {
+        "set_id": SET_ID,
+        "status": "pending",
+        "coverage": "btrfs-only",
+        "members": [
+            {"archive": "machine-000", "original_mount": "/", "status": "pending"}
+        ],
+    }
+    monkeypatch.setattr(os, "scandir", stalled_scandir)
+    try:
+        started = time.monotonic()
+        with _live_machine_progress(tmp_path, record):
+            assert entered.wait(1)
+            record["members"][0]["status"] = "completed"
+            record["status"] = "completed_btrfs_only"
+        assert time.monotonic() - started < 0.65
+        assert _result(record) == 0
+        release.set()
+        time.sleep(0.05)
+        events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        assert events[-2]["event"] == "machine_progress"
+        assert events[-2]["bytes_written"] is None
+        assert events[-2]["completed_members"] == 1
+        assert events[-1]["status"] == "completed_btrfs_only"
+        assert sum(event.get("event") == "machine_progress" for event in events) == 1
+    finally:
+        release.set()

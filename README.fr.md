@@ -49,6 +49,10 @@ La branche de développement contient de nouvelles modifications **absentes des 
 - **Laboratoire de rétention transactionnelle** : [CI de crash sur runner jetable](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910), journal durable, quarantaine privée, refus des fichiers étrangers et reprise. **Suppression automatique désactivée** ; la CLI expérimentale permet une purge manuelle confirmée (plan/application/reprise) avec verrouillage global de la destination, jamais lors des sauvegardes planifiées. tant que l'exclusion des lectures/écritures concurrentes et la planification ne sont pas qualifiées.
 - **GUI non encore certifiée** : systray KDE Wayland/X11 en vraie session, progression, installation des paquets dans des VM jetables et autres chargeurs UEFI. Conserver une sauvegarde indépendante et vérifiée.
 
+## v0.2.7-rc.4 — suivi des sauvegardes fiabilisé (préversion).
+
+Un seul parcours de la destination par mesure, vérification des fichiers partiels et fin de transfert non bloquée par une lecture NFS lente. Aucune ETA chiffrée sans estimation fiable et validée.
+
 ## v0.2.7-rc.3 — progression réelle de la sauvegarde ordinateur (preview)
 
 Le bouton Sauvegarder maintenant (ou Reprendre) affiche en direct toutes les 2 secondes : volumes terminés/total, volume courant, octets réellement écrits sur la destination, débit mesuré et durée écoulée. La jauge avec numérateur représente le nombre de volumes terminés et non un faux pourcentage d'octets. Les snapshots Snapper/Harbor et leurs transferts sont inchangés.

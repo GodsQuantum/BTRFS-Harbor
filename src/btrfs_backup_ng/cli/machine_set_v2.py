@@ -250,43 +250,39 @@ def _archive_valid(root: Path, archive: str) -> bool:
 
 
 def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
-    """Report bytes actually on destination, NOT guessed source size or ETA.
+    """Sample destination archives with one directory read, never source I/O.
 
-    A checkpoint .part may be overwritten on resume; report only the current
-    archive plus completed members, and let the UI reset its throughput window
-    if the measured size drops. Never follow symlinks.
+    Only a final stream or a canonical transfer-UUID .part is counted.
+    Readdir and stat failures are not replaced with fabricated measurements.
     """
     members = data["members"]
     total = len(members)
     completed = sum(m.get("status") == "completed" for m in members)
     current = next((m for m in members if m.get("status") != "completed"), None)
-    written = 0
-    for member in members:
-        archive = member["archive"]
-        final_name = f"{archive}.btrfs.zst"
-        try:
-            with os.scandir(root) as directory:
-                for entry in directory:
-                    if entry.name != final_name and not (
-                        entry.name.startswith(f"{final_name}.")
-                        and entry.name.endswith(".part")
-                    ):
+    archives = {member["archive"] for member in members}
+    written: int | None = 0
+    try:
+        with os.scandir(root) as directory:
+            for entry in directory:
+                archive, separator, suffix = entry.name.partition(".btrfs.zst")
+                if not separator or archive not in archives:
+                    continue
+                if suffix:
+                    if not (suffix.startswith(".") and suffix.endswith(".part")):
                         continue
-                    if entry.is_file(follow_symlinks=False):
-                        written += entry.stat(follow_symlinks=False).st_size
-        except (FileNotFoundError, PermissionError, OSError):
-            # A detached destination is an error for the transfer guard. The
-            # telemetry channel never bypasses that error or invents bytes.
-            return {
-                "event": "machine_progress",
-                "completed_members": completed,
-                "total_members": total,
-                "current_mount": current["original_mount"] if current else None,
-                "bytes_written": None,
-                "bytes_per_second": None,
-                "eta_seconds": None,
-                "percent": None,
-            }
+                    transfer_id = suffix[1:-5]
+                    try:
+                        if str(uuid.UUID(transfer_id)) != transfer_id:
+                            continue
+                    except (ValueError, AttributeError):
+                        continue
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISREG(info.st_mode):
+                    written = (written or 0) + info.st_size
+    except OSError:
+        # The mount guard, not the telemetry sampler, handles a lost export.
+        written = None
+
     return {
         "event": "machine_progress",
         "completed_members": completed,
@@ -301,23 +297,23 @@ def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
 
 @contextmanager
 def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
-    """Emit inexpensive read-only progress from the existing privileged job.
+    """Sample asynchronously; completion must never wait on stalled NFS stat.
 
-    No new privilege request, disk traversal of source, or writes to the
-    backup target. Worker stops before the main command reports its result.
+    A blocking NFS syscall cannot be interrupted by joining its thread.
+    The final update uses the most recent real sample, if any, and the latest
+    in-memory member statuses, without performing another destination I/O.
     """
     stop = threading.Event()
+    emit_lock = threading.Lock()
     started = time.monotonic()
+    latest: dict[str, object] | None = None
 
     def monitor() -> None:
+        nonlocal latest
         last_time: float | None = None
         last_bytes: int | None = None
         while not stop.is_set():
             payload = _machine_progress_measure(root, data)
-            # A stale NFS stat may return after the main operation finished.
-            # Such a delayed event must NEVER follow the final result JSON.
-            if stop.is_set():
-                break
             now = time.monotonic()
             current = payload["bytes_written"]
             if (
@@ -331,10 +327,13 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
                     (current - last_bytes) / (now - last_time)
                 )
             payload["elapsed_seconds"] = round(now - started)
-            # Btrfs send size is unknown until the producer finishes. ETA and
-            # bytes-complete percentage cannot be inferred from source disk
-            # usage, checkpoints, or arbitrary per-volume weights.
-            print(json.dumps(payload, sort_keys=True), flush=True)
+            # Serialize stop-check and print so a stalled stat cannot emit
+            # after the final record. No locks held during filesystem I/O.
+            with emit_lock:
+                if stop.is_set():
+                    break
+                print(json.dumps(payload, sort_keys=True), flush=True)
+                latest = payload
             last_bytes = current if isinstance(current, int) else None
             last_time = now
             if stop.wait(2):
@@ -348,18 +347,26 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
         yield
     finally:
         stop.set()
-        worker.join(timeout=1)
-        print(
-            json.dumps(
-                {
-                    **_machine_progress_measure(root, data),
-                    "elapsed_seconds": round(time.monotonic() - started),
-                    "bytes_per_second": None,
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
+        # If NFS is stalled, the daemon sampler exits when its I/O returns;
+        # it must not hold completion or block the final machine-set result.
+        worker.join(timeout=0.1)
+        with emit_lock:
+            members = data["members"]
+            current = next((m for m in members if m.get("status") != "completed"), None)
+            payload = {
+                "event": "machine_progress",
+                "completed_members": sum(
+                    m.get("status") == "completed" for m in members
+                ),
+                "total_members": len(members),
+                "current_mount": current["original_mount"] if current else None,
+                "bytes_written": latest["bytes_written"] if latest else None,
+                "bytes_per_second": None,
+                "elapsed_seconds": round(time.monotonic() - started),
+                "eta_seconds": None,
+                "percent": None,
+            }
+            print(json.dumps(payload, sort_keys=True), flush=True)
 
 
 def _drive(root: Path, data: dict, *, allow_local: bool, state_dir: str | None) -> dict:

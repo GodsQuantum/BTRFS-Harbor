@@ -49,6 +49,10 @@ This source branch contains newer work **not included in the published rc.11 pac
 - **Retention transaction laboratory**: [disposable GC crash CI](https://github.com/GodsQuantum/BTRFS-Harbor/actions/runs/38089399910) exercises a private quarantine/journal, foreign-file refusal and crash recovery. **Automatic deletion remains disabled**; the experimental CLI now provides manually confirmed plan/apply/resume transactions with the destination-wide lease, never as an automatic scheduled action. because application-level concurrent reader/writer coordination and safe scheduling are not yet qualified.
 - **Desktop qualification still required**: native KDE Wayland/X11 systray close/reopen, real UI progression, package installation in disposable distro VMs, and several bootloaders. Do not replace your independent verified backups with this experimental preview.
 
+## v0.2.7-rc.4 — safer one-click backup telemetry (preview).
+
+Destination read once per sample; bounded completion on stalled network filesystem. ETA remains unavailable without validated prediction.
+
 ## v0.2.7-rc.3 — measured whole-computer backup progress (preview)
 
 Back up now and Resume stream live progress every two seconds: completed/total Btrfs volumes, current volume, real bytes written to the destination, measured rate and elapsed time. The stepped bar tracks volumes **not** byte-level completion. Source selection, verified transfer and checkpoint recovery remain unchanged.

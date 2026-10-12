@@ -730,8 +730,8 @@
 						</p>
 						<p class="machine-detail">
 							ETA : {locale === 'fr'
-								? 'non calculable pour ce premier flux : taille finale Btrfs inconnue. La barre représente les volumes terminés, pas les octets.'
-								: 'unknown until Btrfs reports the final stream size. This bar tracks completed volumes, not bytes.'}
+								? 'indisponible : taille finale du flux Btrfs inconnue avant la fin du transfert. La barre représente les volumes terminés, pas les octets.'
+								: 'unavailable: final Btrfs send stream size cannot be known reliably in advance. This bar tracks completed volumes, not bytes.'}
 						</p>
 					</div>
 				{:else}

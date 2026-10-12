@@ -314,6 +314,10 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
         last_bytes: int | None = None
         while not stop.is_set():
             payload = _machine_progress_measure(root, data)
+            # A stale NFS stat may return after the main operation finished.
+            # Such a delayed event must NEVER follow the final result JSON.
+            if stop.is_set():
+                break
             now = time.monotonic()
             current = payload["bytes_written"]
             if (

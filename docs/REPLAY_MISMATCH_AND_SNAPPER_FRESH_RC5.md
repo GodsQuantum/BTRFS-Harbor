@@ -9,7 +9,7 @@ ReplaySourceMismatch signals a typed source mismatch; resume_worker persists fai
 An application crash after the old journal enters failed_unrecoverable and before the machine-set catalog is updated is recoverable by Resume, which sees the durable terminal state. When all replacements complete, release the old Snapper pins; any cleanup failures are warned. Neither SHA checks nor destination mount identity guards are bypassed.
 
 ## Snapper
-The default whole-machine Back up now requests a NEW Snapper readonly snapshot for each configured Btrfs source; unmanaged Btrfs data subvolumes get a Harbor-native capture. A separate mode exports the latest existing Snapper snapshots. A failed Snapper snapshot creation is fatal rather than silently falling back to a stale snapshot. New snapshots have Snapper number-retention policy, while the checkpoint pin protects snapshots being transferred. Snapshot creation occurs before catalog persistence, so a crash in that short window can leave a Snapper-owned unreferenced snapshot requiring review.
+The desktop default whole-machine Back up now requests a NEW Snapper readonly snapshot for each configured Btrfs source; unmanaged Btrfs data subvolumes get a Harbor-native capture. A separate mode exports the latest existing Snapper snapshots. A failed Snapper snapshot creation is fatal rather than silently falling back to a stale snapshot. New snapshots have Snapper number-retention policy, while the checkpoint pin protects snapshots being transferred. Snapshot creation occurs before catalog persistence, so a crash in that short window can leave a Snapper-owned unreferenced snapshot requiring review.
 
 ## Limits
 No byte-perfect mid-stream resume is claimed if a new Btrfs send differs; only the failing member is transferred from zero. Previous partials remain as audit evidence until explicit user discard. Global byte percentage and ETA remain unavailable because the final incremental/compressed stream size cannot be known reliably in advance. Bootable universal cross-hardware restore and LUKS/UKI/Wayland scenarios are not certified. Existing mount, NFS, ACL, swap and real backup data were not modified in development.
@@ -19,3 +19,4 @@ No byte-perfect mid-stream resume is claimed if a new Btrfs send differs; only t
 - https://btrfs.readthedocs.io/en/latest/dev/dev-send-stream.html
 - https://man.archlinux.org/man/extra/snapper/snapper.8.en
 - https://manpages.opensuse.org/Tumbleweed/snapper-backup/snbk.8.en.html
+\nThe direct CLI set-start command without --snapshot-provider retains its historical harbor default, including explicit --source calls; the desktop explicitly passes snapper-fresh, preventing a surprising API/CI behavior change.\n

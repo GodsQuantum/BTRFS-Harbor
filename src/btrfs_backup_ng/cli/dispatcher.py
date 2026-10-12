@@ -548,7 +548,7 @@ def create_subcommand_parser() -> argparse.ArgumentParser:
             set_parser.add_argument(
                 "--snapshot-provider",
                 choices=("harbor", "snapper", "snapper-fresh"),
-                default="snapper-fresh",
+                default="harbor",
                 help="Snapper-fresh: create readonly Snapper snapshots now; "
                 "Snapper: reuse latest existing; Harbor: create native captures. "
                 "Unmanaged Btrfs volumes use Harbor for both Snapper modes.",

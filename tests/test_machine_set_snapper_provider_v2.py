@@ -622,3 +622,27 @@ def test_snapper_fresh_does_not_hide_snapshot_creation_failures(monkeypatch, tmp
     )
     with pytest.raises(RuntimeError, match="Snapper snapshot creation failed"):
         m._snapper_fresh_for_machine_sources([str(root)])
+
+
+def test_cli_explicit_source_keeps_legacy_native_provider_by_default():
+    from btrfs_backup_ng.cli.dispatcher import create_subcommand_parser
+
+    base = [
+        "raw",
+        "checkpoint-v2",
+        "set-start",
+        "--target",
+        "/tmp/harbor-unit-target",
+        "--source",
+        "/tmp/harbor-unit-source",
+        "--profile-id",
+        PROFILE,
+    ]
+    parser = create_subcommand_parser()
+    assert parser.parse_args(base).snapshot_provider == "harbor"
+    assert (
+        parser.parse_args(
+            base + ["--snapshot-provider", "snapper-fresh"]
+        ).snapshot_provider
+        == "snapper-fresh"
+    )

@@ -2,6 +2,8 @@
   <img src="branding/logo.svg" alt="Btrfs Harbor" width="560">
 </p>
 
+## v0.2.7-rc.5
+
 **v0.2.7-rc.5 预览版：**立即备份优先创建 Snapper 只读快照，未由 Snapper 管理的 Btrfs 子卷使用 Harbor。原有 Snapper 快照可直接发送。恢复传输发生 SHA-256 不一致时，保留原始部分数据及日志，仅重新发送出错子卷，已验证的卷不受影响，最多自动重试一次。跨硬件可启动恢复尚未获得全面认证。
 
 

@@ -360,6 +360,9 @@ def _machine_progress_measure(
         "eta_min_seconds": None,
         "eta_max_seconds": None,
         "eta_stalled": False,
+        "eta_if_resumed_seconds": None,
+        "eta_if_resumed_min_seconds": None,
+        "eta_if_resumed_max_seconds": None,
     }
 
 
@@ -406,6 +409,7 @@ def _live_machine_progress(
         last_time: float | None = None
         last_bytes: int | None = None
         smoothed_bps: float | None = None
+        last_good_bps: float | None = None
         last_growth: float | None = None
         while not stop.is_set():
             payload = _machine_progress_measure(
@@ -432,6 +436,7 @@ def _live_machine_progress(
                         else 0.65 * smoothed_bps + 0.35 * instant
                     )
                     last_growth = now
+                    last_good_bps = smoothed_bps
                 if last_growth is not None and now - last_growth > 25:
                     # A 0 B/s stall is not a promise of progress.
                     smoothed_bps = None
@@ -455,6 +460,27 @@ def _live_machine_progress(
                             )
                 elif smoothed_bps is None:
                     payload["eta_seconds"] = None
+                # A stopped write cannot have a real ETA. Retain a clearly
+                # CONDITIONAL scenario: if the last measured rate returns.
+                if (
+                    payload.get("eta_stalled")
+                    and isinstance(current, int)
+                    and last_good_bps
+                ):
+                    total = payload.get("estimated_total_bytes")
+                    lower = payload.get("estimated_min_bytes")
+                    upper = payload.get("estimated_max_bytes")
+                    if isinstance(total, int):
+                        payload["eta_if_resumed_seconds"] = round(
+                            max(0, total - current) / last_good_bps
+                        )
+                    if isinstance(lower, int) and isinstance(upper, int):
+                        payload["eta_if_resumed_min_seconds"] = round(
+                            max(0, lower - current) / last_good_bps
+                        )
+                        payload["eta_if_resumed_max_seconds"] = round(
+                            max(0, upper - current) / last_good_bps
+                        )
             payload["elapsed_seconds"] = round(now - started)
             # Serialize stop-check and print so a stalled stat cannot emit
             # after the final record. No locks held during filesystem I/O.
@@ -507,6 +533,9 @@ def _live_machine_progress(
                 "eta_min_seconds": 0 if current is None else None,
                 "eta_max_seconds": 0 if current is None else None,
                 "eta_stalled": False,
+                "eta_if_resumed_seconds": None,
+                "eta_if_resumed_min_seconds": None,
+                "eta_if_resumed_max_seconds": None,
                 "percent": None,
                 "estimated_total_bytes": (
                     latest.get("estimated_total_bytes") if latest else None

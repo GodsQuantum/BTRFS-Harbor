@@ -798,9 +798,22 @@
 								{#if machineProgress.eta_stalled}
 									<p class="source-warning">
 										{locale === 'fr'
-											? 'Transfert sans progrès mesuré depuis plus de 25 s : ETA suspendue.'
-											: 'No measured progress for over 25 s: ETA paused.'}
+											? 'Transfert sans progrès mesuré depuis plus de 25 s : ETA réelle suspendue.'
+											: 'No measured progress for over 25 s: live ETA paused.'}
 									</p>
+									{#if machineProgress.eta_if_resumed_seconds != null}
+										<p>
+											{locale === 'fr'
+												? 'Si le précédent débit revient : environ '
+												: 'If previous throughput resumes: approximately '}
+											{formatDuration(machineProgress.eta_if_resumed_seconds)}
+											{#if machineProgress.eta_if_resumed_min_seconds != null && machineProgress.eta_if_resumed_max_seconds != null}
+												({formatDuration(machineProgress.eta_if_resumed_min_seconds)} – {formatDuration(
+													machineProgress.eta_if_resumed_max_seconds
+												)})
+											{/if}
+										</p>
+									{/if}
 								{/if}
 								<p>
 									{locale === 'fr'

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace permanently unavailable machine-backup ETA with an explicitly approximate compressed final size, broad min/max byte range, estimated byte percentage and ETA with an uncertainty interval.
 - Use time-bounded, read-only Btrfs FIEMAP extents (4s), falling back to already-enabled qgroup accounting (2s); no quota enable/rescan and no blocking the send on source probe.
 - Sample sources asynchronously while the existing destination archive/part byte sampler runs at low overhead. Recalibrate compression ratio from finished members, never predict fewer bytes than actually written.
-- Smooth real throughput (EWMA), suspend ETA after 25s without growth, and never present an approximate byte percentage in the existing exact-percent field.
+- Smooth real throughput (EWMA), suspend ETA after 25s without growth, and never present an approximate byte percentage in the existing exact-percent field. During a stall, show only a clearly conditional estimate for if the previous measured throughput resumes.
 - Source/target, journal, mount safeguards, partial recovery and restore behavior unchanged. No hot-upgrade of active backups.
 
 ## [0.2.7-rc.5] — Snapper-now & safe raw replay restart (preview)

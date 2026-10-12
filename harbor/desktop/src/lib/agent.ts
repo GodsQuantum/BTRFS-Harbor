@@ -126,6 +126,9 @@ export interface MachineProgressEvent {
 	eta_min_seconds?: number | null;
 	eta_max_seconds?: number | null;
 	eta_stalled?: boolean;
+	eta_if_resumed_seconds?: number | null;
+	eta_if_resumed_min_seconds?: number | null;
+	eta_if_resumed_max_seconds?: number | null;
 	estimated_total_bytes?: number | null;
 	estimated_min_bytes?: number | null;
 	estimated_max_bytes?: number | null;

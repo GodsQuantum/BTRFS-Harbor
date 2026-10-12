@@ -322,16 +322,16 @@ def test_machine_progress_uses_destination_file_sizes_without_fabricated_eta(tmp
         ]
     }
     output = _machine_progress_measure(tmp_path, data)
-    assert output == {
-        "event": "machine_progress",
-        "completed_members": 1,
-        "total_members": 2,
-        "current_mount": "/home",
-        "bytes_written": 5120,
-        "bytes_per_second": None,
-        "eta_seconds": None,
-        "percent": None,
-    }
+    assert output["event"] == "machine_progress"
+    assert output["completed_members"] == 1
+    assert output["total_members"] == 2
+    assert output["current_mount"] == "/home"
+    assert output["bytes_written"] == 5120
+    assert output["bytes_per_second"] is None
+    assert output["eta_seconds"] is None
+    assert output["percent"] is None  # Not an exact percentage of the send.
+    assert output["estimate_quality"] == "low"
+    assert output["estimated_total_bytes"] >= 5120
 
 
 def test_machine_progress_handles_missing_destination_without_invented_bytes(tmp_path):

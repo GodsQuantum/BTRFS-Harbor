@@ -743,11 +743,83 @@
 							· {formatDuration(machineProgress.elapsed_seconds)}
 							{locale === 'fr' ? 'écoulé' : 'elapsed'}
 						</p>
-						<p class="machine-detail">
-							ETA : {locale === 'fr'
-								? 'indisponible : taille finale du flux Btrfs inconnue avant la fin du transfert. La barre représente les volumes terminés, pas les octets.'
-								: 'unavailable: final Btrfs send stream size cannot be known reliably in advance. This bar tracks completed volumes, not bytes.'}
-						</p>
+						{#if machineProgress.estimated_total_bytes !== null && machineProgress.estimated_total_bytes !== undefined}
+							<div class="machine-detail" data-testid="machine-forecast">
+								<strong>
+									{locale === 'fr'
+										? 'Taille finale estimée ≈ '
+										: locale === 'zh-CN'
+											? '预估最终大小 ≈ '
+											: 'Estimated final size ≈ '}
+									{formatBytesBinary(machineProgress.estimated_total_bytes)}
+								</strong>
+								{#if machineProgress.estimated_min_bytes != null && machineProgress.estimated_max_bytes != null}
+									<p>
+										{locale === 'fr'
+											? 'Fourchette indicative : '
+											: locale === 'zh-CN'
+												? '粗略范围：'
+												: 'Approximate range: '}
+										{formatBytesBinary(machineProgress.estimated_min_bytes)} – {formatBytesBinary(
+											machineProgress.estimated_max_bytes
+										)}
+									</p>
+								{/if}
+								{#if machineProgress.estimated_percent != null}
+									<progress
+										value={machineProgress.estimated_percent}
+										max={100}
+										aria-label={locale === 'fr'
+											? 'Avancement estimé des octets, non garanti'
+											: 'Estimated byte completion, not guaranteed'}
+									></progress>
+									<p>
+										≈ {machineProgress.estimated_percent.toFixed(1)} %
+										{locale === 'fr' ? 'des octets (estimation)' : 'of bytes (estimate)'}
+									</p>
+								{/if}
+								<p>
+									{locale === 'fr'
+										? 'ETA indicative : '
+										: locale === 'zh-CN'
+											? '粗略剩余时间：'
+											: 'Estimated time remaining: '}
+									{machineProgress.eta_seconds === null
+										? locale === 'fr'
+											? 'en attente de débit réel'
+											: 'waiting for measured throughput'
+										: '≈ ' + formatDuration(machineProgress.eta_seconds)}
+									{#if machineProgress.eta_min_seconds != null && machineProgress.eta_max_seconds != null}
+										({formatDuration(machineProgress.eta_min_seconds)} – {formatDuration(
+											machineProgress.eta_max_seconds
+										)})
+									{/if}
+								</p>
+								{#if machineProgress.eta_stalled}
+									<p class="source-warning">
+										{locale === 'fr'
+											? 'Transfert sans progrès mesuré depuis plus de 25 s : ETA suspendue.'
+											: 'No measured progress for over 25 s: ETA paused.'}
+									</p>
+								{/if}
+								<p>
+									{locale === 'fr'
+										? 'Prévision grossière basée sur les extents Btrfs et le taux de compression mesuré, non garantie.'
+										: 'Rough forecast from Btrfs extents and observed compression; not guaranteed.'}
+									{machineProgress.estimate_quality === 'low'
+										? locale === 'fr'
+											? ' Confiance faible.'
+											: ' Low confidence.'
+										: ''}
+								</p>
+							</div>
+						{:else}
+							<p class="machine-detail" data-testid="machine-forecast-pending">
+								{locale === 'fr'
+									? 'Estimation de taille/ETA en préparation : mesure Btrfs limitée en temps ; le transfert se poursuit normalement.'
+									: 'Preparing estimated size/ETA: time-limited Btrfs sample; backup continues normally.'}
+							</p>
+						{/if}
 					</div>
 				{:else}
 					<progress

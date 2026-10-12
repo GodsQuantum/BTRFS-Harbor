@@ -2,7 +2,9 @@
   <img src="branding/logo.svg" alt="Btrfs Harbor" width="560">
 </p>
 
-## v0.2.7-rc.5
+## v0.2.7-rc.6
+
+**Préversion v0.2.7-rc.6 :** Harbor indique une taille compressée prévisionnelle, une fourchette, un avancement estimé des octets et un ETA indicatif. Le calcul utilise une mesure Btrfs en lecture seule, limitée en durée, puis le taux de compression réellement observé. L'incertitude est importante pour les extents partagés et les envois incrémentaux ; l'ETA est suspendu lorsque le transfert ne progresse plus. Ne pas remplacer une version pendant une sauvegarde active : utiliser la rc.6 après la fin du transfert.
 
 **Préversion v0.2.7-rc.5 :** le bouton « Sauvegarder maintenant » crée en priorité des snapshots Snapper en lecture seule, avec repli Harbor pour les volumes Btrfs non gérés. Le mode « derniers snapshots Snapper existants » reste disponible. Si une reprise du flux Btrfs diverge au contrôle SHA-256, Harbor préserve l'ancien partiel et reprend le seul volume depuis zéro, sans effacer ceux déjà validés. Une seule relance automatique est autorisée ; le redémarrage sur matériel différent n'est pas universellement certifié.
 

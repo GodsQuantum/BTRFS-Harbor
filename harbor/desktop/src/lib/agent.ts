@@ -122,7 +122,17 @@ export interface MachineProgressEvent {
 	bytes_per_second: number | null;
 	elapsed_seconds: number;
 	percent: null;
-	eta_seconds: null;
+	eta_seconds: number | null;
+	eta_min_seconds?: number | null;
+	eta_max_seconds?: number | null;
+	eta_stalled?: boolean;
+	estimated_total_bytes?: number | null;
+	estimated_min_bytes?: number | null;
+	estimated_max_bytes?: number | null;
+	estimated_percent?: number | null;
+	estimate_quality?: 'calibrated' | 'low' | 'measured' | 'unavailable';
+	estimate_method?: string | null;
+	estimate_covered_members?: number;
 }
 
 export async function runCheckpointAction(

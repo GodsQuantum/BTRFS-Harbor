@@ -419,3 +419,24 @@ def test_machine_set_recovery_after_snapshot_creation_crash(
         file.read_text() == "durable data before crash\n"
         for file in recovery.rglob("before-crash.txt")
     )
+
+
+def test_real_btrfs_fiemap_eta_size_sample_is_readonly_and_bounded(btrfs_volume: Path):
+    """Measure a real readonly Btrfs snapshot without running another send."""
+    from btrfs_backup_ng.core.machine_eta_v2 import estimate_source_bytes
+
+    source = btrfs_volume / "eta-source"
+    frozen = btrfs_volume / "eta-readonly"
+    subprocess.run(["btrfs", "subvolume", "create", str(source)], check=True)
+    payload = source / "data.bin"
+    with payload.open("wb") as writer:
+        writer.write(os.urandom(1024 * 1024))
+        writer.flush()
+        os.fsync(writer.fileno())
+    subprocess.run(
+        ["btrfs", "subvolume", "snapshot", "-r", str(source), str(frozen)],
+        check=True,
+    )
+    estimate = estimate_source_bytes(frozen)
+    assert estimate is not None and 500000 <= estimate <= 8 * 1024**2
+    assert payload.stat().st_size == 1024 * 1024

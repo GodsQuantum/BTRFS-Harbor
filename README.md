@@ -2,7 +2,9 @@
   <img src="branding/logo.svg" alt="Btrfs Harbor" width="560">
 </p>
 
-## v0.2.7-rc.5
+## v0.2.7-rc.6
+
+**Preview v0.2.7-rc.6:** Whole-computer backups now show rough estimated compressed size, an uncertainty range, estimated byte progress and an approximate ETA. A bounded read-only Btrfs extent measurement is recalibrated with the observed compression of completed volumes. Results may vary considerably for reflinks and incremental sends; an ETA is suspended if throughput stops. Do not update a running backup: let it finish and use rc.6 for a subsequent backup.
 
 **Preview v0.2.7-rc.5:** Back up now asks Snapper for fresh readonly snapshots on configured subvolumes, using Harbor captures for unmanaged Btrfs volumes. Existing Snapper snapshots remain selectable. When regenerated Btrfs send bytes mismatch a durable checkpoint, Harbor preserves the original partial and retries only that member from byte zero, without weakening SHA verification or invalidating completed members. At most one automatic retry per member; universal bare-metal recovery is not certified.
 

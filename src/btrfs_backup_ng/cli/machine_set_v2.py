@@ -26,6 +26,7 @@ from typing import Iterator
 from .. import __util__
 from ..config import RetentionConfig
 from ..core.machine_retention_v2 import SetPoint, calculate_set_retention
+from ..core.machine_eta_v2 import estimate_source_bytes, forecast_machine
 from ..core.machine_retention_gc_v2 import destination_gc_lock
 from ..endpoint.mount_guard_v2 import capture_mount_identity
 from ..core.boot_files_v2 import (
@@ -144,6 +145,13 @@ def _read(root: Path, set_id: str) -> dict:
                 raise ValueError("Snapper machine-set requires immutable source UUID")
         if member.get("status") not in ("pending", "sending", "completed"):
             raise ValueError("invalid machine-set member state")
+        # Advisory source measures may be persisted alongside ordinary
+        # catalog writes; never trust unbounded or fractional values.
+        reference = member.get("source_reference_bytes")
+        if reference is not None and (
+            type(reference) is not int or not 0 < reference < (1 << 62)
+        ):
+            raise ValueError("invalid advisory source reference size")
         retired = member.get("replay_retired", [])
         restarts = member.get("replay_restarts", 0)
         if (
@@ -272,11 +280,17 @@ def _archive_valid(root: Path, archive: str) -> bool:
     return verify_checkpoint_index(meta, stream, full=True).status == "ok"
 
 
-def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
-    """Sample destination archives with one directory read, never source I/O.
+def _machine_progress_measure(
+    root: Path,
+    data: dict,
+    *,
+    forecast_rate: float | None = None,
+    source_references: dict[str, int] | None = None,
+) -> dict[str, object]:
+    """One destination readdir per sample + optional rough source-size model.
 
-    Only a final stream or a canonical transfer-UUID .part is counted.
-    Readdir and stat failures are not replaced with fabricated measurements.
+    Only final archives and strict UUID .part files are counted. Existing
+    telemetry never walks source trees or blocks to gather an estimate.
     """
     members = data["members"]
     total = len(members)
@@ -284,6 +298,9 @@ def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
     current = next((m for m in members if m.get("status") != "completed"), None)
     archives = {member["archive"] for member in members}
     written: int | None = 0
+    observed: dict[str, int] = {}
+    parts: dict[str, int] = {}
+    finals: dict[str, int] = {}
     try:
         with os.scandir(root) as directory:
             for entry in directory:
@@ -300,12 +317,35 @@ def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
                     except (ValueError, AttributeError):
                         continue
                 info = entry.stat(follow_symlinks=False)
-                if stat.S_ISREG(info.st_mode):
-                    written = (written or 0) + info.st_size
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                if suffix:
+                    parts[archive] = max(parts.get(archive, 0), info.st_size)
+                else:
+                    finals[archive] = info.st_size
+        # A completed stream may briefly coexist with a checkpoint part:
+        # never double-count it or multiple retired transfers.
+        observed = dict(parts)
+        observed.update(finals)
+        written = sum(observed.values())
     except OSError:
         # The mount guard, not the telemetry sampler, handles a lost export.
         written = None
+        observed = {}
 
+    # Advisory samples are kept outside the durable set catalog. The source
+    # meter must never mutate shared data while _write serializes its journal.
+    model_members = [
+        {**member, "source_reference_bytes": source_references[member["archive"]]}
+        if source_references is not None and member["archive"] in source_references
+        else member
+        for member in members
+    ]
+    forecast = (
+        forecast_machine(model_members, observed, rate_bps=forecast_rate)
+        if written is not None
+        else forecast_machine([], {}, rate_bps=None)
+    )
     return {
         "event": "machine_progress",
         "completed_members": completed,
@@ -313,13 +353,20 @@ def _machine_progress_measure(root: Path, data: dict) -> dict[str, object]:
         "current_mount": current["original_mount"] if current else None,
         "bytes_written": written,
         "bytes_per_second": None,
-        "eta_seconds": None,
+        **forecast,
+        # Legacy field remains null: the estimated % is a distinct and
+        # explicitly approximate statistic.
         "percent": None,
+        "eta_min_seconds": None,
+        "eta_max_seconds": None,
+        "eta_stalled": False,
     }
 
 
 @contextmanager
-def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
+def _live_machine_progress(
+    root: Path, data: dict, *, estimate_sources: bool = False
+) -> Iterator[None]:
     """Sample asynchronously; completion must never wait on stalled NFS stat.
 
     A blocking NFS syscall cannot be interrupted by joining its thread.
@@ -330,13 +377,43 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
     emit_lock = threading.Lock()
     started = time.monotonic()
     latest: dict[str, object] | None = None
+    reference_samples: dict[str, int] = {}
+
+    def source_meter() -> None:
+        """Best-effort bounded FIEMAP samples while normal sending continues.
+
+        No snapshot creation, quota changes, mount operations or destination
+        metadata writes. A slow FIEMAP never holds the final JSON.
+        """
+        for member in data["members"]:
+            if stop.is_set():
+                break
+            name = member["archive"]
+            if (
+                name in reference_samples
+                or member.get("source_reference_bytes") is not None
+            ):
+                continue
+            snap = Path(member.get("snapshot_path", "/path/not-created"))
+            original = Path(member["original_mount"])
+            path = snap if snap.is_dir() and not snap.is_symlink() else original
+            estimated = estimate_source_bytes(path)
+            if estimated is not None and not stop.is_set():
+                reference_samples[name] = estimated
 
     def monitor() -> None:
         nonlocal latest
         last_time: float | None = None
         last_bytes: int | None = None
+        smoothed_bps: float | None = None
+        last_growth: float | None = None
         while not stop.is_set():
-            payload = _machine_progress_measure(root, data)
+            payload = _machine_progress_measure(
+                root,
+                data,
+                forecast_rate=smoothed_bps,
+                source_references=reference_samples,
+            )
             now = time.monotonic()
             current = payload["bytes_written"]
             if (
@@ -346,9 +423,38 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
                 and now > last_time
                 and current >= last_bytes
             ):
-                payload["bytes_per_second"] = round(
-                    (current - last_bytes) / (now - last_time)
-                )
+                instant = (current - last_bytes) / (now - last_time)
+                payload["bytes_per_second"] = round(instant)
+                if instant > 0:
+                    smoothed_bps = (
+                        instant
+                        if smoothed_bps is None
+                        else 0.65 * smoothed_bps + 0.35 * instant
+                    )
+                    last_growth = now
+                if last_growth is not None and now - last_growth > 25:
+                    # A 0 B/s stall is not a promise of progress.
+                    smoothed_bps = None
+                    payload["eta_stalled"] = True
+                # The sample's observed file sizes are already known in the
+                # model; recompute with current smoothed rate in the next
+                # event instead of a second destination scan.
+                if smoothed_bps and isinstance(current, int):
+                    total_estimate = payload["estimated_total_bytes"]
+                    minimum = payload["estimated_min_bytes"]
+                    maximum = payload["estimated_max_bytes"]
+                    if isinstance(total_estimate, int):
+                        remaining = max(0, total_estimate - current)
+                        payload["eta_seconds"] = round(remaining / smoothed_bps)
+                        if isinstance(minimum, int) and isinstance(maximum, int):
+                            payload["eta_min_seconds"] = round(
+                                max(0, minimum - current) / smoothed_bps
+                            )
+                            payload["eta_max_seconds"] = round(
+                                max(0, maximum - current) / smoothed_bps
+                            )
+                elif smoothed_bps is None:
+                    payload["eta_seconds"] = None
             payload["elapsed_seconds"] = round(now - started)
             # Serialize stop-check and print so a stalled stat cannot emit
             # after the final record. No locks held during filesystem I/O.
@@ -365,7 +471,16 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
     worker = threading.Thread(
         target=monitor, name="harbor-machine-progress", daemon=True
     )
+    meter = (
+        threading.Thread(
+            target=source_meter, name="harbor-machine-source-meter", daemon=True
+        )
+        if estimate_sources
+        else None
+    )
     worker.start()
+    if meter is not None:
+        meter.start()
     try:
         yield
     finally:
@@ -373,6 +488,8 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
         # If NFS is stalled, the daemon sampler exits when its I/O returns;
         # it must not hold completion or block the final machine-set result.
         worker.join(timeout=0.1)
+        if meter is not None:
+            meter.join(timeout=0.1)
         with emit_lock:
             members = data["members"]
             current = next((m for m in members if m.get("status") != "completed"), None)
@@ -386,8 +503,34 @@ def _live_machine_progress(root: Path, data: dict) -> Iterator[None]:
                 "bytes_written": latest["bytes_written"] if latest else None,
                 "bytes_per_second": None,
                 "elapsed_seconds": round(time.monotonic() - started),
-                "eta_seconds": None,
+                "eta_seconds": 0 if current is None else None,
+                "eta_min_seconds": 0 if current is None else None,
+                "eta_max_seconds": 0 if current is None else None,
+                "eta_stalled": False,
                 "percent": None,
+                "estimated_total_bytes": (
+                    latest.get("estimated_total_bytes") if latest else None
+                ),
+                "estimated_min_bytes": (
+                    latest.get("estimated_min_bytes") if latest else None
+                ),
+                "estimated_max_bytes": (
+                    latest.get("estimated_max_bytes") if latest else None
+                ),
+                "estimated_percent": (
+                    100
+                    if current is None
+                    else latest.get("estimated_percent")
+                    if latest
+                    else None
+                ),
+                "estimate_quality": (
+                    latest.get("estimate_quality") if latest else "unavailable"
+                ),
+                "estimate_method": (latest.get("estimate_method") if latest else None),
+                "estimate_covered_members": (
+                    latest.get("estimate_covered_members") if latest else 0
+                ),
             }
             print(json.dumps(payload, sort_keys=True), flush=True)
 
@@ -1343,7 +1486,7 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
         }
         with guard, _exclusive_set_lock(guard, set_id):
             _write(root, data, allow_local=args.allow_local)
-            with _live_machine_progress(root, data):
+            with _live_machine_progress(root, data, estimate_sources=True):
                 result = _drive(
                     root,
                     data,
@@ -1374,7 +1517,7 @@ def _execute_machine_set_unlocked(args: argparse.Namespace) -> int:
             raise ValueError("machine-set destination fingerprint changed")
         with _exclusive_set_lock(guard, set_id):
             if action == "set-resume":
-                with _live_machine_progress(root, data):
+                with _live_machine_progress(root, data, estimate_sources=True):
                     result = _drive(
                         root,
                         data,

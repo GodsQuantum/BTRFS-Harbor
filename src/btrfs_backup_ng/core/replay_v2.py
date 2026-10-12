@@ -31,6 +31,18 @@ REPLAY_STATES = frozenset(
 REPLAY_READ_BYTES = 1024 * 1024
 
 
+class ReplaySourceMismatch(ValueError):
+    """A new Btrfs send disagrees with a durable raw checkpoint.
+
+    The existing part is NOT corrupt by implication. Never append this stream
+    to it: a semantically equivalent Btrfs send may have different raw bytes.
+    """
+
+    def __init__(self, sequence: int):
+        self.sequence = sequence
+        super().__init__(f"replay checkpoint {sequence}: raw SHA-256 mismatch")
+
+
 @dataclass(frozen=True, slots=True)
 class SourceFingerprint:
     uuid: str
@@ -119,9 +131,7 @@ def replay_committed(
             digest.update(payload)
             remaining -= len(payload)
         if not hmac.compare_digest(digest.hexdigest(), entry.raw_sha256):
-            raise ValueError(
-                f"replay checkpoint {entry.sequence}: raw SHA-256 mismatch"
-            )
+            raise ReplaySourceMismatch(entry.sequence)
         matched += entry.raw_length
         if progress is not None:
             progress(ReplayProgress(entry.sequence + 1, matched))

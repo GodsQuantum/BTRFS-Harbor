@@ -19,6 +19,7 @@ from .checkpoint_stream import (
 from .replay_v2 import (
     DestinationFingerprint,
     SourceFingerprint,
+    ReplaySourceMismatch,
     replay_committed,
 )
 from ..endpoint.resumable_raw import ResumableRawSink
@@ -138,9 +139,16 @@ def resume_worker(
     """Verify the committed raw prefix before touching destination again."""
     if chunk_size != sink.manifest.checkpoint_size:
         raise ValueError("resume checkpoint size differs from original job")
-    proof = replay_committed(
-        source_stream, sink.manifest, source=source, destination=destination
-    )
+    try:
+        proof = replay_committed(
+            source_stream, sink.manifest, source=source, destination=destination
+        )
+    except ReplaySourceMismatch:
+        # Retire ONLY this incomplete transaction. Preserve every byte of the
+        # partial and its committed SHA-256 journal for forensic inspection.
+        # Replaying another send is not a byte-safe continuation.
+        sink.transition("failed_unrecoverable")
+        raise
     sink.authorize_replayed_prefix(proof)
     return run_worker(
         source_stream,

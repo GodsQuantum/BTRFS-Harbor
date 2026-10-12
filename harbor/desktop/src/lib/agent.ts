@@ -69,7 +69,7 @@ export interface CheckpointActionRequest {
 	performance?: 'balanced' | 'fast' | null;
 	set_id?: string | null;
 	sources?: string[] | null;
-	snapshot_provider?: 'harbor' | 'snapper' | null;
+	snapshot_provider?: 'harbor' | 'snapper' | 'snapper-fresh' | null;
 	staging?: string | null;
 	confirm?: boolean;
 }

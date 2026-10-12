@@ -2,6 +2,10 @@
   <img src="branding/logo.svg" alt="Btrfs Harbor" width="560">
 </p>
 
+**Préversion v0.2.7-rc.5 :** le bouton « Sauvegarder maintenant » crée en priorité des snapshots Snapper en lecture seule, avec repli Harbor pour les volumes Btrfs non gérés. Le mode « derniers snapshots Snapper existants » reste disponible. Si une reprise du flux Btrfs diverge au contrôle SHA-256, Harbor préserve l'ancien partiel et reprend le seul volume depuis zéro, sans effacer ceux déjà validés. Une seule relance automatique est autorisée ; le redémarrage sur matériel différent n'est pas universellement certifié.
+
+
+
 <h1 align="center">Btrfs Harbor</h1>
 
 <p align="center">

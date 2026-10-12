@@ -2,6 +2,10 @@
   <img src="branding/logo.svg" alt="Btrfs Harbor" width="560">
 </p>
 
+**Preview v0.2.7-rc.5:** Back up now asks Snapper for fresh readonly snapshots on configured subvolumes, using Harbor captures for unmanaged Btrfs volumes. Existing Snapper snapshots remain selectable. When regenerated Btrfs send bytes mismatch a durable checkpoint, Harbor preserves the original partial and retries only that member from byte zero, without weakening SHA verification or invalidating completed members. At most one automatic retry per member; universal bare-metal recovery is not certified.
+
+
+
 <h1 align="center">Btrfs Harbor</h1>
 
 <p align="center">

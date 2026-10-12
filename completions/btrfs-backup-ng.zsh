@@ -295,7 +295,7 @@ _btrfs_backup_ng() {
                                     '--experimental[]' \
                                     '--max-incremental-depth[]:max_incremental_depth:' \
                                     '--profile-id[]:file:_files' \
-                                    '--snapshot-provider[Harbor: create new readonly snapshots; Snapper: reuse latest stable readonly snapshots for EVERY system Btrfs volume.]:value:(harbor snapper)' \
+                                    '--snapshot-provider[Snapper-fresh: create readonly Snapper snapshots now; Snapper: reuse latest existing; Harbor: create native captures. Unmanaged Btrfs volumes use Harbor for both Snapper modes.]:value:(harbor snapper snapper-fresh)' \
                                     '--source[]:file:_files' \
                                     '-h[show this help message and exit]' \
                                     '--help[show this help message and exit]' \

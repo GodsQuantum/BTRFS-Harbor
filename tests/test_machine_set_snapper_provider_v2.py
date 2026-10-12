@@ -460,3 +460,165 @@ def test_machine_progress_final_does_not_stat_stalled_nfs(
         assert sum(event.get("event") == "machine_progress" for event in events) == 1
     finally:
         release.set()
+
+
+def test_diverged_member_retry_keeps_original_archive_and_source(tmp_path, monkeypatch):
+    root, _, snapshot, _ = _fake_snapper(monkeypatch, tmp_path)
+    original = "machine20261011T234658-66666666-000"
+    member = {
+        "archive": original,
+        "original_mount": str(root),
+        "snapshot_provider": "snapper",
+        "snapshot_path": str(snapshot),
+        "snapshot_uuid": UUID,
+        "snapper_config": "root",
+        "snapper_number": 7,
+        "status": "sending",
+        "transfer_id": None,
+    }
+    transfer = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    part = tmp_path / (original + ".btrfs.zst." + transfer + ".part")
+    part.write_bytes(b"original committed data preserved")
+    m._rebase_divergent_member(
+        member,
+        {
+            "name": original,
+            "transfer_id": transfer,
+            "state": "failed_unrecoverable",
+        },
+    )
+    assert member["archive"] == original + "-retry1"
+    assert member["snapshot_path"] == str(snapshot)
+    assert member["status"] == "pending"
+    assert member["replay_restarts"] == 1
+    assert member["replay_retired"][0]["transfer_id"] == transfer
+    assert part.read_bytes() == b"original committed data preserved"
+    with pytest.raises(ValueError, match="already"):
+        m._rebase_divergent_member(
+            member,
+            {
+                "name": member["archive"],
+                "transfer_id": transfer,
+                "state": "failed_unrecoverable",
+            },
+        )
+
+
+def test_diverged_member_retry_rejects_fake_error_state():
+    mbr = {"archive": "machine20261011T234658-66666666-000"}
+    with pytest.raises(ValueError, match="verified"):
+        m._rebase_divergent_member(
+            mbr,
+            {
+                "name": mbr["archive"],
+                "transfer_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "state": "failed_resumable",
+            },
+        )
+
+
+def test_machine_resume_replays_only_failing_member_from_start_without_erasing_partial(
+    monkeypatch, tmp_path
+):
+    root, _home, source, _ = _fake_snapper(monkeypatch, tmp_path)
+    archive = "machine20261011T234658-66666666-000"
+    tx = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    unfinished = tmp_path / (archive + ".btrfs.zst." + tx + ".part")
+    unfinished.write_bytes(b"previous safely committed frames")
+    state = "paused"
+    calls = []
+
+    def entries(_root):
+        rows = [
+            {
+                "name": archive,
+                "state": state,
+                "transfer_id": tx,
+            }
+        ]
+        if len(calls) > 1:
+            rows.append(
+                {
+                    "name": archive + "-retry1",
+                    "state": "completed",
+                    "transfer_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                }
+            )
+        return rows
+
+    def execute(args):
+        nonlocal state
+        calls.append((args.checkpoint_action, args.name))
+        if len(calls) == 1:
+            state = "failed_unrecoverable"
+            return 3
+        return 0
+
+    monkeypatch.setattr(m, "_list_v2", entries)
+    monkeypatch.setattr(m, "execute_checkpoint_v2", execute)
+    monkeypatch.setattr(m, "_write", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "_archive_valid", lambda _r, name: name.endswith("-retry1"))
+    data = {
+        "set_id": SET_ID,
+        "profile_id": PROFILE,
+        "coverage": "btrfs-only",
+        "members": [
+            {
+                "archive": archive,
+                "original_mount": str(root),
+                "snapshot_provider": "snapper",
+                "snapshot_path": str(source),
+                "snapshot_uuid": UUID,
+                "snapper_config": "root",
+                "snapper_number": 7,
+                "status": "sending",
+                "transfer_id": tx,
+            }
+        ],
+        "boot_members": [],
+    }
+    result = m._drive(tmp_path, data, allow_local=True, state_dir=None)
+    assert calls == [
+        ("resume", archive),
+        ("start", archive + "-retry1"),
+    ]
+    assert result["status"] == "completed_btrfs_only"
+    assert result["members"][0]["status"] == "completed"
+    assert unfinished.read_bytes() == b"previous safely committed frames"
+
+
+def test_snapper_fresh_requests_readonly_snapshots_on_managed_volumes(
+    monkeypatch, tmp_path
+):
+    root, home, p, q = _fake_snapper(monkeypatch, tmp_path)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            returncode=0, stdout=("7" if "root" in argv else "8"), stderr=""
+        )
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    chosen = m._snapper_fresh_for_machine_sources([str(root), str(home)])
+    assert [item["snapshot_path"] for item in chosen] == [str(p), str(q)]
+    assert all(item["snapshot_provider"] == "snapper" for item in chosen)
+    assert len(calls) == 2
+    for argv in calls:
+        assert argv[0] == "snapper"
+        assert "--read-only" in argv
+        assert "--print-number" in argv
+        assert argv[argv.index("--cleanup-algorithm") + 1] == "number"
+
+
+def test_snapper_fresh_does_not_hide_snapshot_creation_failures(monkeypatch, tmp_path):
+    root, _home, *_ = _fake_snapper(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda *_a, **_k: SimpleNamespace(
+            returncode=1, stdout="", stderr="DBus unavailable"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Snapper snapshot creation failed"):
+        m._snapper_fresh_for_machine_sources([str(root)])

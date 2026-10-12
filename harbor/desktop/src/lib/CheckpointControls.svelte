@@ -383,7 +383,7 @@
 		}
 		await machineTransfer('set-start');
 	}
-	let snapshotProvider: 'harbor' | 'snapper' = 'harbor';
+	let snapshotProvider: 'harbor' | 'snapper' | 'snapper-fresh' = 'snapper-fresh';
 	let running = false;
 	let busy = false;
 	let error = '';
@@ -610,6 +610,19 @@
 					<input
 						type="radio"
 						name="whole-computer-snapshot-provider"
+						value="snapper-fresh"
+						bind:group={snapshotProvider}
+					/>
+					{locale === 'fr'
+						? 'Créer des snapshots Snapper maintenant (recommandé ; repli Harbor pour volumes non gérés)'
+						: locale === 'zh-CN'
+							? '立即创建 Snapper 快照（未管理的卷使用 Harbor）'
+							: 'Create fresh Snapper snapshots now (recommended; Harbor for unmanaged volumes)'}
+				</label>
+				<label>
+					<input
+						type="radio"
+						name="whole-computer-snapshot-provider"
 						value="harbor"
 						bind:group={snapshotProvider}
 					/>
@@ -632,10 +645,12 @@
 							? '优先使用现有最新 Snapper 快照'
 							: 'Prefer latest existing Snapper snapshots'}
 				</label>
-				{#if snapshotProvider === 'snapper'}
+				{#if snapshotProvider === 'snapper' || snapshotProvider === 'snapper-fresh'}
 					<p class="machine-detail" role="status">
 						{locale === 'fr'
-							? 'Harbor envoie les derniers snapshots Snapper disponibles. Pour les volumes de données non gérés par Snapper, il crée une capture Harbor. Un volume /swap contenant seulement du swap identifié est exclu : son fichier sera à recréer en restauration.'
+							? snapshotProvider === 'snapper-fresh'
+								? 'Harbor demande à Snapper de créer un nouveau snapshot en lecture seule pour chaque configuration existante. Les volumes Btrfs non gérés utilisent une capture Harbor. Les données swap volatiles seront à recréer.'
+								: 'Harbor envoie les derniers snapshots Snapper disponibles. Pour les volumes de données non gérés par Snapper, il crée une capture Harbor. Un volume /swap contenant seulement du swap identifié est exclu : son fichier sera à recréer en restauration.'
 							: 'Existing Snapper snapshots are reused. For data volumes not managed by Snapper, Harbor creates a separate snapshot. A verified swap-only /swap volume is omitted; recreate swap on restore.'}
 					</p>
 				{/if}

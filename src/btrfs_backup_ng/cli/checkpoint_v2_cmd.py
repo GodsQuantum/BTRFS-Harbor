@@ -43,7 +43,11 @@ from ..core.native_send_v2 import (
     spawn_btrfs_send,
 )
 from ..core.performance_v2 import apply_resource_policy, resolve_performance_profile
-from ..core.replay_v2 import DestinationFingerprint, SourceFingerprint
+from ..core.replay_v2 import (
+    DestinationFingerprint,
+    SourceFingerprint,
+    ReplaySourceMismatch,
+)
 from ..endpoint.mount_guard_v2 import (
     MountGuard,
     REMOTE_TYPES,
@@ -664,6 +668,11 @@ def execute_checkpoint_v2(args: argparse.Namespace) -> int:
                 ):
                     return _execute(args)
         return _execute(args)
+    except ReplaySourceMismatch as exc:
+        # Distinct internal status lets machine-set safely retry only the
+        # affected member. Do not silently truncate an existing partial.
+        print(f"checkpoint-v2: {exc}", file=sys.stderr)
+        return 3
     except (OSError, RuntimeError, ValueError, PermissionError) as exc:
         print(f"checkpoint-v2: {exc}", file=sys.stderr)
         return 2

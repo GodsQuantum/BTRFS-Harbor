@@ -164,3 +164,10 @@ class TestReplayV2(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_replay_divergence_has_distinct_safety_exception():
+    from btrfs_backup_ng.core.replay_v2 import ReplaySourceMismatch
+
+    assert issubclass(ReplaySourceMismatch, ValueError)
+    assert "raw SHA-256 mismatch" in str(ReplaySourceMismatch(14))

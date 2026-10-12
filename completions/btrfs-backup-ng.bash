@@ -52,7 +52,7 @@ _btrfs_backup_ng() {
         --state-dir)
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --snapshot-provider)
-            COMPREPLY=($(compgen -W "harbor snapper" -- "$cur")); return ;;
+            COMPREPLY=($(compgen -W "harbor snapper snapper-fresh" -- "$cur")); return ;;
         --identity-file)
             COMPREPLY=($(compgen -f -- "$cur")); return ;;
         --compress)

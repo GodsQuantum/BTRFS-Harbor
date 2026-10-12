@@ -409,3 +409,56 @@ class TestResumableRawSink(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_real_part_and_journal_remain_intact_on_raw_replay_divergence(tmp_path):
+    import pytest
+
+    from btrfs_backup_ng.core.checkpoint_stream import compress_frame
+    from btrfs_backup_ng.core.replay_v2 import (
+        ReplaySourceMismatch,
+        SourceFingerprint,
+        DestinationFingerprint,
+    )
+    from btrfs_backup_ng.core.resumable_worker import resume_worker
+
+    v2, api = load_api()
+    manifest = sample_manifest(v2)
+    first = b"A" * 16
+    with api.ResumableRawSink.open_new(
+        tmp_path, "snap", manifest, Guard(tmp_path)
+    ) as sink:
+        sink.append_frame(
+            raw_sha256=hashlib.sha256(first).hexdigest(),
+            raw_length=len(first),
+            frame=compress_frame(first),
+        )
+    part = tmp_path / f"snap.btrfs.zst.{TRANSFER_ID}.part"
+    original = part.read_bytes()
+    with api.load_existing(
+        tmp_path,
+        "snap",
+        TRANSFER_ID,
+        Guard(tmp_path),
+        expected_manifest=manifest,
+    ) as resumed:
+        with pytest.raises(ReplaySourceMismatch, match="checkpoint 0"):
+            resume_worker(
+                io.BytesIO(b"B" * 16),
+                resumed,
+                SourceFingerprint(
+                    uuid=SOURCE_UUID,
+                    parent_uuid=None,
+                    path="/snapshots/12/snapshot",
+                    send_fingerprint="protocol=2",
+                    readonly=True,
+                ),
+                DestinationFingerprint(type="raw", fingerprint="verified:storage"),
+                action=lambda: "run",
+                chunk_size=16,
+            )
+    assert part.read_bytes() == original
+    failed = v2.read_manifest(tmp_path / f".harbor-resume-{TRANSFER_ID}.json")
+    assert failed.state == "failed_unrecoverable"
+    assert failed.checkpoints[0].raw_sha256 == hashlib.sha256(first).hexdigest()
+    assert not (tmp_path / "snap.btrfs.zst").exists()

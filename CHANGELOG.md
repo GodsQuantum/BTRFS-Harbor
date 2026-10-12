@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7-rc.5] — Snapper-now & safe raw replay restart (preview)
+
+- Whole-computer Back up now defaults to NEW readonly Snapper snapshots on configured volumes, with separately labeled Harbor captures for unmanaged Btrfs data; advanced existing-Snapper/Harbor alternatives remain.
+- On committed checkpoint raw SHA-256 replay divergence, retire only that incomplete transaction as failed_unrecoverable, retaining the original .part and SHA journal untouched; whole-machine Resume starts only that member again under -retry1 using the original readonly snapshot.
+- At most one automatic per-member restart; repeated divergence is surfaced without loops, deleting partial data or weakening integrity checks. Already verified member archives and boot captures remain intact.
+- After replacement completes, release retired Snapper pins if possible; cleanup errors are reported, not used to mislabel verified backup data.
+- Fresh Snapper snapshots are created before the machine-set journal: a process crash in this short window may leave an unreferenced Snapper snapshot requiring later review. Byte-perfect Btrfs send resume and precise ETA are not guaranteed.
+
 ## [0.2.7-rc.4] — bounded destination progress
 
 - One target directory scan per sample instead of once per member; ignore symlinks and malformed checkpoint parts.

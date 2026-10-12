@@ -210,12 +210,12 @@ fn set_action_arguments(req: &CheckpointRequest) -> Result<Vec<String>, String> 
         let profile = req.profile_id.as_deref().ok_or("Missing profile ID")?;
         Uuid::parse_str(profile).map_err(|_| "Invalid profile ID")?;
         args.extend(["--profile-id".into(), profile.into()]);
-        let provider = req.snapshot_provider.as_deref().unwrap_or("harbor");
-        if !matches!(provider, "harbor" | "snapper") {
+        let provider = req.snapshot_provider.as_deref().unwrap_or("snapper-fresh");
+        if !matches!(provider, "harbor" | "snapper" | "snapper-fresh") {
             return Err("Unsupported machine snapshot provider".into());
         }
         args.extend(["--snapshot-provider".into(), provider.into()]);
-        if provider == "snapper"
+        if matches!(provider, "snapper" | "snapper-fresh")
             && req
                 .sources
                 .as_ref()
@@ -357,12 +357,19 @@ mod tests {
         request.sources = None;
         request.snapshot_provider = Some("../../unsafe".into());
         assert!(set_action_arguments(&request).is_err());
+        request.snapshot_provider = Some("snapper-fresh".into());
+        assert!(
+            set_action_arguments(&request)
+                .unwrap()
+                .windows(2)
+                .any(|w| w[0] == "--snapshot-provider" && w[1] == "snapper-fresh")
+        );
         request.snapshot_provider = None;
         assert!(
             set_action_arguments(&request)
                 .unwrap()
                 .windows(2)
-                .any(|w| w[0] == "--snapshot-provider" && w[1] == "harbor")
+                .any(|w| w[0] == "--snapshot-provider" && w[1] == "snapper-fresh")
         );
     }
 
